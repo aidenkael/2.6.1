@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QFrame,
     QFileDialog,
@@ -16,9 +17,12 @@ from PySide6.QtWidgets import (
     QStyle,
     QVBoxLayout,
     QWidget,
+    QToolButton,
 )
 
 from profit_accounting_26.application import AppContext, SettingsService
+from profit_accounting_26.shared import resource_path
+from profit_accounting_26.ui.greeting_header import GreetingHeaderController
 from profit_accounting_26.ui.pages import (
     CalculationPage,
     CalibrationPage,
@@ -103,6 +107,14 @@ class MainWindow(QMainWindow):
         self.calculation_page.saved.connect(lambda _record_id: self.history_page.refresh())
         self.history_page.recordRequested.connect(self.open_record)
         self.image_search_page.sendToCalculation.connect(self.send_image_to_calculation)
+        self.greeting_header = GreetingHeaderController(
+            lambda: str(self.settings.get("display_name") or "用户"), self
+        )
+        self.greeting_header.bind_existing_header(
+            title_label=self.page_title,
+            subtitle_label=self.page_subtitle,
+            shuffle_button=self.greeting_refresh,
+        )
 
         self.switch_page(1)
 
@@ -131,18 +143,14 @@ class MainWindow(QMainWindow):
         layout.addLayout(brand)
         layout.addSpacing(18)
 
-        standard_icons = [
-            QStyle.StandardPixmap.SP_FileDialogContentsView,
-            QStyle.StandardPixmap.SP_ComputerIcon,
-            QStyle.StandardPixmap.SP_FileDialogDetailedView,
-            QStyle.StandardPixmap.SP_DirLinkIcon,
-            QStyle.StandardPixmap.SP_BrowserReload,
-            QStyle.StandardPixmap.SP_FileDialogInfoView,
+        icon_names = [
+            "nav_image_search.svg", "nav_new_product_estimate.svg", "nav_history_records.svg",
+            "nav_data_import_export.svg", "nav_model_calibration_feedback.svg", "nav_settings.svg",
         ]
         self.nav_buttons: list[QPushButton] = []
-        for index, (icon_id, name) in enumerate(zip(standard_icons, NAV_ITEMS, strict=True)):
+        for index, (icon_name, name) in enumerate(zip(icon_names, NAV_ITEMS, strict=True)):
             button = QPushButton(name)
-            button.setIcon(self.style().standardIcon(icon_id))
+            button.setIcon(QIcon(str(resource_path(Path("src/profit_accounting_26/ui/assets") / icon_name))))
             button.setProperty("nav", True)
             button.setCheckable(True)
             button.clicked.connect(lambda _checked, idx=index: self.switch_page(idx))
@@ -204,6 +212,8 @@ class MainWindow(QMainWindow):
         title_box.addWidget(self.page_title)
         title_box.addWidget(self.page_subtitle)
         layout.addLayout(title_box)
+        self.greeting_refresh = QToolButton()
+        layout.addWidget(self.greeting_refresh)
         layout.addStretch(1)
         self.save_status = QLabel("已保存")
         self.save_status.setStyleSheet("background:#EAF9F2;color:#168A58;padding:6px 11px;border-radius:14px;")
@@ -222,8 +232,6 @@ class MainWindow(QMainWindow):
         for idx, button in enumerate(self.nav_buttons):
             button.setChecked(idx == index)
         name = NAV_ITEMS[index]
-        self.page_title.setText(name)
-        self.page_subtitle.setText(SUBTITLES[name])
         if name == "历史记录管理":
             self.history_page.refresh()
         elif name == "模型校准反馈":
@@ -244,6 +252,7 @@ class MainWindow(QMainWindow):
         display_name = str(self.settings.get("display_name") or "用户")
         self.user_name.setText(display_name)
         self.avatar.setText(display_name[:1])
+        self.greeting_header.refresh_display_name()
         self.sidebar_rate.setText(f"{float(self.settings.get('exchange_rate_usd_to_rmb', 7.2)):.4f}")
         updated = str(self.settings.get("exchange_rate_updated_at") or "未记录")
         self.rate_updated_label.setText(f"最后修改：{updated}")

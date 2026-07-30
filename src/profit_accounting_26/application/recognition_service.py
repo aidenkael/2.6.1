@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from profit_accounting_26.application.settings_service import SettingsService
+from profit_accounting_26.application.api_profile_store import ApiProfileStore, VISUAL_AI
 from profit_accounting_26.domain.models import AIObservation, PackagingProposal
 
 
@@ -70,8 +71,9 @@ class RecognitionService:
 
     PROMPT_VERSION = "2.6.1-vision-slots-v2"
 
-    def __init__(self, settings_service: SettingsService) -> None:
+    def __init__(self, settings_service: SettingsService, profile_store: ApiProfileStore | None = None) -> None:
         self.settings_service = settings_service
+        self.profile_store = profile_store
 
     @staticmethod
     def _endpoint(raw: str) -> str:
@@ -299,9 +301,16 @@ class RecognitionService:
         if cancellation and cancellation.cancelled:
             raise RecognitionCancelledError("AI识图已终止。")
         settings = self.settings_service.load()
-        endpoint = self._endpoint(str(settings.get("vision_api_endpoint") or ""))
-        api_key = str(settings.get("vision_api_key") or "").strip()
-        model = str(settings.get("vision_api_model") or "").strip()
+        binding = self.profile_store.bound_profile(VISUAL_AI) if self.profile_store else None
+        if binding is not None:
+            profile, api_key = binding
+            endpoint = self._endpoint(profile.api_url)
+            model = profile.model_name
+        else:
+            # Compatibility fallback for settings created before API profiles.
+            endpoint = self._endpoint(str(settings.get("vision_api_endpoint") or ""))
+            api_key = str(settings.get("vision_api_key") or "").strip()
+            model = str(settings.get("vision_api_model") or "").strip()
         if not endpoint or not api_key or not model:
             raise RecognitionUnavailableError("AI识图尚未配置，请先在“设置”中填写API地址、密钥和模型。")
         valid_items: list[dict[str, str]] = []
@@ -330,21 +339,7 @@ class RecognitionService:
             timeout=timeout,
             cancellation=cancellation,
         )
-        observation, proposal = self.parse_payload(response_payload, model=model)
-        main_image_only = len(valid_items) == 1 and valid_items[0]["type"] == "主图"
-        if main_image_only and not self._has_complete_estimate(observation, proposal):
-            retry_content = [{"type": "text", "text": self._measurement_retry_prompt(observation)}]
-            retry_content.extend(content[1:])
-            supplement_payload = self._request_payload(
-                endpoint=endpoint,
-                api_key=api_key,
-                model=model,
-                content=retry_content,
-                timeout=timeout,
-                cancellation=cancellation,
-            )
-            supplement, supplement_proposal = self.parse_payload(supplement_payload, model=model)
-            observation = self._merge_observation(observation, supplement)
-            if supplement_proposal is not None:
-                proposal = supplement_proposal
-        return observation, proposal
+        # One recognition/overall-estimate action is exactly one multimodal
+        # request.  A second automatic visual retry made the button's wait
+        # time unpredictable and contradicted the confirmed interaction.
+        return self.parse_payload(response_payload, model=model)

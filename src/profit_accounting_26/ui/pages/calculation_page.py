@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QObject, QThread, Qt, Signal, Slot
-from PySide6.QtGui import QKeyEvent, QKeySequence
+from PySide6.QtGui import QCursor, QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -77,6 +77,27 @@ class RecognitionWorker(QObject):
             self.completed.emit(observation, proposal)
 
 
+class LocalReestimateWorker(QObject):
+    completed = Signal(object)
+    failed = Signal(str, str)
+
+    def __init__(self, service, context: dict[str, Any]) -> None:
+        super().__init__()
+        self._service = service
+        self._context = context
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.completed.emit(self._service.reestimate(**self._context))
+        except RecognitionUnavailableError as exc:
+            self.failed.emit("unavailable", str(exc))
+        except RecognitionResponseError as exc:
+            self.failed.emit("response", str(exc))
+        except Exception as exc:
+            self.failed.emit("failed", str(exc))
+
+
 class CalculationPage(QWidget):
     dirtyChanged = Signal(bool)
     saved = Signal(str)
@@ -106,6 +127,12 @@ class CalculationPage(QWidget):
         self._recognition_worker: RecognitionWorker | None = None
         self._recognition_cancellation: RecognitionCancellation | None = None
         self._recognition_dialog: QDialog | None = None
+        self._local_thread: QThread | None = None
+        self._local_worker: LocalReestimateWorker | None = None
+        self._local_dialog: QDialog | None = None
+        self._ai_baseline: dict[str, Any] | None = None
+        self._recognized_image_fingerprint: tuple[tuple[str, str], ...] = ()
+        self._accepted_bare_fields: set[str] = set()
 
         self.content_layout = QVBoxLayout(self)
         self.content_layout.setContentsMargins(12, 10, 12, 12)
@@ -173,18 +200,22 @@ class CalculationPage(QWidget):
         self.product_summary = QuickLineEdit()
         self.product_summary.setPlaceholderText("商品类型/名称")
         self.material_summary = QuickLineEdit()
-        self.material_summary.setPlaceholderText("主要材质")
+        self.material_summary.setVisible(False)
+        self.structure_summary = QuickLineEdit()
+        self.structure_summary.setPlaceholderText("材质、软硬、结构与包装说明")
         self.packaging_summary = QuickLineEdit()
-        self.packaging_summary.setPlaceholderText("包装状态")
+        self.packaging_summary.setVisible(False)
         self.packaging_summary.setReadOnly(True)
-        reestimate = QPushButton("重新估算规格")
+        reestimate = QPushButton("局部重估")
         reestimate.clicked.connect(self.reestimate_packaging)
         first.addWidget(self.product_summary, 3)
-        first.addWidget(self.material_summary, 2)
-        first.addWidget(self.packaging_summary, 2)
+        first.addWidget(self.structure_summary, 4)
         first.addWidget(reestimate)
         layout.addLayout(first)
 
+        # Structured values stay internal for deterministic packaging rules.
+        # Users edit the two natural-language summaries instead of a row of
+        # specialist switches; text AI normalizes their edit on local reestimate.
         second = QHBoxLayout()
         second.setSpacing(7)
         self.rigidity_combo = QComboBox()
@@ -220,7 +251,10 @@ class CalculationPage(QWidget):
             self.structure_checks[key] = box
             second.addWidget(box)
         second.addStretch(1)
-        layout.addLayout(second)
+        for index in range(second.count()):
+            item = second.itemAt(index)
+            if item.widget():
+                item.widget().hide()
         self.content_layout.addWidget(card)
 
     def _package_card(self, title: str, *, selected: bool = False) -> tuple[Card, dict[str, Any]]:
@@ -389,6 +423,10 @@ class CalculationPage(QWidget):
         self.profit_explanation.setWordWrap(True)
         self.profit_explanation.setProperty("muted", True)
         layout.addWidget(self.profit_explanation)
+        self.profit_currency_detail = QLabel("总成本 — RMB / — USD\n预计利润 — RMB / — USD")
+        self.profit_currency_detail.setProperty("muted", True)
+        self.profit_currency_detail.setStyleSheet("background:#F4F7FB;border:1px solid #E1E8F1;border-radius:5px;padding:4px 7px;")
+        layout.addWidget(self.profit_currency_detail)
         self.content_layout.addWidget(card)
 
     def _build_bottom_actions(self) -> None:
@@ -435,8 +473,11 @@ class CalculationPage(QWidget):
         self.domestic_shipping.editingFinished.connect(self.recalculate)
         for widget in (self.bare_length, self.bare_width, self.bare_height, self.bare_weight):
             widget.editingFinished.connect(self._upstream_changed)
+        for key, widget in (("length_cm", self.bare_length), ("width_cm", self.bare_width), ("height_cm", self.bare_height), ("weight_g", self.bare_weight)):
+            widget.editingFinished.connect(lambda k=key: self._accept_bare_field(k))
         self.product_summary.textChanged.connect(lambda _text: self._upstream_changed())
         self.material_summary.textChanged.connect(lambda _text: self._upstream_changed())
+        self.structure_summary.textChanged.connect(lambda _text: self._upstream_changed())
         for combo in (self.rigidity_combo, self.foldability_combo, self.compressibility_combo):
             combo.currentIndexChanged.connect(lambda _index: self._upstream_changed())
         for key, box in self.structure_checks.items():
@@ -485,7 +526,7 @@ class CalculationPage(QWidget):
             except (IndexError, ValueError):
                 image_type = defaults[index % len(defaults)]
             slot = ImageSlotWidget(index, image_type)
-            slot.changed.connect(self._mark_dirty)
+            slot.changed.connect(self._image_changed)
             slot.removeRequested.connect(self.remove_image)
             if index < len(existing) and existing[index][0] is not None:
                 slot.load_path(existing[index][0])
@@ -514,13 +555,35 @@ class CalculationPage(QWidget):
         if 0 <= index < len(self.image_slots):
             self.image_slots[index].clear_image()
 
+    def _image_fingerprint(self) -> tuple[tuple[str, str], ...]:
+        result: list[tuple[str, str]] = []
+        for slot in self.image_slots:
+            if slot.path and slot.path.is_file():
+                try:
+                    digest = hashlib.sha256(slot.path.read_bytes()).hexdigest()
+                except OSError:
+                    digest = "unreadable"
+                result.append((slot.image_type().value, digest))
+        return tuple(result)
+
+    def _image_changed(self) -> None:
+        self._mark_dirty()
+        if self._ai_baseline is not None and self._image_fingerprint() != self._recognized_image_fingerprint:
+            self.ai_button.setText("AI整体重估")
+            self.ai_button.setEnabled(self._recognition_thread is None)
+        elif self._ai_baseline is None:
+            self.ai_button.setText("AI识图")
+            self.ai_button.setEnabled(self._recognition_thread is None)
+
     def paste_from_clipboard(self) -> bool:
         clipboard = QApplication.clipboard()
         mime = clipboard.mimeData()
+        target = self._slot_under_cursor()
+        if target is None:
+            return False
         if mime.hasUrls():
             for url in mime.urls():
                 if url.isLocalFile():
-                    target = next((slot for slot in self.image_slots if slot.path is None), self.image_slots[0])
                     target.load_path(Path(url.toLocalFile()))
                     return True
         image = clipboard.image()
@@ -536,10 +599,17 @@ class CalculationPage(QWidget):
             temp = temp_dir / f"clipboard_{digest[:20]}.png"
             if not temp.exists():
                 temp.write_bytes(data)
-            target = next((slot for slot in self.image_slots if slot.path is None), self.image_slots[0])
             target.load_path(temp)
             return True
         return False
+
+    def _slot_under_cursor(self) -> ImageSlotWidget | None:
+        widget = QApplication.widgetAt(QCursor.pos())
+        while widget is not None:
+            if isinstance(widget, ImageSlotWidget) and widget in self.image_slots:
+                return widget
+            widget = widget.parentWidget()
+        return None
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         if event.matches(QKeySequence.StandardKey.Paste) and self.paste_from_clipboard():
@@ -552,6 +622,29 @@ class CalculationPage(QWidget):
         index = combo.findData(value)
         combo.setCurrentIndex(index if index >= 0 else 0)
 
+    @staticmethod
+    def _observation_structure_summary(observation: AIObservation) -> str:
+        parts = [observation.material] if observation.material else []
+        labels = {
+            "soft": "柔软", "semi_rigid": "半硬", "hard": "硬质",
+            "good": "可折叠", "limited": "有限折叠", "none": "不可折叠",
+        }
+        for value in (observation.rigidity, observation.foldability, observation.compressibility):
+            if label := labels.get(value):
+                parts.append(label)
+        for enabled, label in (
+            (observation.has_hard_bottom, "硬底"), (observation.has_hard_backboard, "硬背板"),
+            (observation.has_frame, "框架"), (observation.has_rigid_insert, "硬内衬"),
+            (observation.requires_shape_retention, "保形"), (observation.retail_box_visible, "原盒"),
+        ):
+            if enabled is True:
+                parts.append(label)
+        return "；".join(dict.fromkeys(parts))
+
+    def _accept_bare_field(self, key: str) -> None:
+        if not self._updating:
+            self._accepted_bare_fields.add(key)
+
     def _apply_observation(self, observation: AIObservation) -> None:
         previous_updating = self._updating
         self._updating = True
@@ -559,6 +652,7 @@ class CalculationPage(QWidget):
             self.product_summary.setText(observation.product_name or observation.product_type)
         if observation.material:
             self.material_summary.setText(observation.material)
+        self.structure_summary.setText(self._observation_structure_summary(observation))
         self._set_combo_data(self.rigidity_combo, observation.rigidity)
         self._set_combo_data(self.foldability_combo, observation.foldability)
         self._set_combo_data(self.compressibility_combo, observation.compressibility)
@@ -659,6 +753,18 @@ class CalculationPage(QWidget):
         self._apply_observation(observation)
         self.proposal = self.context.packaging_service.estimate(observation, external_proposal=external_proposal)
         self.apply_proposal(self.proposal)
+        self._ai_baseline = {
+            "summary": self._current_summary(),
+            "bare_spec": {
+                "length_cm": observation.length_cm, "width_cm": observation.width_cm,
+                "height_cm": observation.height_cm, "weight_g": observation.weight_g,
+            },
+            "normal_packaging": self._scenario_data(self.normal_fields),
+        }
+        self._accepted_bare_fields.clear()
+        self._recognized_image_fingerprint = self._image_fingerprint()
+        self.ai_button.setText("AI识图")
+        self.ai_button.setEnabled(False)
         self.packaging_stale = False
         self.manual_scenarios.clear()
         self._mark_dirty()
@@ -683,7 +789,8 @@ class CalculationPage(QWidget):
         self._recognition_worker = None
         self._recognition_cancellation = None
         self._recognition_thread = None
-        self.ai_button.setEnabled(True)
+        if self._ai_baseline is None or self._image_fingerprint() != self._recognized_image_fingerprint:
+            self.ai_button.setEnabled(True)
         if thread is not None:
             thread.deleteLater()
 
@@ -724,13 +831,122 @@ class CalculationPage(QWidget):
         return observation
 
     def reestimate_packaging(self) -> None:
+        if self._local_thread is not None:
+            return
+        if self._ai_baseline is None:
+            QMessageBox.information(self, "需要先识图", "请先完成一次 AI识图，再根据摘要进行局部重估。")
+            return
+        if self._image_fingerprint() != self._recognized_image_fingerprint:
+            answer = QMessageBox.question(
+                self,
+                "图片已修改",
+                "图片已修改，是否使用新图片重新识图？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                # Overall recognition is explicit; never start another visual
+                # request as a side effect of clicking local reestimate.
+                return
+        current = self.collect_observation()
+        adopted_bare = {
+            key: getattr(current, key)
+            for key in self._accepted_bare_fields
+            if getattr(current, key) is not None
+        }
+        adopted_normal: dict[str, Any] = {}
+        if "正常档" in self.manual_scenarios:
+            adopted_normal = self._scenario_data(self.normal_fields)
+        original = self._ai_baseline
+        context = {
+            "original_summary": str(original["summary"]),
+            "current_summary": self._current_summary(),
+            "original_bare_spec": original["bare_spec"],
+            "adopted_bare_spec": adopted_bare,
+            "original_normal_packaging": original["normal_packaging"],
+            "adopted_normal_packaging": adopted_normal,
+        }
+        self._show_local_dialog()
+        self._local_thread = QThread(self)
+        self._local_worker = LocalReestimateWorker(self.context.local_reestimate_service, context)
+        self._local_worker.moveToThread(self._local_thread)
+        self._local_thread.started.connect(self._local_worker.run)
+        self._local_worker.completed.connect(self._local_reestimate_completed)
+        self._local_worker.failed.connect(self._local_reestimate_failed)
+        self._local_worker.completed.connect(self._local_thread.quit)
+        self._local_worker.failed.connect(self._local_thread.quit)
+        self._local_thread.finished.connect(self._local_thread_finished)
+        self._local_thread.finished.connect(self._local_worker.deleteLater)
+        self._local_thread.start()
+
+    @staticmethod
+    def _scenario_data(fields: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "packaging_method": fields["method"].text().strip(),
+            "length_cm": fields["length"].value() or None,
+            "width_cm": fields["width"].value() or None,
+            "height_cm": fields["height"].value() or None,
+            "weight_g": fields["weight"].value() or None,
+        }
+
+    def _current_summary(self) -> str:
+        return "；".join(value for value in (self.product_summary.text().strip(), self.structure_summary.text().strip()) if value)
+
+    def _show_local_dialog(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("局部重估")
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.setFixedSize(300, 92)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 16, 18, 14)
+        label = QLabel("局部重估中，请稍候")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setProperty("sectionTitle", True)
+        layout.addWidget(label)
+        self._local_dialog = dialog
+        dialog.show()
+
+    @Slot(object)
+    def _local_reestimate_completed(self, result: Any) -> None:
+        previous_updating = self._updating
+        self._updating = True
+        if result.recognition_summary:
+            self.structure_summary.setText(result.recognition_summary)
+        for key, widget in (("length_cm", self.bare_length), ("width_cm", self.bare_width), ("height_cm", self.bare_height), ("weight_g", self.bare_weight)):
+            value = result.bare_spec.get(key)
+            if key not in self._accepted_bare_fields and isinstance(value, (int, float)) and value > 0:
+                widget.setValue(float(value))
+        self._updating = previous_updating
         self.observation = self.collect_observation()
         self.proposal = self.context.packaging_service.estimate(self.observation)
+        normal = result.normal_packaging
+        if "正常档" not in self.manual_scenarios:
+            self.proposal.normal.packaging_method = str(normal.get("packaging_method") or self.proposal.normal.packaging_method)
+            for key in ("length_cm", "width_cm", "height_cm", "weight_g"):
+                value = normal.get(key)
+                if isinstance(value, (int, float)) and value > 0:
+                    setattr(self.proposal.normal, key, float(value))
+            self.proposal.normal.reasoning_summary = str(normal.get("reason") or self.proposal.normal.reasoning_summary)
         self.apply_proposal(self.proposal)
         self.packaging_stale = False
-        self.manual_scenarios.clear()
         self._mark_dirty()
         self.recalculate()
+
+    @Slot(str, str)
+    def _local_reestimate_failed(self, category: str, message: str) -> None:
+        title = "局部重估不可用" if category == "unavailable" else "局部重估失败"
+        QMessageBox.warning(self, title, message)
+
+    def _local_thread_finished(self) -> None:
+        if self._local_dialog is not None:
+            self._local_dialog.close()
+            self._local_dialog.deleteLater()
+        thread = self._local_thread
+        self._local_dialog = None
+        self._local_worker = None
+        self._local_thread = None
+        if thread is not None:
+            thread.deleteLater()
 
     def apply_proposal(self, proposal: PackagingProposal) -> None:
         previous_updating = self._updating
@@ -796,9 +1012,12 @@ class CalculationPage(QWidget):
             self._mark_dirty()
         for fields, selected in ((self.normal_fields, normal_selected), (self.conservative_fields, not normal_selected)):
             fields["card"].set_choice_state(selected=selected, frozen=not selected)
-            fields["method"].setEnabled(selected)
+            # Normal packaging is the editable adopted proposal.  Conservative
+            # packaging is generated by the local rule and is selectable only.
+            editable = fields is self.normal_fields
+            fields["method"].setEnabled(editable)
             for key in ("length", "width", "height", "weight"):
-                fields[key].setEnabled(selected)
+                fields[key].setEnabled(editable)
             fields["changed"].setText("✓" if selected and self.package_selection_changed else "")
         if hasattr(self, "profit_explanation"):
             self.recalculate()
@@ -901,6 +1120,8 @@ class CalculationPage(QWidget):
         self.profit_state.setProperty("danger", False)
         self._refresh_profit_style()
         self.profit_explanation.setText(message)
+        if hasattr(self, "profit_currency_detail"):
+            self.profit_currency_detail.setText("总成本 — RMB / — USD\n预计利润 — RMB / — USD")
 
     def recalculate(self) -> None:
         if self._updating:
@@ -1055,6 +1276,10 @@ class CalculationPage(QWidget):
             f"售价 ${result.sale_price_usd:.2f}，预留后 ${reduced_price:.2f}；"
             f"采用成本 ¥{result.total_cost_rmb:.2f}，预测利润 ¥{result.profit_rmb:.2f}。"
         )
+        self.profit_currency_detail.setText(
+            f"总成本 ¥{result.total_cost_rmb:.2f} / ${result.total_cost_rmb / rate:.2f}\n"
+            f"预计利润 ¥{result.profit_rmb:.2f} / ${result.profit_rmb / rate:.2f}"
+        )
 
     def build_record_payload(self) -> dict[str, Any]:
         scenario = self.current_scenario()
@@ -1148,6 +1373,13 @@ class CalculationPage(QWidget):
             QMessageBox.critical(self, "保存失败", str(exc))
             return
         self.mark_saved()
+        # The local reestimate baseline belongs to one unsaved measurement
+        # session only.  Saving ends that session; the record itself keeps its
+        # existing auditable AI/adopted layers.
+        self._ai_baseline = None
+        self._recognized_image_fingerprint = ()
+        self.ai_button.setText("AI识图")
+        self.ai_button.setEnabled(True)
         self.saved.emit(self.record_id)
         QMessageBox.information(self, "保存成功", f"记录已保存：{self.record_id}")
 
@@ -1166,10 +1398,14 @@ class CalculationPage(QWidget):
         self.record_id = None
         self.observation = AIObservation()
         self.proposal = None
+        self._ai_baseline = None
+        self._recognized_image_fingerprint = ()
+        self._accepted_bare_fields.clear()
         self.packaging_stale = False
         self.manual_scenarios.clear()
         self.product_summary.clear()
         self.material_summary.clear()
+        self.structure_summary.clear()
         self.packaging_summary.clear()
         self.product_link.clear()
         for combo in (self.rigidity_combo, self.foldability_combo, self.compressibility_combo):

@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from profit_accounting_26.application.calibration_manager import CalibrationManager
+from profit_accounting_26.application.api_profile_store import ApiProfileStore
 from profit_accounting_26.application.import_export_service import ImportExportService
+from profit_accounting_26.application.local_reestimate_service import LocalReestimateService
 from profit_accounting_26.application.packaging_estimation_service import PackagingEstimationService
 from profit_accounting_26.application.recognition_service import RecognitionService
 from profit_accounting_26.application.record_service import RecordService
@@ -22,6 +24,8 @@ class AppContext:
     import_export_service: ImportExportService
     calibration_manager: CalibrationManager
     recognition_service: RecognitionService
+    api_profile_store: ApiProfileStore
+    local_reestimate_service: LocalReestimateService
 
     @classmethod
     def create_default(cls) -> "AppContext":
@@ -45,6 +49,7 @@ class AppContext:
             calibration_version=str(active_calibration["version"]),
         )
         calibration_manager.bind_service(packaging_service)
+        api_profile_store = ApiProfileStore(paths.data_dir)
         return cls(
             paths=paths,
             store=store,
@@ -53,5 +58,7 @@ class AppContext:
             record_service=RecordService(store, paths),
             import_export_service=ImportExportService(store),
             calibration_manager=calibration_manager,
-            recognition_service=RecognitionService(settings_service),
+            recognition_service=RecognitionService(settings_service, api_profile_store),
+            api_profile_store=api_profile_store,
+            local_reestimate_service=LocalReestimateService(api_profile_store),
         )

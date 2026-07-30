@@ -214,18 +214,18 @@ class ImageSlotWidget(Card):
 
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        self.upload_button = QPushButton("↑")
-        self.upload_button.setToolTip("上传图片")
-        self.upload_button.setFixedSize(30, 28)
-        self.upload_button.clicked.connect(self.select_file)
-        header.addWidget(self.upload_button)
-
         self.type_combo = QComboBox()
         self.type_combo.addItems([item.value for item in ImageType])
         self.type_combo.setCurrentText(image_type.value)
         self.type_combo.setFixedWidth(112)
         self.type_combo.currentTextChanged.connect(lambda _: self.changed.emit())
         header.addWidget(self.type_combo, 1)
+
+        self.upload_button = QPushButton("↑")
+        self.upload_button.setToolTip("上传图片")
+        self.upload_button.setFixedSize(30, 28)
+        self.upload_button.clicked.connect(self.select_file)
+        header.addWidget(self.upload_button)
 
         self.delete_button = QPushButton("×")
         self.delete_button.setToolTip("删除图片")

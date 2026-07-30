@@ -25,7 +25,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from profit_accounting_26.application import AppContext, SettingsService
+from profit_accounting_26.application import AppContext, ApiProfile, ApiProfileStore, LOCAL_REESTIMATE, SettingsService, VISUAL_AI
+from profit_accounting_26.application.api_profile_store import PROVIDER_PRESETS
 from profit_accounting_26.domain.models import Forwarder
 from profit_accounting_26.domain.rules import (
     AdjustmentDirection,
@@ -84,6 +85,18 @@ class SettingsPage(QWidget):
         self.vision_key = QuickLineEdit()
         self.vision_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.vision_key.setPlaceholderText("API Key，仅保存在本机设置文件")
+        self.api_profile_select = QComboBox()
+        self.api_profile_name = QuickLineEdit()
+        self.api_profile_name.setPlaceholderText("配置名称")
+        self.api_provider = QComboBox()
+        self.api_provider.addItems(PROVIDER_PRESETS.keys())
+        self.visual_binding = QComboBox()
+        self.local_binding = QComboBox()
+        self.save_api_profile_button = QPushButton("保存 API 配置")
+        self.save_api_profile_button.setProperty("primary", True)
+        self.save_api_profile_button.clicked.connect(self.save_api_profile)
+        self.api_profile_select.currentIndexChanged.connect(self._load_selected_api_profile)
+        self.api_provider.currentTextChanged.connect(self._apply_provider_preset)
         fields = [
             ("展示名称", self.display_name),
             ("AI API地址", self.vision_endpoint),
@@ -102,9 +115,20 @@ class SettingsPage(QWidget):
             grid.addWidget(box, 0, index)
         grid.setColumnStretch(1, 2)
         layout.addLayout(grid)
+        api_row = QHBoxLayout()
+        api_row.setSpacing(7)
+        for widget in (
+            QLabel("API配置"), self.api_profile_select, self.api_profile_name, self.api_provider,
+            QLabel("视觉/整体"), self.visual_binding, QLabel("局部文字"), self.local_binding,
+            self.save_api_profile_button,
+        ):
+            api_row.addWidget(widget)
+        layout.addLayout(api_row)
         self.content_layout.addWidget(card)
         for widget in (self.display_name, self.vision_endpoint, self.vision_model, self.vision_key):
             widget.textChanged.connect(lambda _text: self._mark_dirty())
+        self.visual_binding.currentIndexChanged.connect(lambda _index: self._mark_dirty())
+        self.local_binding.currentIndexChanged.connect(lambda _index: self._mark_dirty())
 
     def _build_forwarders(self) -> None:
         card = Card()
@@ -258,6 +282,79 @@ class SettingsPage(QWidget):
         layout.addStretch(1)
         self.content_layout.addWidget(card)
 
+    def _refresh_api_profiles(self) -> None:
+        public = self.context.api_profile_store.load_public()
+        profiles = [item for item in public["profiles"] if isinstance(item, dict)]
+        bindings = public["button_bindings"]
+        for combo in (self.api_profile_select, self.visual_binding, self.local_binding):
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("新建配置", "")
+            for item in profiles:
+                combo.addItem(str(item.get("display_name") or "未命名配置"), str(item.get("profile_id") or ""))
+            combo.blockSignals(False)
+        self.visual_binding.setCurrentIndex(max(0, self.visual_binding.findData(bindings.get(VISUAL_AI))))
+        self.local_binding.setCurrentIndex(max(0, self.local_binding.findData(bindings.get(LOCAL_REESTIMATE))))
+
+    def _load_selected_api_profile(self, _index: int) -> None:
+        profile_id = str(self.api_profile_select.currentData() or "")
+        if not profile_id:
+            self.api_profile_name.clear()
+            self.api_provider.setCurrentText("自定义")
+            self.vision_endpoint.clear()
+            self.vision_model.clear()
+            self.vision_key.clear()
+            return
+        raw = next(
+            (item for item in self.context.api_profile_store.load_public()["profiles"] if item.get("profile_id") == profile_id),
+            {},
+        )
+        keys = self.context.api_profile_store.load_keys()
+        self._updating = True
+        self.api_profile_name.setText(str(raw.get("display_name") or ""))
+        self.api_provider.setCurrentText(str(raw.get("provider") or "自定义"))
+        self.vision_endpoint.setText(str(raw.get("api_url") or ""))
+        self.vision_model.setText(str(raw.get("model_name") or ""))
+        self.vision_key.setText(keys.get(profile_id, ""))
+        self._updating = False
+
+    def _apply_provider_preset(self, provider: str) -> None:
+        if self._updating:
+            return
+        preset = PROVIDER_PRESETS.get(provider, "")
+        if preset:
+            self.vision_endpoint.setText(preset)
+
+    def save_api_profile(self) -> None:
+        profile_id = str(self.api_profile_select.currentData() or "")
+        name = self.api_profile_name.text().strip()
+        if not name or not self.vision_endpoint.text().strip() or not self.vision_model.text().strip():
+            QMessageBox.warning(self, "无法保存", "请填写配置名称、API地址和模型。")
+            return
+        if profile_id:
+            profile = ApiProfile(
+                profile_id=profile_id, display_name=name, provider=self.api_provider.currentText(),
+                api_url=self.vision_endpoint.text().strip(), model_name=self.vision_model.text().strip(),
+            )
+        else:
+            profile = ApiProfile.create(
+                display_name=name, provider=self.api_provider.currentText(),
+                api_url=self.vision_endpoint.text().strip(), model_name=self.vision_model.text().strip(),
+            )
+        stores = [self.context.api_profile_store]
+        pending_data_dir = ApplicationPaths.configured_data_dir()
+        if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
+            stores.append(ApiProfileStore(pending_data_dir))
+        visual_id = str(self.visual_binding.currentData() or profile.profile_id)
+        local_id = str(self.local_binding.currentData() or profile.profile_id)
+        for store in stores:
+            store.save_profile(profile, self.vision_key.text())
+            store.bind(VISUAL_AI, visual_id)
+            store.bind(LOCAL_REESTIMATE, local_id)
+        self._refresh_api_profiles()
+        self.api_profile_select.setCurrentIndex(max(0, self.api_profile_select.findData(profile.profile_id)))
+        QMessageBox.information(self, "已保存", "API配置与私钥已保存到当前数据目录。")
+
     def load_settings(self) -> None:
         self.settings = self.context.settings_service.load()
         self._updating = True
@@ -265,6 +362,7 @@ class SettingsPage(QWidget):
         self.vision_endpoint.setText(str(self.settings.get("vision_api_endpoint") or ""))
         self.vision_model.setText(str(self.settings.get("vision_api_model") or ""))
         self.vision_key.setText(str(self.settings.get("vision_api_key") or ""))
+        self._refresh_api_profiles()
         self._load_forwarder_rows(self.settings.get("forwarders", []))
         self.rules_data = list(self.settings.get("profit_rules", []))
         self.refresh_rule_list()
@@ -301,16 +399,20 @@ class SettingsPage(QWidget):
                 f"{float(data.get('volume_divisor', 8000)):.0f}",
             ]
         ):
-            self.forwarder_table.setItem(row, col, QTableWidgetItem(value))
+            item = QTableWidgetItem(value)
+            if bool(data.get("archived", False)):
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.forwarder_table.setItem(row, col, item)
         enabled_box = QCheckBox("启用")
         is_archived = bool(data.get("archived", False))
         enabled_box.setChecked(bool(data.get("enabled", True)) and not is_archived)
         enabled_box.setEnabled(not is_archived)
         enabled_box.toggled.connect(lambda _checked: self._mark_dirty())
         self.forwarder_table.setCellWidget(row, 4, enabled_box)
-        operation = QPushButton("恢复" if data.get("archived", False) else "归档")
+        operation = QPushButton("已归档" if data.get("archived", False) else "归档")
         identifier = str(data.get("id") or f"forwarder_{uuid4().hex}")
         operation.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
+        operation.setEnabled(not bool(data.get("archived", False)))
         self.forwarder_table.setCellWidget(row, 5, operation)
         self.forwarder_table.setItem(row, 6, QTableWidgetItem(identifier))
         self.forwarder_table.setItem(row, 7, QTableWidgetItem("1" if data.get("archived", False) else "0"))
@@ -328,25 +430,30 @@ class SettingsPage(QWidget):
         row = self._find_forwarder_row(identifier)
         if row < 0:
             return
-        archived = self.forwarder_table.item(row, 7).text() == "1"
-        if not archived:
-            answer = QMessageBox.question(
-                self,
-                "归档货代",
-                "归档后该货代将从当前测算与使用中列表移除，确定继续吗？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                return
-        self.forwarder_table.item(row, 7).setText("0" if archived else "1")
+        if self.forwarder_table.item(row, 7).text() == "1":
+            return
+        answer = QMessageBox.question(
+            self,
+            "归档货代",
+            "归档后该货代将从当前测算与使用中列表移除，确定继续吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.forwarder_table.item(row, 7).setText("1")
         enabled_box = self.forwarder_table.cellWidget(row, 4)
         if isinstance(enabled_box, QCheckBox):
             enabled_box.setChecked(False)
-            enabled_box.setEnabled(archived)
+            enabled_box.setEnabled(False)
         operation = self.forwarder_table.cellWidget(row, 5)
         if isinstance(operation, QPushButton):
-            operation.setText("归档" if archived else "恢复")
+            operation.setText("已归档")
+            operation.setEnabled(False)
+        for col in range(4):
+            item = self.forwarder_table.item(row, col)
+            if item is not None:
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self._mark_dirty()
         self.filter_forwarders(self._show_archived_forwarders)
 
@@ -575,15 +682,15 @@ class SettingsPage(QWidget):
         latest.update(
             {
                 "display_name": self.display_name.text().strip() or "用户",
-                "vision_api_endpoint": self.vision_endpoint.text().strip(),
-                "vision_api_model": self.vision_model.text().strip(),
-                "vision_api_key": self.vision_key.text().strip(),
                 "forwarders": forwarders,
                 "selected_forwarder_id": selected_forwarder,
                 "profit_rules": self.rules_data,
                 "selected_profit_rule_id": selected_rule,
             }
         )
+        # New API settings live in the selected data directory's separate
+        # profile/key files.  Do not copy a secret back into settings.json.
+        latest.pop("vision_api_key", None)
         self.settings = latest
         self.context.settings_service.save(self.settings)
         # A directory switch applies after restart.  Until then this page is
