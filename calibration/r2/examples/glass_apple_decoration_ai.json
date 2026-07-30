@@ -1,0 +1,22 @@
+{
+  "product_type": "glass_apple_decoration",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "hard",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": true,
+  "ai_net_weight_kg": 0.30,
+  "ai_package_size_cm": [13, 13, 11],
+  "ai_package_weight_kg": 0.35,
+  "conservative_package_size_cm": [14, 13, 12],
+  "conservative_package_weight_kg": 0.40,
+  "packaging_method": "气泡袋+纸盒",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "medium",
+  "reasoning": "绿色苹果造型玻璃/树脂摆件, 硬质玻璃工艺品, 不可折叠需保型, 单只约300g+包装50g=350g, 包装按13×13×12cm 纸盒+气泡",
+  "notes": "1688商品, 玻璃苹果造型摆件, 装饰类/工艺品"
+}

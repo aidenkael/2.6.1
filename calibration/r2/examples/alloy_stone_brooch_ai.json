@@ -1,0 +1,22 @@
+{
+  "product_type": "alloy_stone_brooch",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "hard",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.025,
+  "ai_package_size_cm": [10, 8, 2],
+  "ai_package_weight_kg": 0.03,
+  "conservative_package_size_cm": [11, 9, 3],
+  "conservative_package_weight_kg": 0.04,
+  "packaging_method": "OPP袋",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "medium",
+  "reasoning": "合金宝石胸针(蓝色宝石+红色心形+金色套装), 单件金属框+玻璃/树脂石+弹簧扣别针, 硬质不可折叠, 单件约25g+包装5g=30g, 包装按10×8×2cm OPP袋",
+  "notes": "1688商品, 合金镶石胸针/复古宫廷风胸针, 单件装。实际头程3元(义乌起步价)"
+}

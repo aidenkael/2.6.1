@@ -1,0 +1,22 @@
+{
+  "product_type": "long_wallet_phone_combo",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "bag",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.123,
+  "ai_package_size_cm": [21, 12, 4],
+  "ai_package_weight_kg": 0.15,
+  "conservative_package_size_cm": [22, 13, 5],
+  "conservative_package_weight_kg": 0.17,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "high",
+  "reasoning": "长款女士钱包(可装手机款), PU皮+拉链夹层+翻盖按扣, 软质可折叠, 参数表19×10×2cm/123g, 包装按21×12×4cm OPP袋",
+  "notes": "1688参数表: 长款钱包19×10×2cm/123g, 含卡位+手机位, 灰色/咖啡色均123g"
+}

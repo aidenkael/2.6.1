@@ -1,0 +1,22 @@
+{
+  "product_type": "satin_scrunchie_large",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.015,
+  "ai_package_size_cm": [12, 12, 3],
+  "ai_package_weight_kg": 0.02,
+  "conservative_package_size_cm": [13, 13, 4],
+  "conservative_package_weight_kg": 0.025,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "黑色大号真丝/缎面发圈, 弹力松紧+缎面布, 软质可折叠压缩, 单只约15g+包装5g=20g, 包装按12×12×3cm OPP袋",
+  "notes": "1688商品, 大号缎面发圈/真丝发圈, 单只装"
+}

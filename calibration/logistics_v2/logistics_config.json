@@ -1,0 +1,75 @@
+{
+  "formula_version": "2026-07-head-tail-freight-forwarder-v1",
+  "packaging_policy_version": "2026-07-realistic-range-packaging-v2",
+  "min_head_charge_rmb": 3.0,
+  "trusted_weight_no_increment_max_g": 50,
+  "trusted_weight_default_increment_g": 50,
+  "_deprecated": {
+    "categories": {
+      "_note": "2026-07-26 作废。包类80/非包类100 改为按货代区分费率。保留此字段仅供旧调用链兼容, 新调用应使用 freight_forwarders。",
+      "_deprecated_at": "2026-07-26"
+    },
+    "default_freight_forwarder": {
+      "_note": "当前设为 null。正式使用前需由用户选择 freight_forwarder 键(sz 或 yw)。在此之前的调用默认按旧 categories 费率运行。",
+      "_deprecated_at": null
+    }
+  },
+  "volume_divisor": 8000,
+  "tail_fee_usd": 7,
+  "usd_cny_rate": 6.7716,
+  "usd_cny_rate_updated_at": "2026-07-21",
+  "usd_cny_rate_source": "user_provided",
+  "usd_cny_rate_max_age_days": 7,
+  "freight_forwarders": {
+    "sz": {
+      "label": "深圳货代",
+      "head_price_per_kg": 80,
+      "fixed_service_fee": 10
+    },
+    "yw": {
+      "label": "义乌货代",
+      "head_price_per_kg": 100,
+      "fixed_service_fee": 6
+    }
+  },
+  "default_freight_forwarder": null,
+  "categories": {
+    "_deprecated": true,
+    "_note": "2026-07-26 作废, 此字段仅用于旧调用链兼容, 请使用 freight_forwarders。",
+    "bag": {
+      "category_cn": "包类(已废弃, rate 不再按包类/非包类区分)",
+      "head_price_per_kg": 80,
+      "fixed_service_fee": 10
+    },
+    "general": {
+      "category_cn": "非包类(已废弃, rate 不再按包类/非包类区分)",
+      "head_price_per_kg": 100,
+      "fixed_service_fee": 6
+    }
+  },
+  "correction_threshold": {
+    "amount_cny": 5,
+    "percent": 0.1,
+    "min_cases_for_profile_suggestion": 5,
+    "continuous_underestimate_warning": 2,
+    "cost_range_attention_cny": 10,
+    "cost_range_attention_percent": 0.4
+  },
+  "evidence_quality": {
+    "max_axis_without_context_cm": 200,
+    "visual_conflict_ratio": 3,
+    "same_rank_dimension_conflict_ratio": 3,
+    "same_rank_weight_conflict_ratio": 3,
+    "small_item_max_weight_kg": 0.5,
+    "small_item_max_volume_weight_kg": 0.3,
+    "soft_bag_max_volume_weight_kg": 1.0,
+    "scenario_rejected_match_tolerance": 0.05,
+    "packaged_evidence_dimension_tolerance": 0.02,
+    "packaged_evidence_weight_tolerance": 0.02,
+    "hard_protection_min_volume_ratio": 1.02,
+    "scenario_max_weight_multiple": 5,
+    "scenario_max_weight_addition_kg": 0.5,
+    "soft_package_min_axis_ratio": 0.05,
+    "soft_package_min_volume_ratio": 0.03
+  }
+}

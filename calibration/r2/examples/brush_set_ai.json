@@ -1,0 +1,22 @@
+{
+  "product_type": "dual_head_makeup_brush_set",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "hard",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.065,
+  "ai_package_size_cm": [22, 6, 3],
+  "ai_package_weight_kg": 0.07,
+  "conservative_package_size_cm": [23, 7, 4],
+  "conservative_package_weight_kg": 0.085,
+  "packaging_method": "黑色礼盒(MAKEUP BRUSH)",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "medium",
+  "reasoning": "F4双头散粉刷(174mm, 大头35mm) + E6小双头细节刷(154mm, 8-10mm)一套两支, 共用黑色长条礼盒包装。木柄+金属连接段硬质, 刷毛软, 整体按硬品处理。",
+  "notes": "1688商家图片显示F4配黑色MAKEUP BRUSH礼盒, E6同套装; 包装尺寸按图片3礼盒比例推测(22x6x3cm); 重量按化妆刷常见单支20-35g估算, 总重约65g含礼盒"
+}

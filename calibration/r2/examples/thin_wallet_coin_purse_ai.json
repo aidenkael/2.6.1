@@ -1,0 +1,22 @@
+{
+  "product_type": "thin_wallet_coin_purse",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "bag",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.10,
+  "ai_package_size_cm": [15, 10, 3],
+  "ai_package_weight_kg": 0.12,
+  "conservative_package_size_cm": [16, 11, 4],
+  "conservative_package_weight_kg": 0.14,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "high",
+  "reasoning": "女超薄小钱包/零钱包, PU皮+金属拉链+金属环, 软质可折叠, 参数表14×9×1.5cm/189cm³/100g",
+  "notes": "1688参数表: 杏色/咖色均14×9×1.5cm/189cm³/100g, 超薄小钱包女。实际头程12元。"
+}

@@ -1,0 +1,22 @@
+{
+  "product_type": "resin_craft_figurine",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "hard",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": true,
+  "ai_net_weight_kg": 0.075,
+  "ai_package_size_cm": [5.9, 5, 8],
+  "ai_package_weight_kg": 0.075,
+  "conservative_package_size_cm": [7, 6, 10],
+  "conservative_package_weight_kg": 0.09,
+  "packaging_method": "OPP袋/小纸盒",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "medium",
+  "reasoning": "义乌时查工艺品厂跨境新款 Gaia 迷你大地之母盖亚树脂工艺品摆件, 金色, 坐姿。商家规格两套对照: 参数表8×6×5cm/75g(疑外包装总尺寸), 详情产品4.8×4.6×7.4/64g+包装5.9×5×8cm(更可信)。按可信包装5.9×5×8cm, 75g总重估。",
+  "notes": "树脂工艺品易碎但本试算按硬品处理; 商家规格相对详细(产品本体+包装分开列出), 比CAL-052那种单一规格数据可信度更高, 但仍不能尽信"
+}

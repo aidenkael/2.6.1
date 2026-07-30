@@ -1,0 +1,22 @@
+{
+  "product_type": "mesh_cycling_skull_cap",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.04,
+  "ai_package_size_cm": [14, 11, 2],
+  "ai_package_weight_kg": 0.05,
+  "conservative_package_size_cm": [15, 12, 3],
+  "conservative_package_weight_kg": 0.06,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "四季网眼速干透气骑行小帽/摩托车头盔内胆, 涤纶网眼+弹力, 软质可折叠压缩, 单顶约40g+包装10g=50g, 包装按14×11×2cm OPP袋",
+  "notes": "1688商品: 速干透气户外骑行小帽(四季网眼/摩托车头盔内胆), 均码/弹力, 跨境爆款"
+}

@@ -1,0 +1,22 @@
+{
+  "product_type": "kazoo_metal_instrument",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "hard",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.04,
+  "ai_package_size_cm": [14, 5, 5],
+  "ai_package_weight_kg": 0.05,
+  "conservative_package_size_cm": [15, 6, 6],
+  "conservative_package_weight_kg": 0.06,
+  "packaging_method": "OPP袋+纸盒",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "medium",
+  "reasoning": "金属/塑料卡祖笛乐器(配5张笛膜), 硬质不可折叠, 单只约30-40g+包装10-20g=50g, 包装按14×5×5cm OPP袋或纸盒",
+  "notes": "1688商品: 卡祖笛乐器演奏级(萨克斯斯卡通小乐器笛筒笛膜), 1只装含5张笛膜"
+}

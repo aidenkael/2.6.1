@@ -1,0 +1,22 @@
+{
+  "product_type": "evening_clutch_bag",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "bag",
+  "rigidity": "semi_rigid",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": true,
+  "ai_net_weight_kg": 0.40,
+  "ai_package_size_cm": [26, 16, 6],
+  "ai_package_weight_kg": 0.48,
+  "conservative_package_size_cm": [28, 17, 7],
+  "conservative_package_weight_kg": 0.50,
+  "packaging_method": "气泡袋+纸盒",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "medium",
+  "reasoning": "黑色硬壳晚宴包, 前置金色椭圆形金属环装饰, 配金色链条, 半硬质PU+金属环, 不可折叠压缩需保型, 单只约400g+金属链条约80g=480g, 包装按26x16x6cm 纸盒+气泡估算",
+  "notes": "1688商品, 修正: 之前误判为金色结绳摆件, 实际是带金属环装饰的硬壳晚宴包"
+}

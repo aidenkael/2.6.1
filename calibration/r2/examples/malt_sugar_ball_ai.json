@@ -1,0 +1,22 @@
+{
+  "product_type": "slow_rebound_squishy",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.10,
+  "ai_package_size_cm": [8, 8, 8],
+  "ai_package_weight_kg": 0.11,
+  "conservative_package_size_cm": [9, 9, 9],
+  "conservative_package_weight_kg": 0.12,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "high",
+  "reasoning": "慢回弹麦芽糖球/解压球(透明款), 软质聚氨酯慢回弹材料, 参数表6×6×6cm/216cm³/100g, 包装按8×8×8cm OPP袋",
+  "notes": "1688参数表: 透明麦芽糖球6×6×6cm/216cm³/100g, 小红书同款减压玩具"
+}

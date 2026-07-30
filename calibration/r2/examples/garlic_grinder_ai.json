@@ -1,0 +1,22 @@
+{
+  "product_type": "garlic_grinder_creative",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "hard",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.06,
+  "ai_package_size_cm": [15, 5, 3],
+  "ai_package_weight_kg": 0.08,
+  "conservative_package_size_cm": [16, 6, 4],
+  "conservative_package_weight_kg": 0.10,
+  "packaging_method": "OPP袋",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "medium",
+  "reasoning": "创意磨蒜器, ABS塑料外壳+不锈钢磨片+硅胶护指套, 硬质不可折叠, 参数13.5×4cm, 单只约60g+包装20g=80g, 包装按15×5×3cm OPP袋",
+  "notes": "1688商品, 创意磨蒜器(13.5×4cm), ABS+不锈钢刀片+护指套, 实际头程9元(义乌)"
+}

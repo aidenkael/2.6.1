@@ -1,0 +1,26 @@
+Profit-Accounting-2.6 局部覆盖补丁
+
+使用方式：
+1. 关闭正在运行的软件和开发工具。
+2. 将本压缩包解压到 Profit-Accounting-2.6 源码根目录。
+3. 选择“覆盖同名文件”。
+4. 在源码根目录重新运行 build_windows.bat 打包。
+
+注意：
+- 不要解压到已经生成的 dist 或 _internal 目录。
+- 本补丁只包含发生变化的源码、默认配置和相关测试，不包含完整项目。
+- 不会覆盖现有 user_data、历史记录或本机 settings.json。
+- AI识图的 API 地址、模型和 Key 需要在“设置”页面填写并保存。
+
+本轮暂未修改：
+- 历史记录管理页面
+- 数据导入导出页面
+- 模型校准反馈页面
+
+验证结果：
+- 43 passed
+- 1 skipped（当前Linux验证环境未安装PySide6，仅跳过窗口烟测）
+- 0 failed
+- 0 collection errors
+- 敏感信息扫描：0 findings
+- Python源码编译检查：通过

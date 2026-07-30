@@ -1,0 +1,2884 @@
+[
+  {
+    "sample_id": "CAL-001",
+    "date": "2026-07-26",
+    "product_type": "flat_top_military_cap",
+    "product_cn": "米色平顶军帽/船型帽 (RB刺绣)",
+    "category_type": "general",
+    "material": "cotton_canvas",
+    "rigidity": "semi_rigid",
+    "requires_shape_retention": true,
+    "estimated_package_size_cm": [
+      25,
+      20,
+      11
+    ],
+    "estimated_head_freight_rmb": 55.0,
+    "estimated_service_fee_rmb": 10.0,
+    "estimated_total_rmb": 65.0,
+    "actual_head_freight_rmb": 44.2,
+    "actual_service_fee_rmb": 10.0,
+    "actual_total_rmb": 54.2,
+    "actual_chargeable_weight_kg": 0.5525,
+    "actual_package_volume_cm3": 4420,
+    "size_reduction_ratio": 0.8,
+    "head_freight_error_pct": 24.4,
+    "freight_forwarder": "深圳货代",
+    "root_cause": "PAGE_DATA_MISUSE",
+    "root_cause_detail": "参数表尺寸是商品展示尺寸(含帽檐展开/展示架空间)，不是出货打包尺寸。反推实际打包体积4420cm³，是参数表5500cm³的80%。头程运费55.0 vs 44.2，高估24%。",
+    "applicable_to": {
+      "product_types": [
+        "military_cap",
+        "flat_top_cap",
+        "baker_boy_cap",
+        "newsboy_cap",
+        "cadet_cap"
+      ],
+      "materials": [
+        "cotton",
+        "canvas",
+        "linen",
+        "polyester_cotton"
+      ],
+      "rules": [
+        "semi_rigid或soft+可轻微折叠的帽类",
+        "参数表尺寸明显偏大时参考80%折算率",
+        "不同帽型仍需单独估算"
+      ],
+      "exclude": [
+        "刚性帽(硬壳安全帽/棒球帽带硬衬)",
+        "大量填充/蓬松材质帽"
+      ]
+    },
+    "ai_json_path": "examples/flat_top_cap_ai.json",
+    "notes": "真实反馈第一条(修正)。注意44.2元是纯头程运费,不含+10元固定服务费,此前误将44.2当作(头程+服务费)合计导致反推体积偏小(62%→修正为80%)。同类帽子优先用实际打包尺寸;无实物时参考80%折算率修正参数表。",
+    "1688_display_size_cm": [
+      25,
+      20,
+      11
+    ],
+    "1688_display_volume_cm3": 5500,
+    "1688_listed_weight_g": 110,
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-002",
+    "date": "2026-07-26",
+    "product_type": "evening_clutch_bag",
+    "product_cn": "黑色晚宴包 (金色椭圆金属环+链条)",
+    "category_type": "bag",
+    "material": "acrylic_metal",
+    "rigidity": "semi_rigid",
+    "requires_shape_retention": true,
+    "estimated_package_size_cm": [
+      26,
+      16,
+      6
+    ],
+    "estimated_weight_kg": 0.48,
+    "estimated_head_freight_rmb": 38.4,
+    "estimated_service_fee_rmb": 10.0,
+    "estimated_total_rmb": 48.4,
+    "actual_head_freight_rmb": 18.05,
+    "actual_service_fee_rmb": 10.0,
+    "actual_total_rmb": 28.05,
+    "actual_chargeable_weight_kg": 0.2256,
+    "actual_package_volume_cm3": 1805,
+    "size_reduction_ratio": 0.47,
+    "head_freight_error_pct": 113,
+    "freight_forwarder": "深圳货代",
+    "root_cause": "AI_VISUAL_ERROR",
+    "root_cause_detail": "亚克力+金属, 硬质不可折叠(该判断正确)。但大幅高估了尺寸和重量: 估算26×16×6cm/480g vs 实际约20×10×8cm/226g。亚克力其实很轻, 薄亚克力+细金属链条不足250g。核心错误: 视觉上把包体放大了, 且未考虑亚克力的轻量特性。",
+    "applicable_to": {
+      "product_types": [
+        "evening_clutch",
+        "acrylic_bag",
+        "small_hard_clutch"
+      ],
+      "materials": [
+        "acrylic",
+        "resin",
+        "pc_plastic"
+      ],
+      "rules": [
+        "亚克力/树脂类小包硬度分类正确(不可折叠), 但尺寸和重量容易被视觉放大",
+        "含金属链条的小包, 金属占比低, 不应高估整体重量",
+        "同类小硬包出货尺寸约 18~22×10~12×7~9cm, 重量 200~300g"
+      ],
+      "exclude": [
+        "大型硬壳行李箱包",
+        "真皮厚材手包",
+        "多层结构箱包"
+      ]
+    },
+    "ai_json_path": "examples/evening_clutch_ai.json",
+    "notes": "CAL-002(修正): 用户确认材质为亚克力+金属, 硬质不可折叠的判断正确。误差根因修正为AI_VISUAL_ERROR(视觉放大尺寸+未考虑亚克力轻量), 而非SOFT_GOODS_UNDER_FOLDED。与CAL-001不同: 帽子是参数表与实际不符, 包是视觉AI估算偏差。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-003",
+    "date": "2026-07-26",
+    "product_type": "angel_wing_brooch_pair",
+    "product_cn": "白色天使翅膀胸针一对(2件)",
+    "category_type": "general",
+    "material": "alloy_metal",
+    "rigidity": "hard",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 2,
+    "estimated_package_size_cm": [
+      9,
+      4,
+      2
+    ],
+    "estimated_weight_kg": 0.02,
+    "estimated_head_freight_rmb": 2.0,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 8.0,
+    "actual_head_freight_range_rmb": [
+      3.0,
+      5.7
+    ],
+    "actual_head_freight_avg_rmb": 4.35,
+    "actual_chargeable_weight_range_kg": [
+      0.03,
+      0.057
+    ],
+    "actual_chargeable_weight_avg_kg": 0.0435,
+    "head_freight_error_pct": 117,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "WEIGHT_UNDERESTIMATED",
+    "root_cause_detail": "估算一对翅膀胸针头程2.0元(0.02kg × 100), 实际3-5.7元(0.030-0.057kg)。一对实际比估算重50-185%。可能是金属件(弹簧扣+合金翅膀)比预估重, 或者一对装还加了小纸卡/OPP袋内衬。",
+    "applicable_to": {
+      "product_types": [
+        "small_metal_brooch",
+        "pin_badge_pair",
+        "earring_pair",
+        "small_metal_jewelry"
+      ],
+      "materials": [
+        "alloy",
+        "zinc_alloy",
+        "metal_with_enamel"
+      ],
+      "rules": [
+        "小金属饰品成对发, 一对重量通常在30-60g",
+        "弹簧扣+合金件会增加重量, 不能按薄片树脂估算",
+        "含小纸卡/包装衬纸时再加5-10g"
+      ],
+      "exclude": [
+        "树脂/塑料单件胸针",
+        "珍珠/轻质材质",
+        "大尺寸金属徽章"
+      ]
+    },
+    "ai_json_path": "examples/angel_wing_brooch_ai.json",
+    "notes": "CAL-003 首次出现低估方向误差(前两次都高估)。小金属饰品对视重易偏轻, 后续同类型一对装建议直接按一对40-50g估重, 不按单件×2推测。头程3-5.7元差异可能来自不同批次/包装方式, 建议积累更多样本。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-004",
+    "date": "2026-07-26",
+    "product_type": "houndstooth_knee_high_socks_pair",
+    "product_cn": "黑色千鸟格过膝袜一对(2只)",
+    "category_type": "general",
+    "material": "cotton_spandex",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 2,
+    "estimated_package_size_cm": [
+      24,
+      9,
+      3
+    ],
+    "estimated_weight_kg": 0.11,
+    "estimated_head_freight_rmb": 11.0,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 17.0,
+    "actual_head_freight_rmb": 8.55,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 14.55,
+    "actual_chargeable_weight_kg": 0.0855,
+    "head_freight_error_pct": 29,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "WEIGHT_OVERESTIMATED",
+    "root_cause_detail": "估算一对过膝袜110g(含包装), 实际约85g。单只袜子比预估轻(100g/对→75-80g/对), 千鸟格纹理+中厚度可能给人一种比实际重的错觉。",
+    "applicable_to": {
+      "product_types": [
+        "knee_high_socks",
+        "thigh_high_socks",
+        "mid_calf_socks",
+        "ankle_socks"
+      ],
+      "materials": [
+        "cotton",
+        "spandex_blend",
+        "polyester_cotton"
+      ],
+      "rules": [
+        "过膝袜/中筒袜单只重量约35-45g, 一对80-90g+包装约85-100g",
+        "千鸟格/花纹不增重, 视觉纹理容易误导",
+        "常规厚度棉袜(非加厚毛圈)一对应在100g以内"
+      ],
+      "exclude": [
+        "加厚毛圈袜(冬季款)",
+        "5双装以上多件套",
+        "羊毛/粗织袜"
+      ]
+    },
+    "ai_json_path": "examples/houndstooth_knee_socks_ai.json",
+    "notes": "CAL-004: 常规厚度过膝袜高估29%。千鸟格等纹理图案容易视觉上放大厚度和重量。后续同类型袜类按一对85-100g(含OPP袋)估算, 不加厚款式一对在100g以内。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-005",
+    "date": "2026-07-26",
+    "product_type": "window_glass_scraper",
+    "product_cn": "玻璃刮刀/窗户刮水器 (18x13cm标注)",
+    "category_type": "general",
+    "material": "abs_plastic_tpu",
+    "rigidity": "hard",
+    "requires_shape_retention": false,
+    "estimated_package_size_cm": [
+      20,
+      14,
+      3
+    ],
+    "estimated_weight_kg": 0.1,
+    "estimated_head_freight_rmb": 10.5,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 16.5,
+    "conservative_head_freight_rmb": 15.8,
+    "actual_head_freight_rmb": 15.2,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 21.2,
+    "actual_chargeable_weight_kg": 0.152,
+    "head_freight_error_pct": 45,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "WEIGHT_UNDERESTIMATED",
+    "root_cause_detail": "正常档估算100g(含包装), 实际约152g。刮刀手柄+金属刮条比预估更厚实, 正常档计费重0.105kg vs 实际0.152kg。保守档15.8元反比正常档10.5元更准——这次保守档立功了。",
+    "applicable_to": {
+      "product_types": [
+        "glass_scraper",
+        "squeegee",
+        "cleaning_tool_with_handle"
+      ],
+      "materials": [
+        "abs_plastic",
+        "tpu_rubber",
+        "metal_insert"
+      ],
+      "rules": [
+        "硬质手柄类工具重量容易被低估, 未亲手拿过的工具类按正常框+30%预估",
+        "参数表只给18x13不含厚度, 厚度2-3cm需加到包装体积累"
+      ],
+      "exclude": [
+        "纯塑料薄片工具",
+        "小橡皮刮(无手柄)"
+      ]
+    },
+    "ai_json_path": "examples/window_scraper_ai.json",
+    "notes": "CAL-005: 刮刀保守档反比正常档准——正常档低估45%, 保守档仅偏差4%。原因: 对ABS硬质工具重量经验不足, 包装体积估算偏小。硬质工具类(手柄+刮条+金属件)不能按轻量小件处理。后续同类工具正常档估重建议+30%。",
+    "1688_display_size_cm": [
+      18,
+      13,
+      2
+    ],
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-006",
+    "date": "2026-07-26",
+    "product_type": "apple_compact_mirror",
+    "product_cn": "红色苹果造型便携化妆镜",
+    "category_type": "general",
+    "material": "abs_glass",
+    "rigidity": "hard",
+    "requires_shape_retention": true,
+    "1688_display_size_cm": [
+      15.8,
+      4,
+      16
+    ],
+    "1688_display_volume_cm3": 1011.2,
+    "1688_listed_weight_g": 175,
+    "estimated_package_size_cm": [
+      13,
+      13,
+      2
+    ],
+    "estimated_weight_kg": 0.1,
+    "estimated_head_freight_rmb": 10.0,
+    "estimated_total_rmb": 16.0,
+    "actual_package_size_cm": [
+      16,
+      16,
+      4
+    ],
+    "actual_weight_with_pkg_g": 205,
+    "actual_head_freight_rmb": 20.7,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 26.7,
+    "actual_chargeable_weight_kg": 0.207,
+    "head_freight_error_pct": 107,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "AI_VISUAL_ERROR",
+    "root_cause_detail": "无参数表时纯视觉估算。低估了所有维度: 尺寸13cm→实际16cm, 厚度2cm→4cm, 重量100g→205g。镜面+ABS壳远比视觉判断重(裸镜就175g)。包装盒比苹果镜外形大一圈(留保护空间)。三条一起低估导致最终误差107%。",
+    "applicable_to": {
+      "product_types": [
+        "compact_mirror",
+        "hand_mirror",
+        "makeup_mirror",
+        "vanity_mirror_single"
+      ],
+      "materials": [
+        "abs_plastic",
+        "glass",
+        "acrylic_mirror"
+      ],
+      "rules": [
+        "玻璃镜面+硬壳镜子单只通常150-200g(裸镜)",
+        "包装盒比镜身大3-4cm每边, 厚度需4-5cm(气泡+盒体)",
+        "有参数表时必须用参数表, 无参数表时镜子类按12-16cm/150-250g预估"
+      ],
+      "exclude": [
+        "塑料薄膜镜(超轻)",
+        "折叠双开门镜(更薄)",
+        "特大尺寸梳妆镜(>30cm)"
+      ]
+    },
+    "ai_json_path": "examples/apple_compact_mirror_ai.json",
+    "notes": "CAL-006: 纯视觉估算无参数表时严重低估107%。有参数表后修改AI JSON, 正常档头程20.0元 vs 实际20.7元, 仅差3.4%。教训: 有参数表必须优先使用, 无参数表时对镜子/玻璃制品按保守上限估算。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "actual_package_measured"
+  },
+  {
+    "sample_id": "CAL-007",
+    "date": "2026-07-26",
+    "product_type": "batman_cowl_mask",
+    "product_cn": "蝙蝠侠头套/cosplay面罩",
+    "category_type": "general",
+    "material": "plastic_pu",
+    "rigidity": "semi_rigid",
+    "requires_shape_retention": true,
+    "estimated_package_size_cm": [
+      28,
+      22,
+      12
+    ],
+    "estimated_weight_kg": 0.24,
+    "estimated_head_freight_rmb": 73.9,
+    "estimated_service_fee_rmb": 10.0,
+    "estimated_total_rmb": 83.9,
+    "actual_package_size_cm": [
+      28,
+      22,
+      3
+    ],
+    "actual_weight_with_pkg_g": 210,
+    "actual_head_freight_rmb": 18.5,
+    "actual_service_fee_rmb": 10.0,
+    "actual_total_rmb": 28.5,
+    "actual_chargeable_weight_kg": 0.231,
+    "head_freight_error_pct": 300,
+    "error_direction": "overestimate",
+    "freight_forwarder": "深圳货代",
+    "root_cause": "PACKAGING_THICKNESS_OVERESTIMATE",
+    "root_cause_detail": "看到尖耳朵(25cm高立体结构)就把盒厚设成12cm, 实则发货时耳朵贴近脸面平放, 整个头套压成约3cm厚的'面具'状。盒厚=主体厚度+缓冲(3-5cm), 不是立体最大尺寸。参数表有/无都一样——核心错误是没区分'立体展示尺寸'和'平放出货尺寸'。",
+    "applicable_to": {
+      "product_types": [
+        "cosplay_mask",
+        "helmet_face_mask",
+        "plastic_mask_with_ears",
+        "character_headpiece"
+      ],
+      "materials": [
+        "plastic",
+        "pu",
+        "latex",
+        "eva"
+      ],
+      "rules": [
+        "尖耳/角/突出部件可贴近主体平放, 盒厚=主体厚度+3-5cm缓冲",
+        "参数表的立体高度≠包装盒厚度, 分辨展示尺寸vs出货尺寸",
+        "面罩/头套类出货通常压平, 盒厚不超过5cm"
+      ],
+      "exclude": [
+        "完整头盔(不可压扁)",
+        "刚性装饰品(不可折)",
+        "厚海绵填充头套(>8cm)"
+      ]
+    },
+    "ai_json_path": "examples/batman_cowl_mask_ai.json",
+    "notes": "CAL-007: 最高估(300%)也是修正后最准(0.1%)。参数表25cm立体高度被误当盒厚, 改正为平放3cm后体积从7392→1848cm³, 头程从73.9→18.48元匹配实际18.5。与CAL-001(帽子32%高估)不同: 帽子是展示尺寸放大, 头套是立体变平放。",
+    "1688_display_size_cm": [
+      28,
+      22,
+      25
+    ],
+    "1688_listed_weight_g": 160,
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "actual_package_measured"
+  },
+  {
+    "sample_id": "CAL-008",
+    "date": "2026-07-26",
+    "product_type": "dual_ended_nail_art_brush",
+    "product_cn": "双头美甲笔(刷子+点珠针)单支",
+    "category_type": "general",
+    "material": "metal_brush",
+    "rigidity": "hard",
+    "requires_shape_retention": false,
+    "estimated_package_size_cm": [
+      18,
+      4,
+      3
+    ],
+    "estimated_weight_kg": 0.03,
+    "estimated_head_freight_rmb": 3.0,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 9.0,
+    "conservative_head_freight_rmb": 4.75,
+    "actual_head_freight_rmb": 4.75,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 10.75,
+    "actual_chargeable_weight_kg": 0.0475,
+    "head_freight_error_pct": 58,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "PACKAGE_SIZE_UNDERESTIMATED",
+    "root_cause_detail": "正常档18×4×3头程3.0元低估37%, 保守档19×5×4头程4.75元精确命中。包装比预估稍大: 笔长可能18-19cm, OPP袋封口+标签增加了宽度和高度。保守档再次比正常档准(第二次出现)。",
+    "applicable_to": {
+      "product_types": [
+        "nail_art_brush",
+        "dual_tip_tool",
+        "cosmetic_brush_single",
+        "eyeliner_pen"
+      ],
+      "materials": [
+        "metal_body",
+        "synthetic_bristle",
+        "aluminum_ferrule"
+      ],
+      "rules": [
+        "笔类长条小件: OPP袋封口+标签会增加1-2cm宽高",
+        "正常档按笔本体尺寸估可能偏紧, 保守档+1cm更准",
+        "单支装笔类重量约25-40g, 包装后30-50g"
+      ],
+      "exclude": [
+        "大面积刷子(鞋刷/油漆刷)",
+        "套装(多支装)"
+      ]
+    },
+    "ai_json_path": "examples/nail_art_brush_ai.json",
+    "notes": "CAL-008: 保守档精确命中4.75。正常档偏紧(3.0→少估37%), 保守档+1cm刚好覆盖OPP袋封口和标签的空间。这是今天第二次保守档比正常档准(CAL-005刮刀也是)。小长条物品的包装余量容易被低估。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-009",
+    "date": "2026-07-26",
+    "product_type": "silicone_donut_door_stopper",
+    "product_cn": "黄色硅胶甜甜圈门挡",
+    "category_type": "general",
+    "material": "silicone",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 2,
+    "1688_display_size_cm": [
+      10,
+      4.8,
+      4.5
+    ],
+    "1688_display_volume_cm3": 216,
+    "estimated_single_weight_g": 40,
+    "estimated_two_weight_g": 90,
+    "estimated_head_freight_rmb": 9.0,
+    "actual_two_head_freight_rmb": 18.9,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 24.9,
+    "actual_chargeable_weight_kg": 0.189,
+    "actual_single_weight_g": 95,
+    "head_freight_error_pct": 429,
+    "error_direction": "underestimate",
+    "freight_forwarder": "深圳货代",
+    "root_cause": "WEIGHT_UNDERESTIMATED",
+    "root_cause_detail": "单件估算40g(泡沫密度), 实际约100-115g(硅胶密度)。硅胶密度~1.1-1.3g/cm³, 216cm³体积至少230g+。用户指出详情页标108g可能是吉利数字('一定发'), 但实发两件216g+20g包装=236g, 深圳头程0.236×80=18.9元吻合。",
+    "applicable_to": {
+      "product_types": [
+        "silicone_door_stopper",
+        "silicone_wedge",
+        "rubber_stopper",
+        "silicone_mold"
+      ],
+      "materials": [
+        "silicone",
+        "rubber",
+        "tpe"
+      ],
+      "rules": [
+        "硅胶密度~1.1-1.3g/cm³, 参数表体积×1.1=最低重量",
+        "详情页重量可能美化(108=吉利数字), 以体积估算为准",
+        "两件发货: 重量翻倍但体积增长有限, 计费重=实重主导"
+      ],
+      "exclude": [
+        "泡沫/海绵门挡(超轻)",
+        "中空硅胶制品",
+        "微型硅胶配件(<3cm)"
+      ]
+    },
+    "notes": "CAL-009(修正): 严重低估硅胶门挡重量(估40g→实际单件100g+, 差2.5倍以上)。用户提示108g可能为吉利数字美化, 实际以反推为准(深圳约236g两件)。关键教训: 硅胶不是泡沫, 密度接近水; 参数表重量不可尽信(1688可能写吉利数字)。硅胶商品用体积估算重量: g≈cm³×1.1。",
+    "data_quality_status": "conflict",
+    "data_quality_issues": [
+      "actual_head_freight(18.9)与actual_chargeable_weight(0.189)与notes中的0.236kg冲突"
+    ],
+    "exclude_from_numeric_calibration": true,
+    "evidence_level": "manual_review_required"
+  },
+  {
+    "sample_id": "CAL-010",
+    "date": "2026-07-27",
+    "product_type": "cotton_skull_cap_beanie",
+    "product_cn": "白色棉质无边便帽(弹力骑行头巾)",
+    "category_type": "general",
+    "material": "cotton_spandex",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "estimated_package_size_cm": [
+      15,
+      12,
+      2
+    ],
+    "estimated_weight_kg": 0.04,
+    "estimated_head_freight_rmb": 4.5,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 10.5,
+    "actual_head_freight_rmb": 3.5,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 9.5,
+    "actual_chargeable_weight_kg": 0.035,
+    "actual_package_size_cm": [
+      13,
+      11,
+      2
+    ],
+    "head_freight_error_pct": 29,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "SOFT_GOODS_UNDER_FOLDED",
+    "root_cause_detail": "软弹力棉帽可压缩到比预估更小: 15×12×2=360cm³ vs 实际13×11×2=286cm³。虽然是soft+good foldability, 但预估的扁平尺寸仍然偏大。软棉弹力面料对折后可压得非常紧凑。",
+    "applicable_to": {
+      "product_types": [
+        "beanie",
+        "skull_cap",
+        "cycling_cap",
+        "stretch_fabric_hat"
+      ],
+      "materials": [
+        "cotton_spandex",
+        "polyester_stretch",
+        "jersey",
+        "microfiber"
+      ],
+      "rules": [
+        "软弹力面料帽对折后约13×11×2=286cm³",
+        "与硬壳军帽(5500cm³)完全不同, 软帽体积只有硬帽的5%",
+        "单只重量 25-40g, 含OPP袋 30-50g"
+      ],
+      "exclude": [
+        "硬壳定型帽(棒球帽/报童帽/军帽)",
+        "厚针织毛线帽(蓬松大体积)",
+        "有硬衬帽檐的帽子"
+      ]
+    },
+    "ai_json_path": "examples/cotton_skull_cap_ai.json",
+    "notes": "CAL-010: 软弹力棉帽正常档高估29%(4.5→3.5元)。软帽和硬壳军帽物流差距12倍, 但软帽还可以再压20%+。soft+good foldability本身还不够, 弹力布类出货时要考虑'对折后再压紧'能达到的体积上限。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "actual_measured"
+  },
+  {
+    "sample_id": "CAL-011",
+    "date": "2026-07-27",
+    "product_type": "waterproof_phone_pouch",
+    "product_cn": "紫色PVC防水手机袋(6.7寸)",
+    "category_type": "general",
+    "material": "pvc_plastic",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "estimated_package_size_cm": [
+      22,
+      12,
+      2
+    ],
+    "estimated_weight_kg": 0.05,
+    "estimated_head_freight_rmb": 6.6,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 12.6,
+    "actual_head_freight_rmb": 7.6,
+    "actual_head_freight_range_rmb": [
+      5.7,
+      6.0,
+      7.6
+    ],
+    "actual_head_freight_avg_rmb": 6.43,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 13.6,
+    "actual_chargeable_weight_kg": 0.076,
+    "actual_package_size_cm": [
+      23,
+      13,
+      2
+    ],
+    "head_freight_error_pct": 15,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "PACKAGE_SIZE_UNDERESTIMATED",
+    "root_cause_detail": "正常档 22×12×2 低估 15%, 实际约 23×13×2。OPP袋+标签+卡扣突起增加了1-2cm长宽。低估幅度不大, 属于可接受的操作误差。",
+    "applicable_to": {
+      "product_types": [
+        "waterproof_phone_pouch",
+        "phone_case_sleeve",
+        "pvc_pouch_large"
+      ],
+      "materials": [
+        "pvc",
+        "tpu",
+        "plastic_film"
+      ],
+      "rules": [
+        "正常档 22×12×2=528cm³ 约6.6元, 保守档 23×13×3=897cm³ 约11.2元",
+        "OPP袋+标签增加1-2cm长宽",
+        "单只重量 40-60g(含包装)"
+      ],
+      "exclude": [
+        "小型防水袋(适配<5寸)",
+        "多功能手机防水包(带腰带/气囊)"
+      ]
+    },
+    "ai_json_path": "examples/waterproof_phone_pouch_ai.json",
+    "notes": "CAL-011(更新): 三次发货5.7/6.0/7.6元(差1.9元=25%), 平均6.43元。估算6.6元(义乌)接近平均, 与商家实际差距小。同SKU浮动25%, 反映纸卡/包装方式差异。保守档11.2元作为风险上限仍然合理(防止实测上探)。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "actual_measured"
+  },
+  {
+    "sample_id": "CAL-012",
+    "date": "2026-07-27",
+    "product_type": "seamless_strapless_bandeau",
+    "product_cn": "无痕一片式抹胸/裹胸/打底内衣",
+    "category_type": "general",
+    "material": "nylon_spandex",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "estimated_package_size_cm": [
+      15,
+      12,
+      2
+    ],
+    "estimated_weight_kg": 0.075,
+    "estimated_head_freight_rmb": 7.5,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 13.5,
+    "conservative_head_freight_rmb": 8.5,
+    "actual_head_freight_rmb": 8.5,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 14.5,
+    "actual_chargeable_weight_kg": 0.085,
+    "head_freight_error_pct": 13,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "PACKAGE_SIZE_UNDERESTIMATED",
+    "root_cause_detail": "正常档15×12×2低估13%, 保守档16×13×3精确命中。一片式抹胸折叠后比预估厚: 2cm→实际约3-4cm(弹力面料回弹+OPP袋)。保守档连续3次比正常档准(CAL-005/CAL-008/CAL-012)。",
+    "applicable_to": {
+      "product_types": [
+        "strapless_bandeau",
+        "tube_top",
+        "seamless_camisole",
+        "boob_tape",
+        "backless_bra"
+      ],
+      "materials": [
+        "nylon_spandex",
+        "seamless_knit",
+        "silicone_edge",
+        "elastic_fabric"
+      ],
+      "rules": [
+        "一片式折叠后厚度 3-4cm(含OPP袋), 不是2cm",
+        "弹力面料折叠后有回弹, 厚度要留余量",
+        "单件装 65-75g(净), 85g(含包装)"
+      ],
+      "exclude": [
+        "加厚海绵款(>4cm)",
+        "钢圈/定型款",
+        "抹胸+胸垫一体"
+      ]
+    },
+    "ai_json_path": "examples/seamless_bandeau_ai.json",
+    "notes": "CAL-012: 无痕抹胸保守档精确命中8.5。正常档低估13%, 保守档连续第3次比正常准(弹性面料折叠回弹力让实际厚度大于预估)。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-013",
+    "date": "2026-07-27",
+    "product_type": "football_keychain_set",
+    "product_cn": "足球钥匙扣套装(腕带+球衣+足球挂件)",
+    "category_type": "general",
+    "material": "rubber_silicone_pu",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "estimated_package_size_cm": [
+      22,
+      6,
+      4
+    ],
+    "estimated_weight_kg": 0.06,
+    "estimated_head_freight_rmb": 6.6,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 12.6,
+    "actual_head_freight_rmb": 7.6,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 13.6,
+    "actual_chargeable_weight_kg": 0.076,
+    "head_freight_error_pct": 15,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "PACKAGE_SIZE_UNDERESTIMATED",
+    "root_cause_detail": "正常档 22×6×4=528cm³ vs 实际 0.076kg→608cm³, 低估15%。腕带+球衣+足球三件套组合, 实际打包比预计多占空间。保守档23×7×5=805cm³偏高32%——这次正常档比保守档更准。",
+    "applicable_to": {
+      "product_types": [
+        "keychain_set",
+        "charm_set",
+        "multi_piece_keychain",
+        "sports_fan_set"
+      ],
+      "materials": [
+        "rubber",
+        "silicone",
+        "pu",
+        "plastic_charms"
+      ],
+      "rules": [
+        "多件套实际打包比单品预估大15-30%",
+        "不能简单按单件合并算, 套装间有空隙",
+        "软橡胶/硅胶组套装50-80g, 含包装60-90g"
+      ],
+      "exclude": [
+        "单件钥匙扣",
+        "金属套装(重)",
+        "10+件大套装"
+      ]
+    },
+    "ai_json_path": "examples/football_keychain_set_ai.json",
+    "notes": "CAL-013: 足球钥匙扣套装低估15%。3件套装实际比预估大, 软橡胶件叠在一起有空隙。这次正常档反比保守档准(正常6.6→7.6, 保守10.1→7.6), 保守档+1cm规则对多件套偏大。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-014",
+    "date": "2026-07-27",
+    "product_type": "two_toe_socks_5pack",
+    "product_cn": "二趾分趾袜/冰丝羊蹄袜 5双装",
+    "category_type": "general",
+    "material": "ice_silk_spandex",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 5,
+    "estimated_package_size_cm": [
+      22,
+      14,
+      3
+    ],
+    "estimated_weight_kg": 0.17,
+    "estimated_head_freight_rmb": 17.0,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 23.0,
+    "actual_head_freight_rmb": 10.45,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 16.45,
+    "actual_chargeable_weight_kg": 0.1045,
+    "head_freight_error_pct": 63,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "WEIGHT_OVERESTIMATED",
+    "root_cause_detail": "估5双170g(30g/双), 实际5双约105g(21g/双)。分趾袜/冰丝袜极薄, 单双重量是普通袜的1/3-1/2。之前过膝袜一对85g, 分趾袜一对才20g。冰丝材质+分趾结构=超薄超轻。",
+    "applicable_to": {
+      "product_types": [
+        "two_toe_socks",
+        "toe_separator_socks",
+        "ice_silk_socks",
+        "invisible_socks",
+        "no_show_liner"
+      ],
+      "materials": [
+        "ice_silk",
+        "nylon",
+        "spandex_mesh"
+      ],
+      "rules": [
+        "冰丝分趾袜单双15-25g(含品牌卡), 普通棉袜45-60g/双",
+        "5双装总重90-125g(含包装)",
+        "此类袜极薄, 不宜按'袜子'通用重量估"
+      ],
+      "exclude": [
+        "厚毛巾袜/毛圈袜(50-80g/双)",
+        "长筒袜/小腿袜",
+        "5双装以上(>10双)"
+      ]
+    },
+    "ai_json_path": "examples/two_toe_socks_5pack_ai.json",
+    "notes": "CAL-014: 分趾袜5双装高估63%(17.0→10.45元)。冰丝分趾袜重量是普通袜的1/3, 之前CAL-004过膝袜一对85g, 分趾袜5双才105g。冰丝/超薄袜类不能用一般袜子重量估。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-015",
+    "date": "2026-07-27",
+    "product_type": "blue_crew_socks_pair",
+    "product_cn": "蓝色中筒棉袜一对",
+    "category_type": "general",
+    "material": "cotton_blend",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "estimated_package_size_cm": [
+      18,
+      9,
+      3
+    ],
+    "estimated_weight_kg": 0.08,
+    "estimated_head_freight_rmb": 8.0,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 14.0,
+    "actual_head_freight_rmb": 8.55,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 14.55,
+    "actual_chargeable_weight_kg": 0.0855,
+    "head_freight_error_pct": 7,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "NORMAL_OPERATIONAL_VARIANCE",
+    "root_cause_detail": "估算一对 80g→8.0元, 实际 85.5g→8.55元。差0.55元(6.4%), 在计费重正常浮动范围内。标准中筒棉袜一对80-90g(含包装), 属于可接受的常规操作误差。",
+    "applicable_to": {
+      "product_types": [
+        "crew_socks",
+        "ankle_socks",
+        "standard_cotton_socks"
+      ],
+      "materials": [
+        "cotton",
+        "cotton_spandex",
+        "polyester_cotton"
+      ],
+      "rules": [
+        "标准中筒棉袜一对 80-90g(含OPP袋)",
+        "头程约 8.0-9.5元(义乌)"
+      ],
+      "exclude": [
+        "冰丝/超薄袜(CAL-014)",
+        "加厚毛圈袜(>120g/对)",
+        "长筒/过膝款(CAL-004)"
+      ]
+    },
+    "ai_json_path": "examples/blue_crew_socks_ai.json",
+    "notes": "CAL-015: 标准棉袜一对低估6.4%(8.0→8.55元)。误差很小, 属于可接受的常规操作浮动范围。棉袜类重量估算已经比较准确(之前CAL-004过膝袜85g也是同样8.55元)。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-016",
+    "date": "2026-07-27",
+    "product_type": "white_mid_calf_two_toe_socks",
+    "product_cn": "白色日系中筒分趾袜一对",
+    "category_type": "general",
+    "material": "cotton_nylon",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      20,
+      10,
+      2
+    ],
+    "estimated_weight_kg": 0.065,
+    "estimated_head_freight_rmb": 6.5,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 12.5,
+    "actual_head_freight_range_rmb": [
+      3.8,
+      5.5
+    ],
+    "actual_head_freight_avg_rmb": 4.65,
+    "actual_chargeable_weight_range_kg": [
+      0.038,
+      0.055
+    ],
+    "actual_chargeable_weight_avg_kg": 0.0465,
+    "head_freight_error_pct": 40,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "WEIGHT_OVERESTIMATED",
+    "root_cause_detail": "估算一对65g→6.5元, 实际3.8-5.5元(义乌)对应38-55g。中筒分趾袜重量在标准棉袜80g和冰丝超薄袜21g之间——约40-55g。同一商品两次发货运费不同(3.8和5.5), 可能存在批次重量差异或打包方式不同。",
+    "applicable_to": {
+      "product_types": [
+        "two_toe_socks_mid_calf",
+        "cotton_toe_socks",
+        "tabi_socks"
+      ],
+      "materials": [
+        "cotton_nylon",
+        "cotton_blend"
+      ],
+      "rules": [
+        "中筒分趾袜一对40-55g(含包装)",
+        "介于冰丝超薄(21g/对,CAL-014)和标准棉袜(80g/对,CAL-015)之间",
+        "同商品不同批次可能有15-30%重量浮动"
+      ],
+      "exclude": [
+        "冰丝超薄分趾袜(CAL-014)",
+        "加厚毛圈分趾袜(>80g)",
+        "过膝长筒分趾袜(>100g)"
+      ]
+    },
+    "ai_json_path": "examples/white_two_toe_socks_ai.json",
+    "notes": "CAL-016: 中筒棉质分趾袜一对高估40%(6.5→3.8-5.5)。同商品两次发货运费不同(差1.7元), 说明同SKU存在批次重量浮动。建议取中间值5.0元作为参考头程。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-017",
+    "date": "2026-07-27",
+    "product_type": "sheer_pantyhose_pair",
+    "product_cn": "裸色丝袜/连裤袜一对(含零售纸卡)",
+    "category_type": "general",
+    "material": "nylon_spandex",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_weight_bare_g": 60,
+    "estimated_weight_with_card_g": 120,
+    "estimated_head_freight_rmb": 6.05,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 12.05,
+    "actual_head_freight_rmb": 12.35,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 18.35,
+    "actual_chargeable_weight_kg": 0.1235,
+    "head_freight_error_pct": 104,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "RETAIL_CARD_WEIGHT_MISSED",
+    "root_cause_detail": "估60g(裸袜+OPP袋), 实际123.5g——含零售吊牌/展示纸卡增重约64g。纸卡+挂钩+品牌标签让单品重量翻倍。同商品不带纸卡约60g→6元头程, 带纸卡约124g→12.35元——包装方式让头程差2倍。",
+    "applicable_to": {
+      "product_types": [
+        "pantyhose",
+        "sheer_tights",
+        "hosiery_with_card",
+        "retail_carded_socks"
+      ],
+      "materials": [
+        "nylon",
+        "spandex",
+        "sheer_fabric"
+      ],
+      "rules": [
+        "零售纸卡/吊牌增重约60g(=一张A5-A6灰板卡+挂钩)",
+        "同商品带/不带纸卡, 头程差2倍",
+        "零售包装商品重量=裸重+60g纸卡, 不能只估裸重"
+      ],
+      "exclude": [
+        "散装/OPP袋装袜(无纸卡)",
+        "5+对套装(纸卡占比小)",
+        "电商专供(无零售包装)"
+      ]
+    },
+    "ai_json_path": "examples/sheer_pantyhose_ai.json",
+    "notes": "CAL-017: 丝袜含纸卡重124g, 裸袜仅60g。用户发现纸板是额外重量——非常重要! 零售包装(纸卡+吊牌+挂钩)增60g, 让头程从6元翻倍到12.35元。未来估重时必须确认: 出货是散装OPP袋还是挂卡零售装。",
+    "data_quality_issues": [
+      "error_direction更正: overestimate->underestimate (估6.05<实际12.35)"
+    ],
+    "data_quality_status": "ok",
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-018",
+    "date": "2026-07-28",
+    "product_type": "black_tabi_socks_pair",
+    "product_cn": "黑色日系二趾袜(tabi/分趾袜)一对",
+    "category_type": "general",
+    "material": "cotton_nylon",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      18,
+      9,
+      2
+    ],
+    "estimated_weight_kg": 0.035,
+    "estimated_head_freight_rmb": 4.05,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 10.05,
+    "actual_head_freight_rmb": 3.0,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 9.0,
+    "actual_chargeable_weight_kg": 0.03,
+    "head_freight_error_pct": 35,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "WEIGHT_OVERESTIMATED",
+    "root_cause_detail": "估算一对35g→4.05元, 实际30g→3.0元。黑色棉质tabi袜比白色同款更薄(CAL-016白色中筒分趾38-55g)。黑色通常染色后偏薄/偏紧, 单双重量比浅色少5-10g。",
+    "applicable_to": {
+      "product_types": [
+        "tabi_socks",
+        "two_toe_socks_thin",
+        "japanese_split_socks"
+      ],
+      "materials": [
+        "cotton_nylon",
+        "thin_cotton"
+      ],
+      "rules": [
+        "黑色棉袜通常比浅色薄5-10g/对(染色工艺)",
+        "薄款tabi袜单对 25-35g(含包装)",
+        "轻薄分趾袜是袜类最轻的一档"
+      ],
+      "exclude": [
+        "加厚毛圈袜",
+        "长筒袜/过膝袜",
+        "厚羊毛袜"
+      ]
+    },
+    "ai_json_path": "examples/black_tabi_socks_ai.json",
+    "notes": "CAL-018: 黑色tabi袜高估35%(4.05→3.0)。袜类最轻一档。黑色比浅色薄5-10g/对, 是袜类最低重量档。轻薄棉/尼龙tabi袜单对25-35g, 头程3元附近。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-019",
+    "date": "2026-07-28",
+    "product_type": "furniture_corner_protectors_8pack",
+    "product_cn": "透明水滴形家具防撞角 8个装",
+    "category_type": "general",
+    "material": "silicone_pvc",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 8,
+    "estimated_package_size_cm": [
+      15,
+      10,
+      5
+    ],
+    "estimated_weight_kg": 0.07,
+    "estimated_head_freight_rmb": 9.38,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 15.38,
+    "actual_head_freight_rmb": 5.7,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 11.7,
+    "actual_chargeable_weight_kg": 0.057,
+    "actual_single_weight_g": 7.1,
+    "head_freight_error_pct": 65,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "PACKAGE_VOLUME_OVERESTIMATED",
+    "root_cause_detail": "8个软质硅胶角套压在一起实际体积 12×8×5≈480cm³, 我们估15×10×5=750cm³(大56%)。软硅胶件彼此可嵌套/挤压, 实际出货体积比预估紧凑得多。单个仅7g, 8个57g含包装。",
+    "applicable_to": {
+      "product_types": [
+        "corner_protector",
+        "edge_guard",
+        "furniture_safety_pads",
+        "soft_bumpers"
+      ],
+      "materials": [
+        "silicone",
+        "pvc",
+        "tpe",
+        "rubber_foam"
+      ],
+      "rules": [
+        "软硅胶件可嵌套/挤压, 实际出货体积比预估小30-50%",
+        "8个装 ~12×8×5cm=480cm³, ~57g",
+        "单件 5-8g(小号护角), 8个 40-64g"
+      ],
+      "exclude": [
+        "硬塑料护角(不可压缩)",
+        "大型护角(>10cm/件)",
+        "带胶贴背板(增加体积)"
+      ]
+    },
+    "ai_json_path": "examples/furniture_corner_protectors_ai.json",
+    "notes": "CAL-019: 护角8个装高估65%(9.38→5.7)。软硅胶嵌套挤压后体积大幅缩小。多件软质品类的体积预估要加'是否可以嵌套挤压'判断, 不能简单按 单件×8 算总体积。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-020",
+    "date": "2026-07-28",
+    "product_type": "velvet_scrunchie_large",
+    "product_cn": "大号韩国绒大肠发圈",
+    "category_type": "general",
+    "material": "velvet_elastic",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      12,
+      12,
+      3
+    ],
+    "estimated_weight_kg": 0.02,
+    "estimated_head_freight_rmb": 2.0,
+    "estimated_service_fee_rmb": 6.0,
+    "estimated_total_rmb": 8.0,
+    "actual_head_freight_rmb": 3.0,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 9.0,
+    "actual_chargeable_weight_kg": 0.03,
+    "head_freight_error_pct": 50,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "BELOW_MINIMUM_CHARGE",
+    "root_cause_detail": "估算 20g→2.0元, 实际 30g→3.0元。义乌和深圳起步价均为3元(=30g下限)。我们估了2.0元是基于20g×100=2.0元, 但货代有最低起步价3元/单。超轻量小件(≤30g) 一律按3元计。",
+    "applicable_to": {
+      "product_types": [
+        "scrunchie",
+        "hair_tie",
+        "hair_band",
+        "velvet_accessory",
+        "small_fabric_item"
+      ],
+      "materials": [
+        "velvet",
+        "satin",
+        "cotton_elastic"
+      ],
+      "rules": [
+        "义乌和深圳起步价3元(=30g最低计费重)",
+        "超轻量单品(≤30g)头程一律3元",
+        "发圈/大肠圈/发绳单件15-30g, 头程=起步价"
+      ],
+      "exclude": [
+        "多件装(>3件)",
+        "大型发箍/发夹(>30g)",
+        "含金属装饰件(加重)"
+      ]
+    },
+    "ai_json_path": "examples/satin_scrunchie_ai.json",
+    "notes": "CAL-020: 韩国绒大肠圈实际3元, 估算2元低估50%。关键发现: 义乌/深圳起步价都是3元, 任何≤30g的单品头程=3元。不要按2.0元(=20g)计算, 要按起步价下限。建议calculator加入 min_charge 规则。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-021",
+    "date": "2026-07-28",
+    "product_type": "mini_bamboo_folding_fan",
+    "product_cn": "中国风全竹镂空迷你折扇",
+    "category_type": "general",
+    "material": "bamboo_paper",
+    "rigidity": "semi_rigid",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 49,
+    "estimated_package_weight_kg": 0.06,
+    "estimated_head_freight_no_trust": 6.0,
+    "estimated_head_freight_with_trust": 9.9,
+    "actual_head_freight_rmb": 4.75,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 10.75,
+    "actual_chargeable_weight_kg": 0.0475,
+    "head_freight_error_no_trust_pct": 26,
+    "head_freight_error_with_trust_pct": 108,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "TRUSTED_WEIGHT_OVERCOMPENSATES",
+    "root_cause_detail": "参数表49g→不加weight-value时6.0元(偏26%), 加--weight-value可信时49g+50g=99g→9.9元(偏108%)。+0.05kg的修正对超轻品(<50g)过度补偿——实际这扇子含PP袋就48g, 参数表49g已是毛重。+50g规则更适合>100g的中等商品。",
+    "applicable_to": {
+      "product_types": [
+        "mini_folding_fan",
+        "small_bamboo_fan",
+        "pocket_fan"
+      ],
+      "materials": [
+        "bamboo",
+        "paper",
+        "wood_bone"
+      ],
+      "rules": [
+        "超轻品(<50g)参数表重量≈实际毛重时, 不加weight-value直接用package_weight",
+        "+0.05kg规则对小件过度补偿, 应设置下限(≤50g时不加)",
+        "迷你扇子/迷你工具一类的参数表49g通常就是含包装的毛重"
+      ],
+      "exclude": [
+        "大折扇(>30cm, >100g)",
+        "金属骨扇(>100g)",
+        "油纸伞"
+      ]
+    },
+    "ai_json_path": "examples/folding_fan_ai.json",
+    "notes": "CAL-021: 迷你扇不加weight-value偏26%(6.0 vs 4.75), 加则偏108%(9.9 vs 4.75)。+0.05kg对超轻品过度补偿。建议规则: 净重≤50g时不加+0.05kg, 直接用参数表重量或ai_package_weight_kg。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-022",
+    "date": "2026-07-28",
+    "product_type": "slow_rebound_squishy",
+    "product_cn": "慢回弹麦芽糖解压球",
+    "category_type": "general",
+    "material": "pu_foam",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 100,
+    "1688_display_size_cm": [
+      6,
+      6,
+      6
+    ],
+    "estimated_with_trust_head": 15.0,
+    "estimated_no_trust_head": 11.0,
+    "actual_head_freight_rmb": 13.3,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 19.3,
+    "actual_chargeable_weight_kg": 0.133,
+    "trusted_error_pct": 13,
+    "no_trust_error_pct": -17,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "TRUSTED_WEIGHT_SLIGHT_OVERCOMPENSATE",
+    "root_cause_detail": "参数表100g+50g=150g→15.0元(偏13%), 不加则110g→11.0元(偏-17%)。实际133g(=100g+33g包装), 真实包装增重33g, 不是50g。+0.05kg规则偏高但幅度不大。",
+    "applicable_to": {
+      "product_types": [
+        "slow_rebound_ball",
+        "decompression_toy",
+        "squishy_ball",
+        "foam_stress_ball"
+      ],
+      "materials": [
+        "pu_foam",
+        "slow_rebound_pu",
+        "memory_foam"
+      ],
+      "rules": [
+        "100-150g级别中件,+0.05kg偏约13%可接受",
+        "PU泡沫6cm球体≈100g, 体积小但密度不小",
+        "包装增重约30-35g, 不是50g——介于CAL-021(超轻不加)的极端反例之外"
+      ],
+      "exclude": [
+        "迷你解压球(<50g)",
+        "大型慢回弹抱枕(>500g)",
+        "水球/液体填充(密度不同)"
+      ]
+    },
+    "ai_json_path": "examples/malt_sugar_ball_ai.json",
+    "notes": "CAL-022: 麦芽糖球13.3元, 加+0.05kg后15.0偏13%, 可用。100g级中件+0.05kg误差在15%内。与CAL-021(<50g偏108%)相比,+0.05规则对中件适用(100-200g), 对超轻品超标。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-023",
+    "date": "2026-07-28",
+    "product_type": "apple_smoothie_squishy",
+    "product_cn": "苹果沙冰捏捏乐(椰子油款)",
+    "category_type": "general",
+    "material": "tpr_pu_coconut_oil",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 160,
+    "estimated_head_freight_rmb": 16.8,
+    "actual_head_freight_rmb": 17.1,
+    "actual_chargeable_weight_kg": 0.214,
+    "head_freight_error_pct": 2,
+    "error_direction": "underestimate",
+    "freight_forwarder": "深圳货代",
+    "root_cause": "NORMAL_OPERATIONAL_VARIANCE",
+    "root_cause_detail": "估0.21kg→16.8元, 实际0.214kg→17.1元。差0.3元(2%), 在计费重正常浮动内。160g基重+50g包装=210g vs 实际214g, 仅差4g。",
+    "ai_json_path": "examples/apple_smoothie_squishy_ai.json",
+    "notes": "CAL-023: 苹果沙冰捏捏乐偏差2%。今天最准之一, 160-200g级中件+0.05kg规则表现优秀。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-024",
+    "date": "2026-07-28",
+    "product_type": "cream_tabisocks_5pack",
+    "product_cn": "米白色二趾分趾袜 5双装",
+    "category_type": "general",
+    "material": "cotton_nylon_thin",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 5,
+    "estimated_package_size_cm": [
+      22,
+      12,
+      3
+    ],
+    "estimated_weight_kg": 0.13,
+    "estimated_head_freight_rmb": 13.0,
+    "actual_head_freight_rmb": 11.0,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 17.0,
+    "actual_chargeable_weight_kg": 0.11,
+    "actual_single_pair_g": 22,
+    "head_freight_error_pct": 18,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "WEIGHT_OVERESTIMATED",
+    "root_cause_detail": "估5双130g→13.0元, 实际110g→11.0元。米白色二趾袜单对22g, 与CAL-014冰丝(21g/对)同档薄袜。差了20g是因为多加包材重量。",
+    "applicable_to": {
+      "product_types": [
+        "two_toe_socks_5pack",
+        "tabi_socks_5pack"
+      ],
+      "materials": [
+        "cotton_nylon_thin",
+        "ice_silk"
+      ],
+      "rules": [
+        "薄款分趾袜5双约110g(每双22g), 头程11元",
+        "多件装估重: 总重≈单双×N+少量包装, 不要多加包材"
+      ],
+      "exclude": [
+        "冰丝船袜5双(CAL-014已覆盖)",
+        "加厚款5双",
+        "中筒分趾袜一对(CAL-016)"
+      ]
+    },
+    "ai_json_path": "examples/cream_tabisocks_5pack_ai.json",
+    "notes": "CAL-024: 米白分趾袜5双高估18%(13→11)。同CAL-014冰丝(21g/对), 米白款略重(22g/对)。多件装不要多加包材。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-025",
+    "date": "2026-07-28",
+    "product_type": "garlic_grinder_creative",
+    "product_cn": "创意磨蒜器(13.5×4cm)",
+    "category_type": "general",
+    "material": "abs_plastic_steel",
+    "rigidity": "hard",
+    "requires_shape_retention": false,
+    "estimated_package_size_cm": [
+      15,
+      5,
+      3
+    ],
+    "estimated_weight_kg": 0.08,
+    "estimated_head_freight_rmb": 8.0,
+    "actual_head_freight_rmb": 9.0,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 15.0,
+    "actual_chargeable_weight_kg": 0.09,
+    "head_freight_error_pct": 11,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "NORMAL_OPERATIONAL_VARIANCE",
+    "root_cause_detail": "估0.08kg→8.0元, 实际0.09kg→9.0元。差0.01kg=10g(ABS含不锈钢磨片实际更重)。误差11%在可接受范围, 正常/保守档(8/10)刚好覆盖了实际9元。",
+    "applicable_to": {
+      "product_types": [
+        "garlic_grinder",
+        "mini_grater",
+        "kitchen_mini_tool"
+      ],
+      "materials": [
+        "abs_plastic",
+        "stainless_steel_blade"
+      ],
+      "rules": [
+        "磨蒜器13×4cm规格约80-90g(含ABS+不锈钢磨片+护指套)",
+        "ABS占70g, 不锈钢+硅胶护指占20g",
+        "头程区间8-10元(义乌)"
+      ],
+      "exclude": [
+        "大型刨丝器(>20cm)",
+        "全金属款(>120g)",
+        "多功能切菜器(>300g)"
+      ]
+    },
+    "ai_json_path": "examples/garlic_grinder_ai.json",
+    "notes": "CAL-025: 磨蒜器偏差11%(8→9), 保守10元覆盖了实际。ABS+不锈钢小型厨房工具类约80-100g。头程8-10元区间稳定。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-026",
+    "date": "2026-07-28",
+    "product_type": "thin_wallet_coin_purse",
+    "product_cn": "女超薄小钱包/零钱包",
+    "category_type": "bag",
+    "material": "pu_leather_metal",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 100,
+    "1688_display_size_cm": [
+      14,
+      9,
+      1.5
+    ],
+    "estimated_head_freight_rmb": 12.0,
+    "actual_head_freight_rmb": 12.0,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 18.0,
+    "actual_chargeable_weight_kg": 0.12,
+    "head_freight_error_pct": 0,
+    "error_direction": "conservative_match",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "EXACT_MATCH_VIA_CONSERVATIVE",
+    "root_cause_detail": "保守档 14.0→实际 12.0(偏 16%)。'正常档'12.0 命中实际是巧合——因为正常档预设了 20g 包材余量(净100g+20g=120g)。如果不加 20g 余量, 净100g+10g=110g→11.0 元(偏 9%)。真正的精确命中需要保守档收紧到 13.5 元左右。",
+    "applicable_to": {
+      "product_types": [
+        "thin_wallet",
+        "coin_purse",
+        "card_holder",
+        "compact_wallet"
+      ],
+      "materials": [
+        "pu_leather",
+        "soft_fabric",
+        "nylon_wallet"
+      ],
+      "rules": [
+        "超薄小钱包净100g+包材10-20g=110-120g",
+        "正常档预设的20g包材余量让'正常'接近实际保守值",
+        "保守档+1cm/0.02kg规则对金属拉链+环件偏大(14.0→14.0→偏16%)"
+      ],
+      "exclude": [
+        "大型长款钱包(>20cm)",
+        "硬壳钱夹(>150g)",
+        "真皮厚款(>150g)"
+      ]
+    },
+    "ai_json_path": "examples/thin_wallet_coin_purse_ai.json",
+    "notes": "CAL-026(修正): '正常档'12.0命中实际但内含20g包材余量, 本质是保守档级命中。保守档14.0反而偏高16%。典型的小皮件正常/保守边界模糊问题。",
+    "data_quality_status": "needs_review",
+    "data_quality_issues": [
+      "根因名称EXACT_MATCH_VIA_CONSERVATIVE与说明中正常档/保守档结论不一致"
+    ],
+    "exclude_from_numeric_calibration": true,
+    "evidence_level": "manual_review_required"
+  },
+  {
+    "sample_id": "CAL-027",
+    "date": "2026-07-28",
+    "product_type": "alloy_stone_brooch",
+    "product_cn": "合金镶石胸针(单件, 起步价档)",
+    "category_type": "general",
+    "material": "alloy_glass_stone",
+    "rigidity": "hard",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      10,
+      8,
+      2
+    ],
+    "estimated_weight_kg": 0.03,
+    "estimated_head_freight_rmb": 3.0,
+    "actual_head_freight_rmb": 3.0,
+    "actual_chargeable_weight_kg": 0.03,
+    "head_freight_error_pct": 0,
+    "error_direction": "match",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "MIN_CHARGE_EXACT",
+    "root_cause_detail": "估0.03kg→3.0元, 实际0.03kg→3.0元, 精确命中。这是min_head_charge=3.0规则触发的命中: 任何≤30g单品一律3元。金属+石头胸针比树脂胸针重, 但起步价仍锁死3元。",
+    "applicable_to": {
+      "product_types": [
+        "alloy_brooch",
+        "metal_brooch",
+        "stone_brooch",
+        "pin_badge",
+        "small_jewelry"
+      ],
+      "materials": [
+        "alloy",
+        "zinc_alloy",
+        "glass_stone",
+        "enamel"
+      ],
+      "rules": [
+        "单件金属/合金胸针25-30g+包材=30g, 起步价3元",
+        "金属/石头胸针比树脂/塑料胸针重, 但仍是起步价档",
+        "≤30g的单品头程锁定3元"
+      ],
+      "exclude": [
+        "塑料胸针",
+        "树脂胸针",
+        "胸针对装(>30g)",
+        "多件装"
+      ]
+    },
+    "ai_json_path": "examples/alloy_stone_brooch_ai.json",
+    "notes": "CAL-027: 合金镶石胸针单件精确命中0%。min_head_charge=3.0规则(CAL-020)对金属饰品也生效。单件金属胸针虽然重量有差异, 但都撞起步价=3元, 误差为0。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-028",
+    "date": "2026-07-28",
+    "product_type": "five_toe_socks_pair",
+    "product_cn": "粉色五趾袜(瑜伽袜)一对",
+    "category_type": "general",
+    "material": "cotton_spandex",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_weight_kg": 0.055,
+    "estimated_head_freight_rmb": 6.0,
+    "actual_head_freight_rmb": 5.0,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 11.0,
+    "actual_chargeable_weight_kg": 0.05,
+    "actual_single_pair_g": 50,
+    "head_freight_error_pct": 20,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "WEIGHT_OVERESTIMATED",
+    "root_cause_detail": "估0.055kg→6.0元, 实际0.05kg→5.0元。一对五趾袜约50g, 比二趾袜(CAL-016的38-55g)略重, 但比标准棉袜(CAL-015的80g)轻很多。多趾袜是薄款但比单/双趾袜稍重(更多面料)。",
+    "applicable_to": {
+      "product_types": [
+        "five_toe_socks",
+        "yoga_socks",
+        "athletic_toe_socks"
+      ],
+      "materials": [
+        "cotton_spandex",
+        "mesh_top_cotton"
+      ],
+      "rules": [
+        "五趾袜一对约50g, 介于二趾袜(38-55g)和标准棉袜(80g)之间",
+        "五趾比二趾略重(每多一个趾头需要更多面料)",
+        "袜类多趾结构重量排序: 二趾<五趾<普通袜"
+      ],
+      "exclude": [
+        "加厚毛圈五趾袜(>80g)",
+        "5双装(参见CAL-024)",
+        "过膝长款五趾袜(>100g)"
+      ]
+    },
+    "ai_json_path": "examples/five_toe_socks_ai.json",
+    "notes": "CAL-028: 五趾袜一对高估20%(6.0→5.0)。袜类多趾结构: 二趾<五趾<普通。50g级别头程5-6元稳定区间。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-029",
+    "date": "2026-07-28",
+    "product_type": "coach_style_bag",
+    "product_cn": "COACH风格女包 (26×8×14cm 商家参数)",
+    "category_type": "bag",
+    "material": "pu_leather",
+    "rigidity": "semi_rigid",
+    "requires_shape_retention": true,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 600,
+    "1688_display_size_cm": [
+      26,
+      8,
+      14
+    ],
+    "1688_display_volume_cm3": 2912,
+    "actual_head_freight_rmb": 43.0,
+    "actual_service_fee_rmb": null,
+    "actual_total_rmb": null,
+    "chargeable_weight_yw_kg": 0.43,
+    "chargeable_weight_sz_kg": 0.5375,
+    "merchant_weight_deviation_yw_pct": 28,
+    "merchant_weight_deviation_sz_pct": 10,
+    "head_freight_error_pct": null,
+    "error_direction": "ambiguous_freight_forwarder",
+    "freight_forwarder": "深圳或义乌(不确定)",
+    "root_cause": "MERCHANT_DATA_SUSPECT",
+    "root_cause_detail": "实际43元。义乌: 0.43kg→商家600g偏28%, 体积上限3440cm³(>2912cm³合理)。深圳: 0.538kg→商家600g偏10%, 体积上限4300cm³(>2912cm³也合理)。深圳在重量上更匹配(10%偏差), 义乌在体积上更紧凑。用户怀疑商家尺寸/重量有误或出货去原盒。COACH包这类大包可能用纸盒出货→深圳对得上。后续需要用户确认发货方式才能确定。",
+    "applicable_to": {
+      "product_types": [
+        "coach_bag",
+        "brand_style_bag",
+        "large_pu_bag",
+        "shoulder_bag"
+      ],
+      "materials": [
+        "pu_leather",
+        "synthetic_leather"
+      ],
+      "rules": [
+        "商家数据可能虚标(吉利数600)或含原厂包装(出货去掉)",
+        "大包类考虑深圳 vs 义乌双选项, 根据包装方式择一",
+        "不能默认用义乌, 大包更可能是深圳"
+      ],
+      "exclude": [
+        "小包(<20cm)",
+        "超薄款"
+      ]
+    },
+    "ai_json_path": null,
+    "notes": "CAL-029: COACH包实际43元, 义乌/深圳均可能。深圳重10%偏差更可信(538g vs 600g), 义乌28%偏差太大。建议: 大包/硬体类优先考虑深圳, 轻量小件默认义乌。后续需要确认出货包装方式。",
+    "data_quality_status": "needs_review",
+    "data_quality_issues": [
+      "货代不确定(深圳或义乌)"
+    ],
+    "exclude_from_numeric_calibration": true,
+    "evidence_level": "forwarder_uncertain"
+  },
+  {
+    "sample_id": "CAL-030",
+    "date": "2026-07-28",
+    "product_type": "shell_evening_clutch",
+    "product_cn": "贝壳晚宴包/金属斜挎包",
+    "category_type": "bag",
+    "material": "metal_pearl_chain",
+    "rigidity": "hard",
+    "requires_shape_retention": true,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 130,
+    "1688_display_size_cm": [
+      9,
+      8,
+      4
+    ],
+    "estimated_with_trust_head": 18.0,
+    "actual_head_freight_rmb": 16.0,
+    "actual_service_fee_rmb": 6.0,
+    "actual_total_rmb": 22.0,
+    "actual_chargeable_weight_kg": 0.16,
+    "freight_forwarder": "义乌货代",
+    "head_freight_error_pct": 12.5,
+    "error_direction": "overestimate",
+    "root_cause": "TRUSTED_WEIGHT_OVERCOMPENSATE",
+    "root_cause_detail": "估130g+0.05kg=180g→18.0元, 实际160g→16.0元。130g金属包+30g纸盒+气泡=160g, 实际包装只多30g(不是+50g)。+0.05kg对100-150g金属/硬质品类偏13-15%。贝壳包和CAL-022的麦芽糖球同档中件表现。",
+    "applicable_to": {
+      "product_types": [
+        "shell_clutch",
+        "metal_evening_bag",
+        "small_hardcase_bag"
+      ],
+      "materials": [
+        "metal",
+        "alloy",
+        "hardcase_pu"
+      ],
+      "rules": [
+        "金属小包100-150g+纸盒30g=130-180g, 头程13-18元",
+        "110cm珍珠链条包含在包材内, 不再单加重量",
+        "体积小(288cm³)但金属密度高, 实重主导"
+      ],
+      "exclude": [
+        "布包/绒包(轻)",
+        "大型晚宴包(>500g)",
+        "软包"
+      ]
+    },
+    "ai_json_path": "examples/shell_evening_clutch_ai.json",
+    "notes": "CAL-030: 贝壳晚宴包130g金属, 头程16元(义乌)。+0.05kg规则对中件硬质品偏13%, 与CAL-022/CAL-026同档。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-031",
+    "date": "2026-07-28",
+    "product_type": "gym_workout_gloves_pair",
+    "product_cn": "运动健身手套(护腕一体)一对",
+    "category_type": "general",
+    "material": "microfiber_nylon_plastic",
+    "rigidity": "semi_rigid",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      22,
+      12,
+      3
+    ],
+    "estimated_weight_kg": 0.12,
+    "estimated_head_freight_rmb": 12.0,
+    "actual_head_freight_rmb": 12.0,
+    "actual_chargeable_weight_kg": 0.12,
+    "head_freight_error_pct": 0,
+    "error_direction": "match",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "EXACT_MATCH_NO_TRUST_BOOST",
+    "root_cause_detail": "估0.12kg→12.0元, 实际0.12kg→12.0元, 正常档精准命中。ai_package_weight_kg=0.12直接命中(没有用+0.05kg修正)。健身手套100g+20gOPP袋=120g恰好是实际值。",
+    "applicable_to": {
+      "product_types": [
+        "gym_gloves",
+        "workout_gloves",
+        "weight_lifting_gloves"
+      ],
+      "materials": [
+        "microfiber",
+        "nylon_mesh",
+        "pu_leather"
+      ],
+      "rules": [
+        "健身手套一对100g+OPP袋20g=120g, 头程12元(义乌)",
+        "护腕支撑板是内部结构, 不额外加包材",
+        "手套折叠后体积小(792cm³), 实重主导计费"
+      ],
+      "exclude": [
+        "加厚款(>150g/对)",
+        "长款护臂(>30cm)",
+        "皮面手套(>200g)"
+      ]
+    },
+    "ai_json_path": "examples/gym_workout_gloves_ai.json",
+    "notes": "CAL-031: 健身手套精确命中0%。120g直接估到实际, 不加+0.05kg修正。手套+OPP袋组合估准: 100g本体+20g袋=120g。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-032",
+    "date": "2026-07-28",
+    "product_type": "gothic_lace_arm_gloves_pair",
+    "product_cn": "哥特蕾丝绑带长款手套一对",
+    "category_type": "general",
+    "material": "lace_ribbon",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      22,
+      14,
+      3
+    ],
+    "estimated_volume_cm3": 924,
+    "estimated_weight_kg": 0.07,
+    "estimated_chargeable_vol_kg": 0.1155,
+    "estimated_head_freight_rmb": 11.55,
+    "actual_head_freight_rmb": 9.0,
+    "actual_chargeable_weight_kg": 0.09,
+    "head_freight_error_pct": 28,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "PACKAGE_VOLUME_OVERESTIMATED",
+    "root_cause_detail": "估22×14×3=924cm³→0.1155kg, 实际~18×10×2=360cm³→0.045kg（实重0.07主导, 计费0.09kg）。蕾丝软布对折后体积可以压到只有我们估的 39%, 实际包装紧得多。",
+    "applicable_to": {
+      "product_types": [
+        "lace_gloves",
+        "fabric_arm_sleeves",
+        "ribbon_tie_accessories",
+        "cosplay_accessories"
+      ],
+      "materials": [
+        "lace",
+        "ribbon",
+        "tulle",
+        "mesh_fabric"
+      ],
+      "rules": [
+        "蕾丝/网眼布类对折后体积估可压 50-60%",
+        "长手套对折+圈起: 预估 18×10×2=360cm³",
+        "蕾丝面料超轻 30-50g/只, 一对 60-100g"
+      ],
+      "exclude": [
+        "硬质手套(>200g)",
+        "带金属件手套(会撑大包装)",
+        "加厚毛皮手套"
+      ]
+    },
+    "ai_json_path": "examples/gothic_lace_arm_gloves_ai.json",
+    "notes": "CAL-032: 蕾丝手套高估28%(11.55→9.0)。蕾丝超软对折后体积大幅缩小(924→360cm³), 类似CAL-010便帽的压缩现象。软蕾丝/网眼类计费由实重主导。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-033",
+    "date": "2026-07-28",
+    "product_type": "brass_maneki_neko",
+    "product_cn": "黄铜招财猫小摆件",
+    "category_type": "general",
+    "material": "brass",
+    "rigidity": "hard",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 50,
+    "estimated_ai_package_weight_kg": 0.06,
+    "estimated_with_trust_head": 10.0,
+    "estimated_no_trust_head": 6.0,
+    "actual_head_freight_rmb": 6.0,
+    "actual_chargeable_weight_kg": 0.06,
+    "trusted_error_pct": 67,
+    "no_trust_error_pct": 0,
+    "error_direction": "match",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "TRUSTED_WEIGHT_OVERCOMPENSATE",
+    "root_cause_detail": "ai_package_weight_kg=0.06 直接命中(0%), +0.05kg修正后10.0元高估67%。50g黄铜小件+10gOPP=60g, 不需要+50g修正。与CAL-021(迷你扇49g偏108%)同一模式: ≤50g超轻品不加修正。",
+    "applicable_to": {
+      "product_types": [
+        "brass_ornament",
+        "small_metal_figurine",
+        "desk_mini_ornament"
+      ],
+      "materials": [
+        "brass",
+        "metal",
+        "alloy_small"
+      ],
+      "rules": [
+        "50g黄铜小件+OPP袋=60g, 头程6元",
+        "ai_package_weight_kg 直接=实际, 不加+0.05g修正",
+        "≤50g超轻金属件计费=起步价至6元区间"
+      ],
+      "exclude": [
+        "大型铜器(>200g)",
+        "铜制品套装(多件)",
+        "非金属摆件(树脂/陶瓷)"
+      ]
+    },
+    "ai_json_path": "examples/brass_maneki_neko_ai.json",
+    "notes": "CAL-033: 黄铜招财猫不加修正命中0%(6.0→6.0)。≤50g金属件+OPP袋直接用 package_weight, 不加+0.05kg。与CAL-021(迷你扇)/CAL-031(健身手套)同模式: 此重量段不加修正更准。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-034",
+    "date": "2026-07-28",
+    "product_type": "snowflake_hair_clip",
+    "product_cn": "儿童冰雪奇缘艾莎发夹发箍",
+    "category_type": "general",
+    "material": "alloy_rhinestone_synthetic_hair",
+    "rigidity": "semi_rigid",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      15,
+      8,
+      2
+    ],
+    "estimated_weight_kg": 0.03,
+    "estimated_head_freight_rmb": 3.0,
+    "actual_head_freight_rmb": 3.0,
+    "actual_chargeable_weight_kg": 0.03,
+    "head_freight_error_pct": 0,
+    "error_direction": "match",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "MIN_CHARGE_EXACT",
+    "root_cause_detail": "估0.03kg→3.0元, 实际0.03kg→3.0元, 起步价3元精确命中。儿童饰品发夹类重量小, 卡起步价下限。",
+    "applicable_to": {
+      "product_types": [
+        "kids_hair_clip",
+        "frozen_elsa_clip",
+        "crown_hair_clip",
+        "princess_hair_accessory"
+      ],
+      "materials": [
+        "alloy",
+        "plastic",
+        "rhinestone",
+        "synthetic_hair"
+      ],
+      "rules": [
+        "儿童发夹单只≤30g+5gOPP=30-35g, 起步价3元",
+        "≤30g 起步价锁定3元, 30-40g 也可能撞3元起步价",
+        "儿童饰品以数量低门槛+单只小巧为卖点, 物流起步价档"
+      ],
+      "exclude": [
+        "大型发箍(>50g)",
+        "金属粗框发箍(>60g)",
+        "发夹套装(多件)"
+      ]
+    },
+    "ai_json_path": "examples/snowflake_hair_clip_ai.json",
+    "notes": "CAL-034: 儿童艾莎发夹起步价3元精确命中。≤30g儿童饰品起步价档, 与CAL-018/020/027同档。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-035",
+    "date": "2026-07-28",
+    "product_type": "smart_temp_stainless_coffee_cup",
+    "product_cn": "智能显温304不锈钢咖啡杯 380ML",
+    "category_type": "general",
+    "material": "stainless_steel_304",
+    "rigidity": "hard",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 450,
+    "1688_display_size_cm": [
+      9,
+      7,
+      14.5
+    ],
+    "estimated_with_trust_head": 40.0,
+    "actual_head_freight_rmb": 23.0,
+    "actual_chargeable_weight_kg": 0.23,
+    "actual_real_weight_g": 230,
+    "head_freight_error_pct": 74,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "MERCHANT_DATA_SUSPECT_DOUBLE",
+    "root_cause_detail": "商家450g, 实际23元反推仅230g(义乌)。商家重量虚标50%, 可能: (1)参数表含原厂礼盒/外箱, 出货去原盒, (2)真空不锈钢杯比标注重。230g已包含~10gOPP/气泡, 杯净重约220g。不锈钢杯本体重量不应有误——更可能是出货去原盒。",
+    "applicable_to": {
+      "product_types": [
+        "stainless_steel_cup",
+        "vacuum_cup",
+        "thermos_cup",
+        "smart_temp_cup"
+      ],
+      "materials": [
+        "stainless_steel_304",
+        "stainless_steel_316"
+      ],
+      "rules": [
+        "不锈钢杯净重比商家标注轻50%(含原盒)",
+        "双层真空不锈钢杯净200-250g/只, OPP袋10g",
+        "商家标450g 实发230g: 原厂礼盒200g+杯子250g",
+        "真空杯纸盒保护足, OPP袋可能不安全, 需加气泡"
+      ],
+      "exclude": [
+        "塑料杯",
+        "陶瓷杯",
+        "马克杯",
+        "保温壶(>500g)"
+      ]
+    },
+    "ai_json_path": "examples/smart_temp_coffee_cup_ai.json",
+    "notes": "CAL-035: 不锈钢咖啡杯高估74%(40→23)。商家虚标450g, 实际230g。怀疑商家参数含原厂礼盒。建议: 1688重量=原盒, 出货去原盒可省50%运费, 但真空杯需要气泡袋保护。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-036",
+    "date": "2026-07-28",
+    "product_type": "mlp_purple_curly_wig",
+    "product_cn": "小马宝莉紫色长款波浪cos假发",
+    "category_type": "general",
+    "material": "synthetic_fiber",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 300,
+    "1688_display_size_cm": [
+      30,
+      20,
+      2
+    ],
+    "1688_display_volume_cm3": 1200,
+    "estimated_head_freight_rmb": 28.16,
+    "actual_head_freight_rmb": 29.0,
+    "actual_chargeable_weight_kg": 0.29,
+    "actual_real_weight_g": 290,
+    "head_freight_error_pct": 3,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "MERCHANT_DATA_ACCURATE",
+    "root_cause_detail": "估0.2816kg(深圳)≈29.0元(实际), 商家300g与实际290g仅差3%——化纤假发没有原盒虚标。假发类是参数表数据最可靠的品类之一。",
+    "applicable_to": {
+      "product_types": [
+        "cosplay_wig",
+        "synthetic_wig",
+        "anime_wig"
+      ],
+      "materials": [
+        "synthetic_fiber",
+        "kanekalon",
+        "high_temperature fiber"
+      ],
+      "rules": [
+        "化纤假发30-70cm长款约250-350g, 商家数据通常准(无原盒虚标)",
+        "假发折叠后~30×20×2cm, 体积1200cm³",
+        "实际发货重量≈商家标注重量, 偏差<5%"
+      ],
+      "exclude": [
+        "真人发假发(更重)",
+        "带帽子的假发套装",
+        "假发+饰品套装"
+      ]
+    },
+    "ai_json_path": "examples/mlp_purple_curly_wig_ai.json",
+    "notes": "CAL-036: MLP紫色假发低估3%(28.16→29.0)。商家300g准(偏差<5%)。化纤假发是参数表最可信的品类, 不存在原厂礼盒虚标。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-037",
+    "date": "2026-07-28",
+    "product_type": "bikini_swimsuit_set",
+    "product_cn": "跨境女款比基尼泳衣套装(2件套)",
+    "category_type": "general",
+    "material": "nylon_spandex",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      20,
+      14,
+      2
+    ],
+    "estimated_weight_kg": 0.1,
+    "estimated_head_freight_rmb": 10.0,
+    "conservative_head_freight_rmb": 12.0,
+    "actual_head_freight_rmb": 12.0,
+    "actual_chargeable_weight_kg": 0.12,
+    "actual_real_weight_g": 120,
+    "head_freight_error_pct": 17,
+    "error_direction": "conservative_match",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "PACKAGE_WEIGHT_SLIGHT_UNDER",
+    "root_cause_detail": "正常档估80g+20g包材=100g→10元, 保守档120g→12元精确命中。两件套泳衣实际净重~95g(含胸垫/挂绳/标签), 比单件估的80g多15-20g。保守档+1cm预估重量修正足够覆盖两件套多面料。",
+    "applicable_to": {
+      "product_types": [
+        "bikini_set",
+        "swimsuit_two_piece",
+        "lingerie_set"
+      ],
+      "materials": [
+        "nylon_spandex",
+        "polyester_spandex"
+      ],
+      "rules": [
+        "比基尼两件套净重 90-100g, 含包材 110-130g, 头程11-13元",
+        "胸垫+挂绳+标签比单件泳装多 15-20g",
+        "弹力面料可折叠极紧"
+      ],
+      "exclude": [
+        "连体泳衣(单件)",
+        "沙滩裙套装(含配件)",
+        "泳镜套装"
+      ]
+    },
+    "ai_json_path": "examples/bikini_swimsuit_set_ai.json",
+    "notes": "CAL-037: 比基尼两件套低估17%, 保守档精确命中。两件套比单件重15-20g(胸垫+挂绳)。泳衣类是校准的新品类, 净重估80g偏低, 实际~95g。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-038",
+    "date": "2026-07-28",
+    "product_type": "mini_strawberry_backpack",
+    "product_cn": "迷你草莓耳机包/挂件小包",
+    "category_type": "bag",
+    "material": "polyester_canvas",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 36,
+    "1688_display_size_cm": [
+      12,
+      9,
+      4
+    ],
+    "estimated_no_trust_head": 4.0,
+    "estimated_with_trust_head": 8.6,
+    "actual_head_freight_rmb": 4.0,
+    "actual_chargeable_weight_kg": 0.04,
+    "no_trust_error_pct": 0,
+    "with_trust_error_pct": 115,
+    "error_direction": "match",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "TRUSTED_WEIGHT_OVERCOMPENSATE",
+    "root_cause_detail": "估36g+0.05kg=86g→8.6元高估115%, 不加修正0.04kg→4.0元精确命中0%。迷你挂件零钱包净重仅36g(涤纶超轻), 加4gOPP=40g。≤50g超轻量+小尺寸双低, +0.05kg修正严重偏高。这是第4个≤50g超轻品案例确认(CAL-021/031/033/038)。",
+    "applicable_to": {
+      "product_types": [
+        "mini_earphone_bag",
+        "phone_pouch_bag",
+        "tpu_pouch",
+        "mini_coin_bag"
+      ],
+      "materials": [
+        "polyester_canvas",
+        "nylon_canvas",
+        "pu_soft"
+      ],
+      "rules": [
+        "迷你挂件包单只30-40g, OPP袋10g以下, 头程起步价3-4元",
+        "涤纶/帆布软包比硬壳包轻50-70%",
+        "≤50g挂件包直接用package_weight, 不加修正"
+      ],
+      "exclude": [
+        "帆布大书包(>200g)",
+        "真皮包(>200g)",
+        "PU硬壳包(>80g)"
+      ]
+    },
+    "ai_json_path": "examples/mini_strawberry_backpack_ai.json",
+    "notes": "CAL-038: 迷你挂件包高估115%(8.6→4.0)。涤纶软包36g净重是迄今最轻的包类。小挂件包净重估算要≤50g, 不加+0.05kg修正更准。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-039",
+    "date": "2026-07-28",
+    "product_type": "pet_car_safety_belt",
+    "product_cn": "宠物汽车安全带(弹力编织带+金属挂钩)",
+    "category_type": "general",
+    "material": "nylon_metal_hook",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      15,
+      8,
+      4
+    ],
+    "estimated_weight_kg": 0.11,
+    "estimated_head_freight_rmb": 11.0,
+    "conservative_head_freight_rmb": 13.0,
+    "actual_head_freight_rmb": 13.0,
+    "actual_chargeable_weight_kg": 0.13,
+    "head_freight_error_pct": 15,
+    "error_direction": "conservative_match",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "METAL_PARTS_WEIGHT_UNDER",
+    "root_cause_detail": "正常估100g编织带+10g包装=110g→11元。实际含金属挂钩(铝合金扣+弹簧钩)重130g。金属扣件比预估多15-20g。保守档13.0元精确命中。",
+    "applicable_to": {
+      "product_types": [
+        "pet_safety_belt",
+        "dog_car_belt",
+        "elastic_pet_lead",
+        "nylon_spring_hook"
+      ],
+      "materials": [
+        "nylon_braid",
+        "elastic",
+        "aluminum_hook",
+        "metal_spring"
+      ],
+      "rules": [
+        "编织带100g+金属挂钩20g=120g 含包装130g",
+        "金属扣件含钩+弹簧重量不可忽略(10-20g)",
+        "长条可卷紧, 体积40-80cm³, 体积重不主导"
+      ],
+      "exclude": [
+        "纯尼龙带(无金属件)",
+        "大号狗狗牵引绳(>200g)",
+        "宠物安全带套装(多件)"
+      ]
+    },
+    "ai_json_path": "examples/pet_car_safety_belt_ai.json",
+    "notes": "CAL-039: 宠物安全带低估15%, 保守档命中13.0元。金属挂钩重量不可忽略(20g), 之前估100g偏轻。编织带+金属件组合: 总重=带重+挂钩重+包装。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-040",
+    "date": "2026-07-28",
+    "product_type": "satin_sleep_cap",
+    "product_cn": "双层仿真丝护发睡帽",
+    "category_type": "general",
+    "material": "satin_silk_like",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      14,
+      14,
+      2
+    ],
+    "estimated_weight_kg": 0.05,
+    "estimated_head_freight_rmb": 5.0,
+    "actual_head_freight_rmb": 6.0,
+    "actual_chargeable_weight_kg": 0.06,
+    "head_freight_error_pct": 17,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "NORMAL_OPERATIONAL_VARIANCE",
+    "root_cause_detail": "估50g→5元, 实际60g→6元, 低估10g(17%)。双层缎面+松紧带比40g预估略厚——仿真丝不是真丝, 密度可能更高。偏差在可接受范围(CAL-015中筒棉袜同档6.4%)。",
+    "applicable_to": {
+      "product_types": [
+        "sleep_cap",
+        "satin_bonnet",
+        "hair_protection_cap"
+      ],
+      "materials": [
+        "satin",
+        "silk_like",
+        "polyester_satin"
+      ],
+      "rules": [
+        "仿真丝睡帽50-60g(双层+松紧带), 真丝款30-40g(单层)",
+        "仿真丝比真丝更重(涤纶密度高)",
+        "28×28cm对折后14×14封装"
+      ],
+      "exclude": [
+        "真丝款(更轻)",
+        "加厚浴帽(防水涂层)",
+        "超大号睡帽(>35cm)"
+      ]
+    },
+    "ai_json_path": "examples/satin_sleep_cap_ai.json",
+    "notes": "CAL-040: 双层仿真丝睡帽低估17%(5→6)。缎面实际比估重10g, 仿真丝(涤纶)比真丝密度高。头程6元是缎面小件的基准。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-041",
+    "date": "2026-07-28",
+    "product_type": "pu_flower_bag_charm",
+    "product_cn": "PU皮质金桂花朵包挂件",
+    "category_type": "general",
+    "material": "pu_leather_plastic_leaf",
+    "rigidity": "semi_rigid",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 15,
+    "1688_display_size_cm": [
+      27
+    ],
+    "estimated_no_trust_head": 3.0,
+    "estimated_with_trust_head": 6.5,
+    "actual_head_freight_rmb": 3.0,
+    "actual_chargeable_weight_kg": 0.03,
+    "no_trust_error_pct": 0,
+    "with_trust_error_pct": 117,
+    "error_direction": "match",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "TRUSTED_WEIGHT_OVERCOMPENSATE",
+    "root_cause_detail": "估15g+0.05kg=65g→6.5元, 实际30g→3.0元(起步价)。不加修正直接用25g→3元, 精确命中。PU挂件15g净重是迄今最轻的饰品, 塑料叶+金属挂钩合计≤20g。第5个≤50g案例确认不加修正。",
+    "applicable_to": {
+      "product_types": [
+        "bag_charm",
+        "pu_flower_charm",
+        "tassel_charm",
+        "light_pendant"
+      ],
+      "materials": [
+        "pu_leather",
+        "plastic",
+        "resin"
+      ],
+      "rules": [
+        "15g超轻挂件+OPP袋=25-30g, 起步价3元",
+        "≤50g一律不加+0.05kg修正(5件确认)",
+        "27cm长挂件卷起来包装不占太多体积"
+      ],
+      "exclude": [
+        "金属挂件(>30g)",
+        "多件套装(>50g)",
+        "大型挂毯(>100g)"
+      ]
+    },
+    "ai_json_path": "examples/pu_flower_bag_charm_ai.json",
+    "notes": "CAL-041: PU花朵挂件高估117%, 不加修正命中0%。15g超轻品起步价3元。≤50g不加+0.05kg规则已5件确认(CAL-021/031/033/038/041)。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-042",
+    "date": "2026-07-28",
+    "product_type": "kazoo_metal_instrument",
+    "product_cn": "金属卡祖笛(含5张笛膜)",
+    "category_type": "general",
+    "material": "metal_plastic_membrane",
+    "rigidity": "hard",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      14,
+      5,
+      5
+    ],
+    "estimated_weight_kg": 0.05,
+    "estimated_head_freight_rmb": 5.0,
+    "conservative_head_freight_rmb": 6.75,
+    "actual_head_freight_rmb": 7.0,
+    "actual_chargeable_weight_kg": 0.07,
+    "head_freight_error_pct": 28,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "PACKAGE_WEIGHT_UNDERESTIMATED",
+    "root_cause_detail": "估50g→5元, 实际70g→7元。纸盒比预估重20g——卡祖笛70g(含纸盒) vs 预估50g(OPP袋)。乐器类出货倾向用纸盒保护(防碰撞), 纸盒重量不可忽视。",
+    "applicable_to": {
+      "product_types": [
+        "kazoo",
+        "small_musical_instrument",
+        "flute_ocarina",
+        "harmonica"
+      ],
+      "materials": [
+        "metal",
+        "plastic",
+        "wood"
+      ],
+      "rules": [
+        "金属乐器用纸盒出货: 总重=乐器40g+纸盒30g=70g",
+        "乐器类出货考究, 含纸盒重量20-30g(类似CAL-035不锈钢杯)",
+        "小型乐器头程约7-10元"
+      ],
+      "exclude": [
+        "大型乐器(>50cm)",
+        "软哨/口哨(<10g)",
+        "电子乐器(电池)"
+      ]
+    },
+    "ai_json_path": "examples/kazoo_metal_instrument_ai.json",
+    "notes": "CAL-042: 卡祖笛低估28%(5→7)。纸盒出货多25g, OPP袋不够保护。乐器类比轻量品更需要纸盒包装, 重量低估在中件范围内。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-043",
+    "date": "2026-07-28",
+    "product_type": "silicone_bear_ice_mold",
+    "product_cn": "硅胶小熊冰格模具(4格)",
+    "category_type": "general",
+    "material": "food_grade_silicone",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      16,
+      11,
+      3
+    ],
+    "estimated_weight_kg": 0.07,
+    "estimated_head_freight_rmb": 7.0,
+    "actual_head_freight_rmb": 6.0,
+    "actual_chargeable_weight_kg": 0.06,
+    "head_freight_error_pct": 17,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "WEIGHT_OVERESTIMATED",
+    "root_cause_detail": "估70g→7元, 实际60g→6元。硅胶冰格50g+OPP=60g, 比我估的70g轻10g。硅胶材质密度低(约1.1g/cm³, 不到一半), 16×11×3=528cm³的冰格实际只重~50g。",
+    "applicable_to": {
+      "product_types": [
+        "ice_mold",
+        "silicone_mold",
+        "cake_mold",
+        "chocolate_mold"
+      ],
+      "materials": [
+        "food_grade_silicone",
+        "silicone_rubber"
+      ],
+      "rules": [
+        "硅胶模具密度低(1.0-1.1g/cm³), 16×11×3cm冰格约50g",
+        "硅胶冰格头程6元起步价内",
+        "硅胶模具装OPP袋10g+即可"
+      ],
+      "exclude": [
+        "金属模具",
+        "塑料模具(密度高)",
+        "硅胶大冰桶(>200g)"
+      ]
+    },
+    "ai_json_path": "examples/silicone_bear_ice_mold_ai.json",
+    "notes": "CAL-043: 硅胶冰格高估17%(7→6)。硅胶密度1.1g/cm³, 大体积但轻。硅胶冰格/模具类约50g/单, 头程6元基准。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-044",
+    "date": "2026-07-28",
+    "product_type": "long_wallet_phone_combo",
+    "product_cn": "长款女士钱包(可装手机)",
+    "category_type": "bag",
+    "material": "pu_leather",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 123,
+    "1688_display_size_cm": [
+      19,
+      10,
+      2
+    ],
+    "estimated_head_freight_rmb": 17.3,
+    "actual_head_freight_rmb": 19.0,
+    "actual_chargeable_weight_kg": 0.19,
+    "head_freight_error_pct": 9,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "NORMAL_OPERATIONAL_VARIANCE",
+    "root_cause_detail": "估173g→17.3元, 实际190g→19.0元, 差17g(9%)。长款钱包比短款重23g, 纸板/硬卡+拉链夹层比预估多。批量出货时可能含纸卡内衬, 多15-20g。",
+    "applicable_to": {
+      "product_types": [
+        "long_wallet",
+        "phone_wallet_combo",
+        "zip_wallet"
+      ],
+      "materials": [
+        "pu_leather",
+        "synthetic_leather"
+      ],
+      "rules": [
+        "长款钱包123g+纸卡50g=173g(+纸板内衬15-20g)=190g",
+        "钱包类比轻量品重, +0.05kg修正可用",
+        "出纸板包装比OPP袋多20-25g"
+      ],
+      "exclude": [
+        "短款小钱包(CAL-026)",
+        "卡包系列",
+        "无拉链款"
+      ]
+    },
+    "ai_json_path": "examples/long_wallet_phone_combo_ai.json",
+    "notes": "CAL-044: 长款钱包低估9%(17.3→19)。123g+0.05kg修正+纸板内衬≈190g。中件(120-200g)+0.05kg规则可用, 偏差<10%。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-045",
+    "date": "2026-07-28",
+    "product_type": "pu_small_chain_shoulder_bag",
+    "product_cn": "PU皮质轻潮链条斜挎小方包",
+    "category_type": "bag",
+    "material": "pu_leather_metal_chain",
+    "rigidity": "semi_rigid",
+    "requires_shape_retention": true,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 410,
+    "1688_display_size_cm": [
+      21,
+      8,
+      13
+    ],
+    "estimated_volume_cm3": 3960,
+    "estimated_head_freight_rmb": 39.6,
+    "actual_head_freight_rmb": 39.0,
+    "actual_chargeable_weight_kg": 0.4875,
+    "head_freight_error_pct": 1.5,
+    "error_direction": "overestimate",
+    "freight_forwarder": "深圳货代",
+    "root_cause": "NORMAL_OPERATIONAL_VARIANCE",
+    "root_cause_detail": "估0.495kg→39.6元, 实际0.4875kg→39.0元, 差0.6元(1.5%)。24×11×15=3960cm³体积重估算极准，纸盒+气泡保护未超标。中等包类+硬质纸盒出货, 体积主导。",
+    "applicable_to": {
+      "product_types": [
+        "chain_shoulder_bag",
+        "pu_small_bag",
+        "zipper_crossbody"
+      ],
+      "materials": [
+        "pu_leather",
+        "metal_chain",
+        "synthetic_leather"
+      ],
+      "rules": [
+        "410g中等包+纸盒+气泡: 体积重24×11×15=3960cm³, 计费~0.5kg",
+        "硬质包210-230cm³/100g级",
+        "中等包深圳货代(>0.2kg)"
+      ],
+      "exclude": [
+        "超软包(OPP袋装)",
+        "超小型(100-200g)",
+        "硬壳箱包"
+      ]
+    },
+    "ai_json_path": "examples/pu_small_chain_shoulder_bag_ai.json",
+    "notes": "CAL-045: PU小方包偏差1.5%(39.6→39)。今天最准的包类正算。24×11×15=3960cm³=0.495kg体积重估算极准，深圳货代确认。",
+    "data_quality_issues": [
+      "CAL-045: error_direction=underestimate but estimated(39.6)>actual(39.0), should be overestimate",
+      "error_direction更正: underestimate->overestimate (estimated 39.6 > actual 39.0, 偏高0.6元)"
+    ],
+    "data_quality_status": "ok",
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-046",
+    "date": "2026-07-28",
+    "product_type": "car_seatbelt_extender_pair",
+    "product_cn": "汽车安全带锁扣延长扣一对(2只)",
+    "category_type": "general",
+    "material": "abs_plastic_metal_buckle",
+    "rigidity": "hard",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 2,
+    "estimated_package_size_cm": [
+      15,
+      8,
+      5
+    ],
+    "estimated_weight_kg": 0.14,
+    "estimated_head_freight_rmb": 14.0,
+    "actual_head_freight_rmb": 18.0,
+    "actual_chargeable_weight_kg": 0.18,
+    "head_freight_error_pct": 22,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "WEIGHT_UNDERESTIMATED",
+    "root_cause_detail": "估140g→14元, 实际180g→18元。ABS塑料+金属卡扣一对约130-140g(单只65-70g, 含金属锁扣占15-20g), 加塑料盒/OPP共180g。塑料锁扣件密度比想象高(ABS+金属≈1.4g/cm³)。",
+    "applicable_to": {
+      "product_types": [
+        "car_seatbelt_extender",
+        "car_buckle",
+        "safety_adjuster"
+      ],
+      "materials": [
+        "abs_plastic",
+        "metal_buckle"
+      ],
+      "rules": [
+        "ABS+金属锁扣一对130-140g(单只65-70g), 头程18元附近",
+        "金属卡扣占15-20g/只, 不能漏算",
+        "汽车配件ABS塑料密度1.05g/cm³, 加上金属偏重"
+      ],
+      "exclude": [
+        "纯塑料(无金属)",
+        "全金属款(>200g)",
+        "皮制卡扣"
+      ]
+    },
+    "ai_json_path": "examples/car_seatbelt_extender_pair_ai.json",
+    "notes": "CAL-046: 汽车安全带延长扣低估22%(14→18)。一对100g偏轻, 实际ABS+金属锁扣约130-140g/对+包装=180g。汽车塑料件有金属组件时需多估20-30g。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-047",
+    "date": "2026-07-28",
+    "product_type": "latex_batman_cowl_mask",
+    "product_cn": "乳胶蝙蝠侠头套(猫女同款)",
+    "category_type": "general",
+    "material": "latex",
+    "rigidity": "semi_rigid",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 160,
+    "1688_display_size_cm": [
+      28,
+      22,
+      25
+    ],
+    "estimated_package_size_cm": [
+      28,
+      22,
+      3
+    ],
+    "estimated_head_freight_rmb": 18.48,
+    "actual_head_freight_rmb": 12.0,
+    "actual_chargeable_weight_kg": 0.15,
+    "head_freight_error_pct": 54,
+    "error_direction": "overestimate",
+    "freight_forwarder": "深圳货代",
+    "root_cause": "PACKAGE_THICKNESS_OVERESTIMATE",
+    "root_cause_detail": "估28×22×3=1848cm³→18.48元, 实际28×22×2=1232cm³→12.32元。乳胶比预估更能压薄(3→2cm), 厚度差1cm→头程多6元。与CAL-007(同样头套, 高估300%→修正到0.1%)类似, 突耳/突角商品平放厚度≤2cm。",
+    "applicable_to": {
+      "product_types": [
+        "cowl_mask",
+        "latex_mask",
+        "cosplay_mask",
+        "superhero_mask"
+      ],
+      "materials": [
+        "latex",
+        "rubber",
+        "tpU_soft"
+      ],
+      "rules": [
+        "乳胶面具平放厚度 ≤ 2cm (比硬质面具更可压)",
+        "28×22×2=1232cm³ → 体积重0.154kg → 头程~12元(深圳)",
+        "参数表立体高度25cm不等于包装厚度——头套类一律平放"
+      ],
+      "exclude": [
+        "硬质头盔(不可压缩)",
+        "金属面具(不可压缩)",
+        "泡沫头套(蓬松)"
+      ]
+    },
+    "ai_json_path": "examples/latex_batman_cowl_mask_ai.json",
+    "notes": "CAL-047: 乳胶头套高估54%(18.48→12)。乳胶比估的更可压(3→2cm增加6元误差)。和CAL-007同样的教训: 突出部件商品平放厚度=主体厚度(~2cm), 不要按3cm估。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-048",
+    "date": "2026-07-28",
+    "product_type": "body_chain_no_pierce",
+    "product_cn": "欧美免打孔体环胸链(锌锆合金)",
+    "category_type": "general",
+    "material": "zinc_alloy_zircon_beads",
+    "rigidity": "semi_rigid",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      12,
+      8,
+      2
+    ],
+    "estimated_weight_kg": 0.03,
+    "estimated_head_freight_rmb": 3.0,
+    "actual_head_freight_rmb": 5.0,
+    "actual_chargeable_weight_kg": 0.05,
+    "head_freight_error_pct": 40,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "WEIGHT_UNDERESTIMATED",
+    "root_cause_detail": "估25g→3元, 实际50g→5元。低估50%。合金链体长饰品(含锌合金+锆珠子+金属铃铛), 单条重40-45g, 不是25g级的轻薄链。躯干饰品比颈链/手链重(更长的链条+更多配件)。",
+    "applicable_to": {
+      "product_types": [
+        "body_chain",
+        "waist_chain",
+        "trunk_jewelry",
+        "long_chain_accessory"
+      ],
+      "materials": [
+        "zinc_alloy",
+        "metal_beads",
+        "zircon"
+      ],
+      "rules": [
+        "躯干/长链合金饰品40-50g(含锌合金+珠子+铃铛)",
+        "比颈链(20-30g)重1.5-2倍",
+        "链条长度30-40cm+装饰品, 总量非单链重量",
+        "头程5元起"
+      ],
+      "exclude": [
+        "颈链/短链(<30g)",
+        "塑料饰品(轻)",
+        "单珠手链"
+      ]
+    },
+    "ai_json_path": "examples/body_chain_no_pierce_ai.json",
+    "notes": "CAL-048: 体环胸链低估40%(3→5)。合金躯干饰品比想象重(40-50g)。长链类饰品按链条重+配件重+珠重一起算, 不能只估链子重。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-049",
+    "date": "2026-07-28",
+    "product_type": "hanging_hand_towel",
+    "product_cn": "米菲兔挂式擦手巾(珊瑚绒绣花)",
+    "category_type": "general",
+    "material": "coral_fleece_embroidered",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "1688_listed_weight_g": 40,
+    "1688_listed_g_per_m2_range": [
+      30,
+      50
+    ],
+    "estimated_package_size_cm": [
+      22,
+      14,
+      3
+    ],
+    "estimated_head_freight_rmb": 11.55,
+    "actual_head_freight_rmb": 8.0,
+    "actual_chargeable_weight_kg": 0.08,
+    "head_freight_error_pct": 45,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "PACKAGE_VOLUME_OVERESTIMATED",
+    "root_cause_detail": "估22×14×3=924cm³→11.55元, 实际~20×16×2=640cm³→8.32元。珊瑚绒薄(30-50g/m²), 估的3cm厚度偏厚, 实际折叠可压至2cm。体积估算超实际42%。",
+    "applicable_to": {
+      "product_types": [
+        "hand_towel",
+        "kitchen_towel",
+        "embroidered_towel"
+      ],
+      "materials": [
+        "coral_fleece",
+        "terry_cloth",
+        "cotton_chenille"
+      ],
+      "rules": [
+        "珊瑚绒擦手巾40g包装+体积640cm³≈8元(义乌)",
+        "珊瑚绒比普通毛巾薄(30-50g/m² vs 200g/m²)",
+        "绣花款包装紧实(2cm厚度)"
+      ],
+      "exclude": [
+        "厚毛圈毛巾(>100g)",
+        "浴巾(>300g)",
+        "含塑料架毛巾"
+      ]
+    },
+    "ai_json_path": "examples/hanging_hand_towel_ai.json",
+    "notes": "CAL-049: 珊瑚绒毛巾高估45%(11.55→8)。珊瑚绒比普通毛巾薄2/3, 折叠厚度2cm不是3cm。小件毛巾按640cm³体积即可。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-050",
+    "date": "2026-07-28",
+    "product_type": "silicone_earplugs_pair",
+    "product_cn": "硅胶隔音耳塞一对(零售纸卡装)",
+    "category_type": "general",
+    "material": "silicone",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      10,
+      8,
+      2
+    ],
+    "estimated_weight_kg": 0.02,
+    "estimated_head_freight_rmb": 3.0,
+    "actual_head_freight_rmb": 5.0,
+    "actual_chargeable_weight_kg": 0.05,
+    "head_freight_error_pct": 40,
+    "error_direction": "underestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "RETAIL_CARD_WEIGHT_MISSED",
+    "root_cause_detail": "估20g→3元起步价, 实际50g→5元。耳塞本身约20g, 但零售纸卡(类似CAL-017丝袜纸卡)增重约30g——纸卡+镂空框+品牌标签+透明塑料保护壳。小件零售包装不可忽略！",
+    "applicable_to": {
+      "product_types": [
+        "earplugs",
+        "noise_cancelling_plugs",
+        "silicone_sleep_plugs"
+      ],
+      "materials": [
+        "silicone",
+        "foam"
+      ],
+      "rules": [
+        "零售纸卡装耳塞总重50g(耳塞20g+纸卡+框30g)",
+        "跨境电商零售装含纸卡重量不可忽略(CAL-017同模式)",
+        "耳塞+零售包装=50g, 头程5元"
+      ],
+      "exclude": [
+        "散装/OPP袋装耳塞(<30g)",
+        "多件装(>3对)",
+        "电子降噪耳塞(含电池)"
+      ]
+    },
+    "ai_json_path": "examples/silicone_earplugs_pair_ai.json",
+    "notes": "CAL-050: 耳塞低估40%(3→5)。零售纸卡装小件：无纸卡=20g→3元起步价; 有纸卡=50g→5元。这也是起步价档的新数据点, 零售纸卡(CAL-017/CAL-048)不可忽略。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  },
+  {
+    "sample_id": "CAL-051",
+    "date": "2026-07-28",
+    "product_type": "mesh_cycling_skull_cap",
+    "product_cn": "四季网眼骑行小帽",
+    "category_type": "general",
+    "material": "polyester_mesh_spandex",
+    "rigidity": "soft",
+    "requires_shape_retention": false,
+    "quantity_per_sale": 1,
+    "estimated_package_size_cm": [
+      14,
+      11,
+      2
+    ],
+    "estimated_weight_kg": 0.05,
+    "estimated_head_freight_rmb": 5.0,
+    "actual_head_freight_rmb": 3.0,
+    "actual_chargeable_weight_kg": 0.03,
+    "head_freight_error_pct": 67,
+    "error_direction": "overestimate",
+    "freight_forwarder": "义乌货代",
+    "root_cause": "WEIGHT_OVERESTIMATED",
+    "root_cause_detail": "估50g→5元, 实际30g→3元起步价。网眼骑行帽仅25-30g(超薄网眼+弹力), 比CAL-010便帽(30g)同档。我估网眼比棉质更厚是错的——网眼布实际上镂空更轻。",
+    "applicable_to": {
+      "product_types": [
+        "cycling_skull_cap",
+        "sweat_wicking_liner",
+        "helmet_cap",
+        "mesh_sports_cap"
+      ],
+      "materials": [
+        "polyester_mesh",
+        "spandex",
+        "stretch_mesh"
+      ],
+      "rules": [
+        "网眼骑行帽25-30g(镂空比棉质轻50%)",
+        "与CAL-010便帽同档(30g级别)",
+        "头程3元起步价"
+      ],
+      "exclude": [
+        "棉质便帽(30-40g)",
+        "厚垫片帽(>50g)",
+        "冬季抓绒帽(>80g)"
+      ]
+    },
+    "ai_json_path": "examples/mesh_cycling_skull_cap_ai.json",
+    "notes": "CAL-051: 骑行帽高估67%(5→3)。网眼布镂空比棉轻, 实际30g起步价档。网眼/镂空类小帽=30g基准。",
+    "data_quality_status": "ok",
+    "data_quality_issues": [],
+    "exclude_from_numeric_calibration": false,
+    "evidence_level": "freight_inferred"
+  }
+]

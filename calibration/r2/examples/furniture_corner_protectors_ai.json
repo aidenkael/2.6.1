@@ -1,0 +1,22 @@
+{
+  "product_type": "furniture_corner_protectors_8pack",
+  "quantity": 8,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.06,
+  "ai_package_size_cm": [15, 10, 5],
+  "ai_package_weight_kg": 0.07,
+  "conservative_package_size_cm": [16, 11, 6],
+  "conservative_package_weight_kg": 0.08,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "水滴形硅胶/PVC家具防撞角 8个装, 软质可折叠压缩, 8个约60g+包装10g=70g, 包装按15×10×5cm OPP袋",
+  "notes": "1688商品: 防震水滴加厚护角, 8个装, 透明硅胶/PVC, 儿童家具安全防护"
+}

@@ -1,0 +1,22 @@
+{
+  "product_type": "latex_batman_cowl_mask",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "semi_rigid",
+  "foldability": "limited",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.16,
+  "ai_package_size_cm": [28, 22, 3],
+  "ai_package_weight_kg": 0.20,
+  "conservative_package_size_cm": [29, 23, 4],
+  "conservative_package_weight_kg": 0.23,
+  "packaging_method": "OPP袋+纸盒",
+  "folding_action": "不折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "high",
+  "reasoning": "乳胶蝙蝠侠头套(猫女同款), 乳胶+硬质衬里, 半硬质可轻度压缩, 参数表28×22×25cm/160g, 包装按28×22×3cm 平放+气泡",
+  "notes": "1688参数表: 蝙蝠侠头套28×22×25cm/160g, 乳胶加厚款, 跨境cosplay"
+}

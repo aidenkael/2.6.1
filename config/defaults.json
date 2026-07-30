@@ -1,0 +1,60 @@
+{
+  "schema_version": 2,
+  "app_version": "2.6.0-rc1",
+  "display_name": "用户",
+  "exchange_rate_usd_to_rmb": 7.2,
+  "default_tail_fee_usd": 5.56,
+  "default_tail_fee_rmb": 40.0,
+  "image_slot_count": 5,
+  "image_slot_types": [
+    "主图",
+    "商品信息",
+    "尺寸/重量",
+    "商品信息",
+    "尺寸/重量"
+  ],
+  "selected_forwarder_id": "forwarder_shenzhen_default",
+  "forwarders": [
+    {
+      "id": "forwarder_shenzhen_default",
+      "name": "深圳货代",
+      "rate_rmb_per_kg": 80.0,
+      "fixed_fee_rmb": 10.0,
+      "volume_divisor": 8000.0,
+      "enabled": true,
+      "archived": false
+    },
+    {
+      "id": "forwarder_yiwu_default",
+      "name": "义乌货代",
+      "rate_rmb_per_kg": 100.0,
+      "fixed_fee_rmb": 6.0,
+      "volume_divisor": 8000.0,
+      "enabled": true,
+      "archived": false
+    }
+  ],
+  "profit_rules": [
+    {
+      "id": "under_29_subsidy",
+      "name": "SHEIN 29美元以下运费补贴",
+      "condition_field": "sale_price_usd",
+      "compare_op": "lt",
+      "condition_value": 29.0,
+      "direction": "income",
+      "adjustment_type": "fixed",
+      "adjustment_value": 2.99,
+      "currency": "USD",
+      "percent_base": null,
+      "enabled": true,
+      "archived": false,
+      "description": "最终售价低于29美元时增加2.99美元收入。"
+    }
+  ],
+  "vision_api_endpoint": "https://api.openai.com/v1",
+  "vision_api_key": "",
+  "vision_api_model": "",
+  "vision_api_timeout_seconds": 90,
+  "exchange_rate_updated_at": "",
+  "selected_profit_rule_id": "under_29_subsidy"
+}

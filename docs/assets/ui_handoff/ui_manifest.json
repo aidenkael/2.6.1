@@ -1,0 +1,222 @@
+{
+  "package": "Profit-Accounting-UI-Handoff",
+  "version": "1.0.0",
+  "generated_at": "2026-07-29",
+  "canvas": {
+    "width": 1920,
+    "height": 1080,
+    "viewBox": "0 0 1920 1080"
+  },
+  "screens": [
+    {
+      "screen_id": "main-ui",
+      "screen_name": "新商品测算",
+      "original_svg": "original/main-ui-original.svg",
+      "normalized_svg": "normalized-svg/main-ui.svg",
+      "preview_image": "original/main-ui-preview.png",
+      "width": 1920,
+      "height": 1080,
+      "regions": [
+        {
+          "id": "sidebar",
+          "name": "左侧导航栏",
+          "approx_box": [0, 0, 280, 1080],
+          "background": "#F8FAFD"
+        },
+        {
+          "id": "top-bar",
+          "name": "顶部状态条",
+          "approx_box": [280, 0, 1920, 72],
+          "background": "#FFFFFF"
+        },
+        {
+          "id": "image-input",
+          "name": "图片输入区",
+          "approx_box": [296, 88, 1903, 373]
+        },
+        {
+          "id": "ai-summary",
+          "name": "AI 识别摘要",
+          "approx_box": [296, 396, 1903, 485]
+        },
+        {
+          "id": "cost-and-spec",
+          "name": "成本与规格",
+          "approx_box": [296, 509, 1903, 718]
+        },
+        {
+          "id": "shipping-options",
+          "name": "货代方案",
+          "approx_box": [296, 742, 1903, 893]
+        },
+        {
+          "id": "profit-calculation",
+          "name": "利润测算",
+          "approx_box": [296, 916, 1903, 1015]
+        },
+        {
+          "id": "bottom-actions",
+          "name": "底部操作区",
+          "approx_box": [296, 1038, 1903, 1080]
+        }
+      ],
+      "visible_components": [
+        "app-logo",
+        "nav-item",
+        "page-title",
+        "status-badge",
+        "user-pill",
+        "card",
+        "button-primary",
+        "button-secondary",
+        "input-text",
+        "input-number",
+        "select-dropdown",
+        "image-uploader",
+        "data-summary-card",
+        "comparison-grid",
+        "data-table",
+        "tag-badge",
+        "label"
+      ],
+      "main_colors": [
+        "#1769F6",
+        "#F5F8FC",
+        "#F8FAFD",
+        "#FFFFFF",
+        "#EAF0F6",
+        "#EAF2FF",
+        "#DCE5F0",
+        "#6E7B90",
+        "#172033",
+        "#FFF4E5"
+      ],
+      "fonts": [
+        {
+          "family": "未声明",
+          "visual_guess": "思源黑体 / 阿里巴巴普惠体（待确认）"
+        }
+      ],
+      "known_issues": [
+        "文字已转为 path，无法直接编辑或搜索",
+        "未提供 hover / active / disabled / focus 状态",
+        "未提供响应式断点",
+        "未提供多语言版本",
+        "「货币名称」「计算规则」等小字在预览图中识别有模糊，建议核对原设计稿"
+      ],
+      "open_questions": [
+        "5 + 控件的实际作用",
+        "货代方案中部分 RMB/USD 数值需核对",
+        "利润测算第二行 USD 数值需核对"
+      ]
+    },
+    {
+      "screen_id": "settings-ui",
+      "screen_name": "设置",
+      "original_svg": "original/settings-ui-original.svg",
+      "normalized_svg": "normalized-svg/settings-ui.svg",
+      "preview_image": "original/settings-ui-preview.png",
+      "width": 1920,
+      "height": 1080,
+      "regions": [
+        {
+          "id": "sidebar",
+          "name": "左侧导航栏",
+          "approx_box": [0, 0, 280, 1080],
+          "background": "#F8FAFD"
+        },
+        {
+          "id": "top-bar",
+          "name": "顶部状态条",
+          "approx_box": [280, 0, 1920, 72],
+          "background": "#FFFFFF"
+        },
+        {
+          "id": "basic-settings",
+          "name": "基础设置",
+          "approx_box": [296, 88, 1903, 195]
+        },
+        {
+          "id": "shipping-management",
+          "name": "货代管理",
+          "approx_box": [296, 220, 1903, 484]
+        },
+        {
+          "id": "profit-rules",
+          "name": "利润调整规则",
+          "approx_box": [296, 509, 1903, 935]
+        },
+        {
+          "id": "bottom-actions",
+          "name": "底部操作区",
+          "approx_box": [296, 960, 1903, 1015]
+        }
+      ],
+      "visible_components": [
+        "app-logo",
+        "nav-item",
+        "page-title",
+        "status-badge",
+        "user-pill",
+        "card",
+        "button-primary",
+        "button-secondary",
+        "input-text",
+        "input-number",
+        "select-dropdown",
+        "data-table",
+        "tag-badge",
+        "rule-list",
+        "rule-edit-form",
+        "text-area"
+      ],
+      "main_colors": [
+        "#1769F6",
+        "#F5F8FC",
+        "#F8FAFD",
+        "#FFFFFF",
+        "#EAF0F6",
+        "#EAF2FF",
+        "#DCE5F0",
+        "#6E7B90",
+        "#172033",
+        "#FFF4E5",
+        "#F53F3F"
+      ],
+      "fonts": [
+        {
+          "family": "未声明",
+          "visual_guess": "思源黑体 / 阿里巴巴普惠体（待确认）"
+        }
+      ],
+      "known_issues": [
+        "文字已转为 path，无法直接编辑或搜索",
+        "未提供 hover / active / disabled / focus 状态",
+        "未提供响应式断点",
+        "「货币名称」字段当前值「第五」识别模糊，可能为其他字符",
+        "基础设置第四个字段标签/值无法清晰识别"
+      ],
+      "open_questions": [
+        "基础设置第四字段是什么",
+        "「货币名称」输入框当前实际值",
+        "规则列表中部分规则副标题需要核对"
+      ]
+    }
+  ],
+  "shared": {
+    "navigation_items": [
+      "以图搜图",
+      "新商品测算",
+      "历史记录管理",
+      "数据导入导出",
+      "模型校准反馈",
+      "设置"
+    ],
+    "user_info": {
+      "name": "张三",
+      "version": "1.5.0",
+      "data_dir": "C:\\ProfitManager\\data",
+      "exchange_rate": "7.20"
+    }
+  }
+}

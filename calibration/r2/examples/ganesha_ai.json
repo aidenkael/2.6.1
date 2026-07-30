@@ -1,0 +1,22 @@
+{
+  "product_type": "ganesha_resin_figurine",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "hard",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": true,
+  "ai_net_weight_kg": 0.14,
+  "ai_package_size_cm": [12.3, 8.3, 14.3],
+  "ai_package_weight_kg": 0.14,
+  "conservative_package_size_cm": [15, 10, 16],
+  "conservative_package_weight_kg": 0.16,
+  "packaging_method": "纸盒(防碎内衬)",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "high",
+  "reasoning": "印度象头神Ganesha树脂摆件, 小号, 象牙白/砂岩2色。商家提供完整规格: 产品7.5×5.5×10cm/110g + 包装12.3×8.3×14.3cm/140g(包装纸盒+防碎内衬)。树脂硬品, 易碎需保形。",
+  "notes": "跨境爆款; 商家规格含产品本体+包装盒两套详细数据, 可信度高; 大/中号参考数据见商家参数表"
+}

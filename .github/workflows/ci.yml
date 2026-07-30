@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - migration/r2-baseline
+      - integration/logistics-ddad3b-2.6.1
+  pull_request:
+    branches:
+      - main
+      - migration/r2-baseline
+
+permissions:
+  contents: read
+
+concurrency:
+  group: profit-accounting-26-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Qt runtime libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1 libxkbcommon-x11-0
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip -q
+          python -m pip install -e ".[dev]" -q
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Run sensitive scan
+        run: python tools/sensitive_scan.py

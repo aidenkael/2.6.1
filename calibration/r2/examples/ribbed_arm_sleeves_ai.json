@@ -1,0 +1,22 @@
+{
+  "product_type": "ribbed_arm_sleeves_pair",
+  "quantity": 2,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.04,
+  "ai_package_size_cm": [16, 10, 3],
+  "ai_package_weight_kg": 0.05,
+  "conservative_package_size_cm": [17, 11, 4],
+  "conservative_package_weight_kg": 0.06,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "黑色罗纹护臂/袖套一对(2只), 棉/涤纶弹力针织, 软质可折叠压缩, 一对约40g+包装10g=50g, 包装按16×10×3cm OPP袋",
+  "notes": "1688商品, 黑色罗纹针织护臂/套袖一对, 弹力面料"
+}

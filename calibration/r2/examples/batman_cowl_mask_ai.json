@@ -1,0 +1,22 @@
+{
+  "product_type": "batman_cowl_mask",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "semi_rigid",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": true,
+  "ai_net_weight_kg": 0.16,
+  "ai_package_size_cm": [28, 22, 3],
+  "ai_package_weight_kg": 0.21,
+  "conservative_package_size_cm": [29, 23, 4],
+  "conservative_package_weight_kg": 0.23,
+  "packaging_method": "OPP袋+纸盒",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "high",
+  "reasoning": "蝙蝠侠头套/cosplay面罩, 参数表: 28×22×25cm / 160g。实发平放(耳朵贴近脸面), 厚度仅3cm。实际头程18.5元(深圳)确认了此发货方式。包装按28×22×3cm, 保守29×23×4cm。",
+  "notes": "1688参数表: 28×22×25cm, 160g。实际头程18.5元(深圳,纯头程不含+10)。参数表25cm高度为立体尺寸, 实发平放后厚度仅3cm。包装盒厚度≠立体最大尺寸——尖耳朵等突出部件平放可大幅压缩盒厚。"
+}

@@ -1,0 +1,22 @@
+{
+  "product_type": "sheer_pantyhose_pair",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.05,
+  "ai_package_size_cm": [22, 11, 2],
+  "ai_package_weight_kg": 0.06,
+  "conservative_package_size_cm": [23, 12, 3],
+  "conservative_package_weight_kg": 0.07,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "裸色丝袜/连裤袜一对, 尼龙/氨纶超薄面料, 软质可折叠压缩, 一对约50g+包装10g=60g, 包装按22×11×2cm OPP袋",
+  "notes": "1688商品, 裸色丝袜/连裤袜, 类似CAL-014冰丝超薄但更长更宽(从腰到脚)。展示图为穿在脚模上的样本。"
+}

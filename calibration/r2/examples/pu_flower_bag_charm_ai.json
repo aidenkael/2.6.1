@@ -1,0 +1,22 @@
+{
+  "product_type": "pu_flower_bag_charm",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "semi_rigid",
+  "foldability": "limited",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.015,
+  "ai_package_size_cm": [15, 10, 2],
+  "ai_package_weight_kg": 0.025,
+  "conservative_package_size_cm": [16, 11, 3],
+  "conservative_package_weight_kg": 0.03,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "high",
+  "reasoning": "PU皮质仿真金桂花朵包挂件(长款27cm), PU皮+塑料叶+金属挂钩, 半硬质, 单件约15g+包装10g=25g, 包装按15×10×2cm OPP袋",
+  "notes": "1688参数表: JS-G11 摘金桂花朵挂件15g/27cm/PU皮, 包包配饰挂件"
+}

@@ -1,0 +1,22 @@
+{
+  "product_type": "cotton_skull_cap_beanie",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.03,
+  "ai_package_size_cm": [15, 12, 2],
+  "ai_package_weight_kg": 0.04,
+  "conservative_package_size_cm": [16, 13, 3],
+  "conservative_package_weight_kg": 0.05,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "白色棉质无边便帽/骑行头巾, 软棉弹力面料可折叠压缩, 单只约30g+包装10g=40g, 包装按15x12x2cm OPP袋(对折后扁平)",
+  "notes": "1688商品, 弹力棉无边帽, 与CAL-001硬壳军帽不同——这顶是软棉可折叠压缩"
+}

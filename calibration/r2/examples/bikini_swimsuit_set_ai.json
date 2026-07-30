@@ -1,0 +1,22 @@
+{
+  "product_type": "bikini_swimsuit_set",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.08,
+  "ai_package_size_cm": [20, 14, 2],
+  "ai_package_weight_kg": 0.10,
+  "conservative_package_size_cm": [21, 15, 3],
+  "conservative_package_weight_kg": 0.12,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "跨境女款比基尼泳衣套装(2件套), 尼龙/氨纶弹力面料, 软质可折叠压缩, 一套约80g+包装20g=100g, 包装按20×14×2cm OPP袋",
+  "notes": "1688商品: 2026欧美亚马逊跨境比基尼女泳衣(热带风印花/速干), 上下两件套"
+}

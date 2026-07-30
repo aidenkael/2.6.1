@@ -1,0 +1,23 @@
+{
+  "product_type": "dual_head_makeup_brush_set",
+  "product_cn": "跨境黑白双头粉底散粉眼影刷套装(F4粉底刷+E6眼影刷)",
+  "quantity": 1,
+  "quantity_source": "merchant_listing",
+  "category": "cosmetic_tool",
+  "rigidity": "rigid",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.055,
+  "ai_package_size_cm": [24, 8, 4],
+  "ai_package_weight_kg": 0.10,
+  "conservative_package_size_cm": [25, 9, 5],
+  "conservative_package_weight_kg": 0.14,
+  "packaging_method": "纸盒+塑料内托+PE外袋(套装盒)",
+  "folding_action": "不折叠(刷毛压变形即报废)",
+  "compression_action": "不压缩",
+  "confidence": "high",
+  "reasoning": "F4双头粉底刷净重约40g(220mm总长+合成纤维刷毛+硬塑料杆), E6双头眼影刷净重约15g(163mm总长+小刷头), 两支并排装入长条套装纸盒, 盒尺寸按最长刷22cm+1.5cm单边余量=24cm, 并排刷头宽3.5cm+3.5cm=7cm+0.5cm单边=8cm, 高度按刷毛+盒壁=4cm。套装盒内塑料托固定两支刷子, 外套PE袋密封。毛重=F4(40g)+E6(15g)+纸盒+塑料内托+外袋(45g)=100g。",
+  "notes": "1688价格¥3.00-13.00, 3个起批, 沧州化妆刷产业带, 跨境爆款。本套装为单套计量(1套=2支刷子), 卖家出货时通常单套装入小纸盒, 不可拆开单支发(套装定位+包装已固定)。起步价3元规则对此量级不适用(实重已超30g阈值)。刷毛为合成纤维(非天然毛), 硬塑料杆+木杆为主流, 不可折叠不可压缩(会损伤刷毛)。"
+}

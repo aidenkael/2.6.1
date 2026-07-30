@@ -1,0 +1,22 @@
+{
+  "product_type": "camera_wrist_strap_quick_release",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "semi_rigid",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.08,
+  "ai_package_size_cm": [16, 13, 5],
+  "ai_package_weight_kg": 0.14,
+  "conservative_package_size_cm": [18, 14, 5],
+  "conservative_package_weight_kg": 0.16,
+  "packaging_method": "挂卡+纸盒",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "medium",
+  "reasoning": "JN杰诺快拆相机腕带, 编织绳带+塑料快拆扣+金属件, 约100cm。品牌挂卡+纸盒零售包装, 含扣件不可压。8色同款, 1条¥9.45。",
+  "notes": "品牌相机配件通常发挂卡+纸盒零售包装, 非简单OPP袋; 编织绳80g+挂卡纸盒60g=140g"
+}

@@ -1,0 +1,22 @@
+{
+  "product_type": "flat_top_military_cap",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "semi_rigid",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": true,
+  "ai_net_weight_kg": 0.10,
+  "ai_package_size_cm": [25, 20, 11],
+  "ai_package_weight_kg": 0.11,
+  "conservative_package_size_cm": [26, 21, 12],
+  "conservative_package_weight_kg": 0.13,
+  "packaging_method": "PE袋+纸盒",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "high",
+  "reasoning": "米色平顶军帽/船型帽, RB 字母刺绣, 半硬质带帽身结构需保型, 不可折叠压缩, 实物规格 25x20x11cm / 110g (黑色/杏色同尺寸), 净重约100g + 10g 包装 = 110g",
+  "notes": "1688参数表: 黑色/杏色, 长25x宽20x高11cm, 体积5500cm3, 重量110g。实际纯头程运费44.2元(不含+10固定服务费), 反推计费重=44.2/80=0.5525kg, 体积4420cm3, 参数表体积比实际出货大约20%(折算率80%)。参数表25x20x11可能是产品展示尺寸非出货尺寸。"
+}

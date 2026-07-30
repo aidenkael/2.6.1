@@ -1,0 +1,22 @@
+{
+  "product_type": "plush_wing_hair_claw_clip",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.025,
+  "ai_package_size_cm": [10, 6, 3],
+  "ai_package_weight_kg": 0.03,
+  "conservative_package_size_cm": [12, 7, 4],
+  "conservative_package_weight_kg": 0.035,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "黑色毛绒翅膀发夹(弹簧夹/爪夹), 软质毛绒主体+小型金属弹簧夹, 金属夹为内部结构不约束外包装, 可折叠压缩, 单只约25g, 包装按10x6x3cm OPP袋估算",
+  "notes": "1688商品, 无称量数据, 视觉AI估算"
+}

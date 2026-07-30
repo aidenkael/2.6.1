@@ -1,0 +1,22 @@
+{
+  "product_type": "apple_smoothie_squishy",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.16,
+  "ai_package_size_cm": [8, 8, 8],
+  "ai_package_weight_kg": 0.17,
+  "conservative_package_size_cm": [9, 9, 9],
+  "conservative_package_weight_kg": 0.19,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "high",
+  "reasoning": "跨境爆款苹果沙冰捏捏乐(椰子油/冰沙可塑手感款), 软质TPR/PU慢回弹, 苹果造型, 参数表5×5×5cm/125cm³/160g",
+  "notes": "1688参数表: 苹果沙冰捏捏乐3色均160g(5×5×5cm/125cm³), 椰子油冰沙手感可塑形, 比上一款麦芽糖球更重更大"
+}

@@ -1,0 +1,22 @@
+{
+  "product_type": "shell_evening_clutch",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "bag",
+  "rigidity": "hard",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": true,
+  "ai_net_weight_kg": 0.13,
+  "ai_package_size_cm": [12, 10, 5],
+  "ai_package_weight_kg": 0.16,
+  "conservative_package_size_cm": [13, 11, 6],
+  "conservative_package_weight_kg": 0.19,
+  "packaging_method": "气泡袋+纸盒",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "high",
+  "reasoning": "贝壳造型晚宴包/金属斜挎包, 金属外壳+珍珠链条(110cm), 硬质不可折叠需保型, 参数表9×8×4cm/130g, 包装按12×10×5cm 纸盒+气泡(含链条)",
+  "notes": "1688参数表: 贝壳晚宴包9×8×4cm/0.13kg/金属/110cm珍珠链条, 实际头程16元。"
+}

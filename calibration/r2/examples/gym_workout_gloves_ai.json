@@ -1,0 +1,22 @@
+{
+  "product_type": "gym_workout_gloves_pair",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "semi_rigid",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.10,
+  "ai_package_size_cm": [22, 12, 3],
+  "ai_package_weight_kg": 0.12,
+  "conservative_package_size_cm": [23, 13, 4],
+  "conservative_package_weight_kg": 0.14,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "运动健身手套男女款(带护腕一体撸铁手套), 仿皮+网布+塑料护腕支撑, 半硬质可折叠, 一对约100g+包装20g=120g, 包装按22×12×3cm OPP袋",
+  "notes": "1688商品: 运动健身手套(护腕一体/撸铁/引体向上/防起茧/半指), 一对"
+}

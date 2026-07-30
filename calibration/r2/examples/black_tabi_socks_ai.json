@@ -1,0 +1,22 @@
+{
+  "product_type": "black_tabi_socks_pair",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.03,
+  "ai_package_size_cm": [18, 9, 2],
+  "ai_package_weight_kg": 0.035,
+  "conservative_package_size_cm": [19, 10, 3],
+  "conservative_package_weight_kg": 0.045,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "high",
+  "reasoning": "黑色日系二趾袜(分趾袜/tabi袜)一对, 棉/尼龙混纺弹力面料, 软质可折叠压缩, 一对约30g+5g包装=35g, 包装按18×9×2cm OPP袋",
+  "notes": "1688商品: 黑色二趾分趾袜/羊蹄袜/tabi袜一对。实际头程3元(义乌), 计费重0.03kg。"
+}

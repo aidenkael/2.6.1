@@ -1,0 +1,22 @@
+{
+  "product_type": "angel_wing_brooch_pair",
+  "quantity": 2,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "hard",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.015,
+  "ai_package_size_cm": [9, 4, 2],
+  "ai_package_weight_kg": 0.02,
+  "conservative_package_size_cm": [10, 5, 3],
+  "conservative_package_weight_kg": 0.025,
+  "packaging_method": "OPP袋",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "medium",
+  "reasoning": "白色天使翅膀胸针一对(2件), 树脂/合金翅膀+金属别针扣, 硬质不可折叠, 单只约7g, 一对约15g+包装5g=20g, 包装按9x4x2cm OPP袋",
+  "notes": "1688商品, 一对(2件)起售。实际头程运费3-5.7元/对(纯头程,不含服务费), 反推计费重0.03~0.057kg。"
+}

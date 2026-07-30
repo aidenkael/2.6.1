@@ -1,0 +1,22 @@
+{
+  "product_type": "houndstooth_knee_high_socks_pair",
+  "quantity": 2,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.10,
+  "ai_package_size_cm": [24, 9, 3],
+  "ai_package_weight_kg": 0.11,
+  "conservative_package_size_cm": [25, 10, 4],
+  "conservative_package_weight_kg": 0.12,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "黑色千鸟格过膝袜一对(2只), 棉/涤棉混纺, 软质可折叠压缩, 两只对折装OPP袋, 一对约100g+包装10g=110g, 包装按24x9x3cm",
+  "notes": "1688商品, 千鸟格过膝袜, 一对装"
+}

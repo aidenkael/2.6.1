@@ -1,0 +1,22 @@
+{
+  "product_type": "pu_small_chain_shoulder_bag",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "bag",
+  "rigidity": "semi_rigid",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": false,
+  "requires_shape_retention": true,
+  "ai_net_weight_kg": 0.41,
+  "ai_package_size_cm": [24, 11, 15],
+  "ai_package_weight_kg": 0.45,
+  "conservative_package_size_cm": [25, 12, 16],
+  "conservative_package_weight_kg": 0.48,
+  "packaging_method": "OPP袋+纸盒",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "high",
+  "reasoning": "PU皮质轻潮斜挎肩部链条包(小方包), PU皮+金属链条肩带+翻盖扣, 半硬质需保型, 参数表21×8×13cm/410g, 包装按24×11×15cm 纸盒+气泡",
+  "notes": "1688参数表: PU材质斜挎肩部包21×8×13cm/0.41kg, 肩带105cm不可调, 主袋/副袋/拉链暗袋"
+}

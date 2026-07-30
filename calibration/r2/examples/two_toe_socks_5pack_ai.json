@@ -1,0 +1,22 @@
+{
+  "product_type": "two_toe_socks_5pack",
+  "quantity": 5,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.15,
+  "ai_package_size_cm": [22, 14, 3],
+  "ai_package_weight_kg": 0.17,
+  "conservative_package_size_cm": [23, 15, 4],
+  "conservative_package_weight_kg": 0.19,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "high",
+  "reasoning": "二趾分趾袜/浅口隐形船袜 5双装, 冰丝/弹力面料, 软质可折叠压缩, 5双约150g+包装20g=170g, 实际头程10.45元(义乌)验证, 包装按22×14×3cm OPP袋",
+  "notes": "1688商品: 冰丝分趾袜/二趾袜/羊蹄袜, 5双装。实际头程10.45元(义乌), 计费重0.1045kg"
+}

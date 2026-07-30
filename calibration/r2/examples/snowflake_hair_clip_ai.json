@@ -1,0 +1,22 @@
+{
+  "product_type": "snowflake_hair_clip",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "semi_rigid",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.025,
+  "ai_package_size_cm": [15, 8, 2],
+  "ai_package_weight_kg": 0.03,
+  "conservative_package_size_cm": [16, 9, 3],
+  "conservative_package_weight_kg": 0.04,
+  "packaging_method": "OPP袋",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "medium",
+  "reasoning": "儿童雪花花冠发夹发箍(渐变变色艾莎风), 合金+水钻+长卷发丝, 硬质不可折叠, 单个约25g+包装5g=30g, 包装按15×8×2cm OPP袋",
+  "notes": "1688商品: 儿童冰雪奇缘艾莎风格发夹发箍(雪花+皇冠+水钻+长卷发丝), 单个"
+}

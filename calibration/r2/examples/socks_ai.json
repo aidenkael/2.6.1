@@ -1,0 +1,22 @@
+{
+  "product_type": "mid_calf_socks",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.08,
+  "ai_package_size_cm": [15, 10, 4],
+  "ai_package_weight_kg": 0.09,
+  "conservative_package_size_cm": [18, 12, 5],
+  "conservative_package_weight_kg": 0.105,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "千鸟格中筒棉袜, 软质可折叠, 两只对齐对折一次后装OPP袋, 约15x10x4cm, 净重约80g",
+  "notes": "1688商品, 无称量数据, 视觉AI估算"
+}

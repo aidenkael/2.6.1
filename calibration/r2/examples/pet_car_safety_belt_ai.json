@@ -1,0 +1,22 @@
+{
+  "product_type": "pet_car_safety_belt",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.10,
+  "ai_package_size_cm": [15, 8, 4],
+  "ai_package_weight_kg": 0.11,
+  "conservative_package_size_cm": [16, 9, 5],
+  "conservative_package_weight_kg": 0.13,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "宠物汽车安全带(弹力编织带+金属挂钩), 涤纶/尼龙编织带+弹簧钩+铝合金扣, 软质可卷曲折叠, 长1.1m×2.5cm 宽, 单条约100g+包装10g=110g, 包装按15×8×4cm OPP袋",
+  "notes": "1688商品: 宠物车载安全带牵引绳(热采购+缩大型大圆环扣狗链, 尼龙弹力编织带), 1.1m长×2.5cm宽"
+}

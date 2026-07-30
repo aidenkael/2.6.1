@@ -1,0 +1,22 @@
+{
+  "product_type": "apple_compact_mirror",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "hard",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": true,
+  "ai_net_weight_kg": 0.175,
+  "ai_package_size_cm": [16, 16, 4],
+  "ai_package_weight_kg": 0.20,
+  "conservative_package_size_cm": [17, 17, 5],
+  "conservative_package_weight_kg": 0.22,
+  "packaging_method": "气泡袋+纸盒",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "high",
+  "reasoning": "红色苹果造型便携化妆镜, 参数表标注: 长15.8×宽4×高16cm / 体积1011.2cm³ / 重量175g。裸镜175g+30g包装=205g, 实际头程20.7元(义乌)验证。正常档16×16×4cm纸盒+气泡, 保守17×17×5cm。",
+  "notes": "1688参数表: 红/绿色, 长15.8×宽4×高16cm, 体积1011.2cm³, 重量175g。实际头程20.7元(义乌)。参数表175g为裸镜, 加气泡+纸盒后实际计费约205g。"
+}

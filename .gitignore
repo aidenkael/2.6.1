@@ -1,0 +1,68 @@
+# Python 字节码与虚拟环境
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+.venv-311/
+.venv-build/
+.python-version
+*.egg-info/
+
+# 测试与覆盖率
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+
+# 构建与发布产物
+build/
+dist/
+release/
+*.egg
+*.whl
+*.zip
+*.tar.gz
+*.spec.bak
+
+# 迁移源：历史项目参考（r2、logistics-cost-skill-2.0），按需另存
+migration_sources/
+
+# 数据：数据库、缓存、历史记录、用户图片、导出文件
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+user_data/
+user_images/
+test_sessions/
+cache/
+exports/
+history/
+backups/
+data/runtime/
+data/feedback/
+data/uploads/
+
+# 敏感配置：API key、本地设置、登录态
+.env
+.env.*
+*.key
+*.pem
+settings.json
+settings.local.json
+api_keys.local.json
+api_keys.*.json
+cookies*.json
+browser_profile/
+session_*.json
+token_*.json
+*.log
+logs/
+!docs/.gitkeep
+!tests/.gitkeep

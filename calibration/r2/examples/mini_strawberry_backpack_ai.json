@@ -1,0 +1,22 @@
+{
+  "product_type": "mini_strawberry_backpack",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "bag",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.036,
+  "ai_package_size_cm": [14, 10, 4],
+  "ai_package_weight_kg": 0.04,
+  "conservative_package_size_cm": [15, 11, 5],
+  "conservative_package_weight_kg": 0.05,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "high",
+  "reasoning": "迷你草莓挂件零钱包, 涤纶+金属挂件+挂绳(20cm), 软质可折叠, 参数表36g+包材4g=40g, 实际头程4元(义乌)验证, 包装按14×10×4cm OPP袋",
+  "notes": "1688参数表: 粉色包+挂绳/36g(迷你耳机包挂件小众设计), 12×9×4cm+20cm挂绳"
+}

@@ -1,0 +1,22 @@
+{
+  "product_type": "car_ac_vent_aroma_diffuser_with_clip",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "hard",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.05,
+  "ai_package_size_cm": [12, 5, 4],
+  "ai_package_weight_kg": 0.08,
+  "conservative_package_size_cm": [13, 6, 4],
+  "conservative_package_weight_kg": 0.10,
+  "packaging_method": "纸盒+说明书+防震内衬",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "medium",
+  "reasoning": "AIKESI车载香薰空调出风口, 金属圆柱身8cm + 黑色塑料夹一体, 直径约1.5cm; 纸盒包装含夹突出空间+说明书+防震内衬; 商家规格可能未单独标夹重量",
+  "notes": "商家规格通常不含塑料夹重量, 实际产品净重应=金属身~35g+塑料夹~10g+盒内防震~15g=约60g, 本次估算已上调至80g包装后总重"
+}

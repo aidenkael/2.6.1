@@ -1,0 +1,22 @@
+{
+  "product_type": "mlp_purple_curly_wig",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.30,
+  "ai_package_size_cm": [32, 22, 4],
+  "ai_package_weight_kg": 0.33,
+  "conservative_package_size_cm": [33, 23, 5],
+  "conservative_package_weight_kg": 0.36,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "high",
+  "reasoning": "小马宝莉cos假发(紫色大波浪长款), 化纤假发+内网, 软质可折叠, 参数表30×20×2cm/1200cm³/300g, 包装按32×22×4cm OPP袋",
+  "notes": "1688参数表: MLP紫色波浪cos假发30×20×2cm/1200cm³/300g, 跨境假发类"
+}

@@ -1,0 +1,83 @@
+{
+  "package": "Profit-Accounting-2.6_partial_update",
+  "basis": "用户修改意见文档为准，两张UI图片为辅",
+  "changed_file_count": 13,
+  "verification": {
+    "pytest": "43 passed, 1 skipped, 0 failed",
+    "sensitive_scan": "0 findings",
+    "compileall": "passed",
+    "windows_pyside6_visual_test": "not run in current Linux environment"
+  },
+  "files": [
+    {
+      "path": "config/defaults.json",
+      "size": 1571,
+      "sha256": "3F0EAA1A42F837D951B9660DF3201111C80AFC4814395B80BC25F894E9715250"
+    },
+    {
+      "path": "src/profit_accounting_26/application/context.py",
+      "size": 2474,
+      "sha256": "59DC378EB4C53FD1DC19B312F37EF071D08925A20F70390C85E744738ADE4D95"
+    },
+    {
+      "path": "src/profit_accounting_26/application/packaging_estimation_service.py",
+      "size": 14135,
+      "sha256": "A5145B7FD3D8940DD85E655BBA1E48D1C8D5D03AE61057EEEB70EA9E9FF8D19A"
+    },
+    {
+      "path": "src/profit_accounting_26/application/recognition_service.py",
+      "size": 8008,
+      "sha256": "EF363E9F0B8EDFE906D40A2CE6CA5FCC0A3E69CBF9AD7C64F55E17D8E8DE646D"
+    },
+    {
+      "path": "src/profit_accounting_26/ui/app.py",
+      "size": 866,
+      "sha256": "4790856ED2138E459F398884214F2E57D4357FA8BF97B6C8476FBD38193E1194"
+    },
+    {
+      "path": "src/profit_accounting_26/ui/main_window.py",
+      "size": 12231,
+      "sha256": "21A4BE6E319D2421286C87DA74FF74BE39DD88AFC8E92FD8505F1FF12990B9ED"
+    },
+    {
+      "path": "src/profit_accounting_26/ui/pages/calculation_page.py",
+      "size": 57834,
+      "sha256": "1BD44DAB1E439AD9CEF043CCB034BED5DE2DB23E381B26CDC96CFABB80C557F4"
+    },
+    {
+      "path": "src/profit_accounting_26/ui/pages/image_search_page.py",
+      "size": 6007,
+      "sha256": "5413B7D2E9D25E5C0624732BAB5C08DE9A1B5E2B1DEFBC96FA7E2FF7F39EB204"
+    },
+    {
+      "path": "src/profit_accounting_26/ui/pages/settings_page.py",
+      "size": 26296,
+      "sha256": "6DBD31A6D3882C6D3289CC26D0DC9228BC7F15AED458C05DE153765C19EC0B57"
+    },
+    {
+      "path": "src/profit_accounting_26/ui/theme.py",
+      "size": 3700,
+      "sha256": "703F43E12144B8D7C9CE5D99F5344C26930DA2DFA8E09403AAF21E3235E159EE"
+    },
+    {
+      "path": "src/profit_accounting_26/ui/widgets.py",
+      "size": 13687,
+      "sha256": "0575D3653CF260F628C0ADBEF731A1C6ECA6B71923967736E0229B339A455E57"
+    },
+    {
+      "path": "tests/application/test_recognition_service.py",
+      "size": 835,
+      "sha256": "62B5FF0B0CC24035AD31B409DBD7CD7EC84B4B0CBB8794A0D049B38151379E17"
+    },
+    {
+      "path": "tests/logistics/test_packaging_estimation_service.py",
+      "size": 5596,
+      "sha256": "AA17A76EB93DB518ED0A6F34B4BA3F658B4976267078E157FBC5B0E15E12BCAC"
+    },
+    {
+      "path": "覆盖说明.txt",
+      "size": 923,
+      "sha256": "49158AF2E8641AEF878C0E41C1660E9F13BFAE84269AABA4787219F9AA5108E5"
+    }
+  ]
+}

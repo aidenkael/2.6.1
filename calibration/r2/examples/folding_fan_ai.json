@@ -1,0 +1,22 @@
+{
+  "product_type": "folding_fan",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "semi_rigid",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.049,
+  "ai_package_size_cm": [24, 4, 2],
+  "ai_package_weight_kg": 0.06,
+  "conservative_package_size_cm": [25, 5, 3],
+  "conservative_package_weight_kg": 0.07,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "无",
+  "confidence": "high",
+  "reasoning": "中国风全竹镂空古风小折叠扇(汉服/旗袍/舞蹈随身款), 竹骨+纸扇面, 半硬质可折叠收拢, 参数表6个变体均49g, 收拢后约24×4×2cm",
+  "notes": "1688参数表: 全竹镂空折扇6色均49g(pp袋装), 小型/迷你款。与前一张图(30cm大型折扇)不同——本次是随身小折扇。"
+}

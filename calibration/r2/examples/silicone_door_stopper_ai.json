@@ -1,0 +1,22 @@
+{
+  "product_type": "silicone_donut_door_stopper",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.04,
+  "ai_package_size_cm": [11, 6, 5],
+  "ai_package_weight_kg": 0.05,
+  "conservative_package_size_cm": [12, 7, 6],
+  "conservative_package_weight_kg": 0.06,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "high",
+  "reasoning": "硅胶甜甜圈门挡, 软硅胶可折叠压缩, 参数表 10×4.8×4.5cm, 单只约40g+包装10g=50g, 包装按11×6×5cm OPP袋",
+  "notes": "1688参数表: 长10×宽4.8×高4.5cm, 体积约216cm³, 黄色硅胶甜甜圈造型"
+}

@@ -1,0 +1,22 @@
+{
+  "product_type": "white_mid_calf_two_toe_socks",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.055,
+  "ai_package_size_cm": [20, 10, 2],
+  "ai_package_weight_kg": 0.065,
+  "conservative_package_size_cm": [21, 11, 3],
+  "conservative_package_weight_kg": 0.075,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "白色日系中筒分趾袜一对, 棉/尼龙吸汗面料, 中筒长度比冰丝船袜厚实, 一对约55g+10g包装=65g, 包装按20×10×2cm OPP袋",
+  "notes": "1688商品, 白色中筒分趾袜/二趾袜/羊蹄袜一对。与CAL-014冰丝超薄款区分: 中筒棉质更厚更长。数量未确认(可单独或5双装)。"
+}

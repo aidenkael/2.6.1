@@ -1,0 +1,22 @@
+{
+  "product_type": "satin_sleep_cap",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.04,
+  "ai_package_size_cm": [14, 14, 2],
+  "ai_package_weight_kg": 0.05,
+  "conservative_package_size_cm": [15, 15, 3],
+  "conservative_package_weight_kg": 0.06,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "双层仿真丝护发睡帽(可调节松紧), 缎面/涤纶面料, 软质可折叠, 单顶约40g+包装10g=50g, 包装按14×14×2cm OPP袋",
+  "notes": "1688商品: 双层浴帽/护发仿真丝睡帽(可调节大小), 28×28cm, 黑色跨境爆款"
+}

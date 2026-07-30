@@ -1,0 +1,22 @@
+{
+  "product_type": "silicone_earplugs_pair",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.01,
+  "ai_package_size_cm": [10, 8, 2],
+  "ai_package_weight_kg": 0.02,
+  "conservative_package_size_cm": [11, 9, 3],
+  "conservative_package_weight_kg": 0.025,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "硅胶隔音耳塞一对(球光袋鼠款/子弹款), 软质可折叠压缩, 一对约10g+包装10g=20g, 包装按10×8×2cm OPP袋",
+  "notes": "1688商品: Temu跨境防噪音硅胶耳塞(蘑菇帽睡帽款/子弹款), 硅胶隔音睡眠耳塞"
+}

@@ -1,0 +1,22 @@
+{
+  "product_type": "metal_greca_belt_chain",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "hard",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.10,
+  "ai_package_size_cm": [12, 10, 4],
+  "ai_package_weight_kg": 0.11,
+  "conservative_package_size_cm": [15, 12, 5],
+  "conservative_package_weight_kg": 0.125,
+  "packaging_method": "气泡袋",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "medium",
+  "reasoning": "金色希腊回纹金属腰带/腰链, 金属链节硬质不可折叠/压缩, 仅可卷起装小气泡袋, 含延长链总长约80-100cm, 估重100g(参考类似镀金合金配饰)",
+  "notes": "1688商品, 无称量数据, 视觉AI估算; 金属件可弯曲但不可压扁, 包装以卷径和链节宽度为主"
+}

@@ -1,0 +1,22 @@
+{
+  "product_type": "football_keychain_set",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.05,
+  "ai_package_size_cm": [22, 6, 4],
+  "ai_package_weight_kg": 0.06,
+  "conservative_package_size_cm": [23, 7, 5],
+  "conservative_package_weight_kg": 0.07,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "足球钥匙扣套装: 蓝色橡胶腕带(印Football)+Mbappe 10号球衣挂件+小足球挂件, 软质橡胶/PU, 可折叠压缩, 套装约50g+包装10g=60g, 包装按22x6x4cm OPP袋",
+  "notes": "1688商品, 套装含腕带+球衣+足球3件, 视觉AI估算"
+}

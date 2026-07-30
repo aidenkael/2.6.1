@@ -1,0 +1,22 @@
+{
+  "product_type": "five_toe_socks_pair",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.045,
+  "ai_package_size_cm": [16, 10, 3],
+  "ai_package_weight_kg": 0.055,
+  "conservative_package_size_cm": [17, 11, 4],
+  "conservative_package_weight_kg": 0.065,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "粉色五趾袜一对, 棉/氨纶弹力面料, 软质可折叠, 一对约45g+包装10g=55g, 实际头程5元(义乌)验证, 包装按16×10×3cm OPP袋",
+  "notes": "1688商品, 五趾袜/瑜伽袜一对, 棉质弹力"
+}

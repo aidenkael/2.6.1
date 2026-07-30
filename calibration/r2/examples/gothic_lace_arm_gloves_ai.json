@@ -1,0 +1,22 @@
+{
+  "product_type": "gothic_lace_arm_gloves_pair",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.06,
+  "ai_package_size_cm": [22, 14, 3],
+  "ai_package_weight_kg": 0.07,
+  "conservative_package_size_cm": [23, 15, 4],
+  "conservative_package_weight_kg": 0.08,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "哥特蕾丝绑带半指长款手套一对, 蕾丝+缎带, 软质可折叠压缩, 一对约60g+包装10g=70g, 包装按22×14×3cm OPP袋",
+  "notes": "1688商品: 跨境哥特风蕾丝绑带长款手套(半指/洛丽塔/舞会/cosplay), 一对"
+}

@@ -1,0 +1,22 @@
+{
+  "product_type": "pet_bandana",
+  "quantity": 1,
+  "quantity_source": "assumed",
+  "category": "general",
+  "rigidity": "soft",
+  "foldability": "good",
+  "compressibility": "good",
+  "has_rigid_parts": false,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.045,
+  "ai_package_size_cm": [18, 14, 2],
+  "ai_package_weight_kg": 0.05,
+  "conservative_package_size_cm": [19, 15, 3],
+  "conservative_package_weight_kg": 0.06,
+  "packaging_method": "OPP袋",
+  "folding_action": "常规折叠",
+  "compression_action": "轻度压缩",
+  "confidence": "medium",
+  "reasoning": "蓝色宠物三角巾(口水巾), 棉/涤纶面料, 软质可折叠压缩, 参数表(三档尺寸): L 15×15×35cm/120g, M 12×15×35cm/90g, S 8×15×35cm/60g。AI JSON 用M码~90g估算, 包装按18×14×2cm OPP袋",
+  "notes": "1688商品, 宠物三角巾三档尺码(L/M/S), 用户图像模糊, 蓝色带骨头+爪印图案"
+}

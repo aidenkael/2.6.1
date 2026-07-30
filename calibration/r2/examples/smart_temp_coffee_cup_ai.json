@@ -1,0 +1,22 @@
+{
+  "product_type": "smart_temp_stainless_coffee_cup",
+  "quantity": 1,
+  "quantity_source": "user_confirmed",
+  "category": "general",
+  "rigidity": "hard",
+  "foldability": "none",
+  "compressibility": "none",
+  "has_rigid_parts": true,
+  "requires_shape_retention": false,
+  "ai_net_weight_kg": 0.225,
+  "ai_package_size_cm": [12, 10, 18],
+  "ai_package_weight_kg": 0.26,
+  "conservative_package_size_cm": [13, 11, 19],
+  "conservative_package_weight_kg": 0.30,
+  "packaging_method": "气泡袋+纸盒",
+  "folding_action": "不折叠",
+  "compression_action": "不压缩",
+  "confidence": "medium",
+  "reasoning": "智能显温304不锈钢咖啡杯, 双层不锈钢真空, 硬质不可折叠, 380ML约225g(净重), 包装按12×10×18cm 纸盒+气泡",
+  "notes": "1688参数表: 304不锈钢咖啡杯380ML(450g含包装)/510ML(更大), 智能显温功能, 跨境爆款"
+}
