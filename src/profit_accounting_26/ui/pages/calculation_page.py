@@ -46,6 +46,7 @@ from profit_accounting_26.ui.widgets import (
     QuoteCard,
     SectionHeader,
 )
+from profit_accounting_26.ui.input_editing import install_blank_click_focus_filter
 
 
 class RecognitionWorker(QObject):
@@ -147,6 +148,7 @@ class CalculationPage(QWidget):
         self.rebuild_image_slots(int(self.settings.get("image_slot_count", 5)))
         self.rebuild_profit_rules()
         self.recalculate()
+        self._blank_focus_guard = install_blank_click_focus_filter(self)
 
     def _mark_dirty(self) -> None:
         if not self.dirty:
@@ -518,14 +520,8 @@ class CalculationPage(QWidget):
                 item.widget().deleteLater()
         existing = [(slot.path, slot.image_type()) for slot in self.image_slots]
         self.image_slots = []
-        types = list(self.settings.get("image_slot_types", []))
-        defaults = [ImageType.MAIN, ImageType.PRODUCT_INFO, ImageType.DIMENSION_WEIGHT]
         for index in range(count):
-            try:
-                image_type = ImageType(types[index])
-            except (IndexError, ValueError):
-                image_type = defaults[index % len(defaults)]
-            slot = ImageSlotWidget(index, image_type)
+            slot = ImageSlotWidget(index, ImageType.MAIN)
             slot.changed.connect(self._image_changed)
             slot.removeRequested.connect(self.remove_image)
             if index < len(existing) and existing[index][0] is not None:
@@ -547,7 +543,7 @@ class CalculationPage(QWidget):
 
     def save_image_config(self) -> None:
         self.settings["image_slot_count"] = len(self.image_slots)
-        self.settings["image_slot_types"] = [slot.image_type().value for slot in self.image_slots]
+        self.settings.pop("image_slot_types", None)
         self.context.settings_service.save(self.settings)
         QMessageBox.information(self, "已保存", "图片框数量、顺序和默认类型已保存。")
 
@@ -687,7 +683,7 @@ class CalculationPage(QWidget):
         if self._recognition_thread is not None:
             return
         image_items = [
-            {"path": str(slot.path), "type": slot.image_type().value}
+            {"path": str(slot.path)}
             for slot in self.image_slots
             if slot.path
         ]
@@ -797,7 +793,7 @@ class CalculationPage(QWidget):
     def collect_observation(self) -> AIObservation:
         observation = AIObservation.from_dict(self.observation.to_dict())
         observation.product_name = self.product_summary.text().strip()
-        observation.product_type = self.product_summary.text().strip()
+        # Product name is display text; keep the AI-normalized product_type for CAL routing.
         observation.material = self.material_summary.text().strip()
         observation.rigidity = str(self.rigidity_combo.currentData())
         observation.foldability = str(self.foldability_combo.currentData())
@@ -861,10 +857,8 @@ class CalculationPage(QWidget):
         context = {
             "original_summary": str(original["summary"]),
             "current_summary": self._current_summary(),
-            "original_bare_spec": original["bare_spec"],
-            "adopted_bare_spec": adopted_bare,
-            "original_normal_packaging": original["normal_packaging"],
-            "adopted_normal_packaging": adopted_normal,
+            "original_observation": self.observation.to_dict(),
+            "user_overrides": adopted_bare,
         }
         self._show_local_dialog()
         self._local_thread = QThread(self)
@@ -912,22 +906,20 @@ class CalculationPage(QWidget):
         self._updating = True
         if result.recognition_summary:
             self.structure_summary.setText(result.recognition_summary)
-        for key, widget in (("length_cm", self.bare_length), ("width_cm", self.bare_width), ("height_cm", self.bare_height), ("weight_g", self.bare_weight)):
-            value = result.bare_spec.get(key)
-            if key not in self._accepted_bare_fields and isinstance(value, (int, float)) and value > 0:
-                widget.setValue(float(value))
+        changed = []
+        for key, value in result.observation_patch.items():
+            if key in self._accepted_bare_fields or key not in self.observation.__dataclass_fields__:
+                continue
+            if getattr(self.observation, key) != value:
+                setattr(self.observation, key, value)
+                changed.append(key)
         self._updating = previous_updating
+        self._apply_observation(self.observation)
         self.observation = self.collect_observation()
         self.proposal = self.context.packaging_service.estimate(self.observation)
-        normal = result.normal_packaging
-        if "正常档" not in self.manual_scenarios:
-            self.proposal.normal.packaging_method = str(normal.get("packaging_method") or self.proposal.normal.packaging_method)
-            for key in ("length_cm", "width_cm", "height_cm", "weight_g"):
-                value = normal.get(key)
-                if isinstance(value, (int, float)) and value > 0:
-                    setattr(self.proposal.normal, key, float(value))
-            self.proposal.normal.reasoning_summary = str(normal.get("reason") or self.proposal.normal.reasoning_summary)
         self.apply_proposal(self.proposal)
+        if not changed:
+            self.review_badge.setText("结构条件未变化")
         self.packaging_stale = False
         self._mark_dirty()
         self.recalculate()

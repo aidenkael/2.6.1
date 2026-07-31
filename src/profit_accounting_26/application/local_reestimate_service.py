@@ -13,12 +13,25 @@ from profit_accounting_26.application.recognition_service import RecognitionResp
 @dataclass(frozen=True, slots=True)
 class LocalReestimateResult:
     recognition_summary: str
-    bare_spec: dict[str, float | None]
-    normal_packaging: dict[str, Any]
+    observation_patch: dict[str, Any]
+    changed_fields: list[str]
 
 
 class LocalReestimateService:
-    """Text-only packaging reasoning; it never reads images or calculates money."""
+    """Convert user text into a structured observation patch.
+
+    It does not produce final package dimensions, calculate money, or read images.
+    The local calibration engine remains the only packaging result outlet.
+    """
+
+    ALLOWED_PATCH_FIELDS = {
+        "product_name", "product_type", "product_family", "material", "material_family",
+        "rigidity", "foldability", "compressibility", "packaging_state_hint",
+        "requires_shape_retention", "has_hard_bottom", "has_hard_backboard",
+        "has_frame", "has_rigid_insert", "has_rigid_parts", "retail_box_visible",
+        "hard_card_visible", "protrusion_flattenable", "length_cm", "width_cm",
+        "height_cm", "weight_g", "dimension_scope", "weight_scope", "quantity",
+    }
 
     def __init__(self, profile_store: ApiProfileStore) -> None:
         self.profile_store = profile_store
@@ -30,47 +43,37 @@ class LocalReestimateService:
             return ""
         return value if value.endswith("/chat/completions") else value + "/chat/completions"
 
-    @staticmethod
-    def _context(
-        *,
-        original_summary: str,
-        current_summary: str,
-        original_bare_spec: dict[str, Any],
-        adopted_bare_spec: dict[str, Any],
-        original_normal_packaging: dict[str, Any],
-        adopted_normal_packaging: dict[str, Any],
-    ) -> str:
+    @classmethod
+    def _context(cls, *, original_summary: str, current_summary: str,
+                 original_observation: dict[str, Any], user_overrides: dict[str, Any]) -> str:
         payload = {
-            "original_ai_result": {
-                "recognition_summary": original_summary,
-                "bare_spec": original_bare_spec,
-                "normal_packaging": original_normal_packaging,
-            },
-            "current_user_data": {
-                "edited_recognition_summary": current_summary,
-                "adopted_bare_spec": adopted_bare_spec,
-                "adopted_normal_packaging": adopted_normal_packaging,
-            },
+            "original_summary": original_summary,
+            "edited_summary": current_summary,
+            "original_observation": original_observation,
+            "user_confirmed_overrides": user_overrides,
         }
-        instruction = (
-            "执行商品局部重估。你看不到图片。用户当前修改摘要优先于原始摘要；"
-            "未涉及内容可参考原始摘要。已采纳裸规格和正常档中的非空字段是强制事实，不得修改。"
-            "只返回修订摘要、裸规格和正常档；保守档由本地规则生成。"
-            "不得计算物流、计费重、成本、售价、利润或选择货代。无法可靠判断的值填 null。"
-            "只返回 JSON：{\"recognition_summary\":\"\",\"bare_spec\":{\"length_cm\":null,\"width_cm\":null,\"height_cm\":null,\"weight_g\":null},"
-            "\"normal_packaging\":{\"packaging_method\":null,\"length_cm\":null,\"width_cm\":null,\"height_cm\":null,\"weight_g\":null,\"reason\":\"\",\"needs_review\":true}}\n"
-            "输入：\n"
+        fields = sorted(cls.ALLOWED_PATCH_FIELDS)
+        return (
+            "你是商品结构字段标准化助手。你看不到图片。根据用户修改后的摘要，"
+            "只返回发生变化的结构化字段补丁。用户已确认值不得修改。"
+            "不要重复用户原话充当结果；不要输出包装尺寸、包装重量、费用、利润或货代。"
+            "将‘深度折叠/压得很扁/完全压平’优先标准化为 foldability=good、"
+            "compressibility=good、packaging_state_hint=strong_compression 或 full_flat_fold；"
+            "存在硬底、框架、保形时不得同时标记完全压平。"
+            f"允许字段：{fields}。"
+            "只返回JSON：{\"recognition_summary\":\"\","
+            "\"observation_patch\":{},\"changed_fields\":[]}。输入：\n"
+            + json.dumps(payload, ensure_ascii=False)
         )
-        return instruction + json.dumps(payload, ensure_ascii=False)
 
     def reestimate(self, **context: Any) -> LocalReestimateResult:
         bound = self.profile_store.bound_profile(LOCAL_REESTIMATE)
         if bound is None:
-            raise RecognitionUnavailableError("局部重估尚未绑定文字 API 配置。")
+            raise RecognitionUnavailableError("局部重估尚未绑定文字API配置。")
         profile, api_key = bound
         endpoint = self._endpoint(profile.api_url)
         if not endpoint or not api_key.strip() or not profile.model_name.strip():
-            raise RecognitionUnavailableError("局部重估 API 配置不完整。")
+            raise RecognitionUnavailableError("局部重估API配置不完整。")
         body = {
             "model": profile.model_name,
             "temperature": 0,
@@ -83,7 +86,7 @@ class LocalReestimateService:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=60) as response:  # noqa: S310 - user-configured endpoint
+            with urlopen(request, timeout=60) as response:  # noqa: S310
                 response_data = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             raise RecognitionUnavailableError(f"局部重估请求失败（HTTP {exc.code}）。") from exc
@@ -99,10 +102,13 @@ class LocalReestimateService:
             raise RecognitionResponseError("局部重估返回格式无效。") from exc
         if not isinstance(data, dict):
             raise RecognitionResponseError("局部重估返回格式无效。")
-        bare = data.get("bare_spec") if isinstance(data.get("bare_spec"), dict) else {}
-        normal = data.get("normal_packaging") if isinstance(data.get("normal_packaging"), dict) else {}
+        raw_patch = data.get("observation_patch") if isinstance(data.get("observation_patch"), dict) else {}
+        patch = {key: value for key, value in raw_patch.items() if key in self.ALLOWED_PATCH_FIELDS}
+        changed = [key for key in data.get("changed_fields", []) if key in patch]
+        if not changed:
+            changed = list(patch)
         return LocalReestimateResult(
             recognition_summary=str(data.get("recognition_summary") or ""),
-            bare_spec={key: bare.get(key) for key in ("length_cm", "width_cm", "height_cm", "weight_g")},
-            normal_packaging=normal,
+            observation_patch=patch,
+            changed_fields=changed,
         )

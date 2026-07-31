@@ -96,7 +96,10 @@ class AIObservation:
 
     product_name: str = ""
     product_type: str = ""
+    product_family: str = ""
     material: str = ""
+    material_family: str = ""
+    packaging_state_hint: str = "unknown"
     rigidity: str = "unknown"
     foldability: str = "unknown"
     compressibility: str = "unknown"

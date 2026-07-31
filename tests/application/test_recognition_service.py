@@ -78,7 +78,7 @@ def test_parse_main_image_packaging_candidates():
     assert proposal.needs_review is True
 
 
-def test_measurement_supplement_only_fills_missing_fields():
+def test_single_vision_response_keeps_the_first_observation_as_the_only_input():
     first = RecognitionService.parse_payload(
         {"choices": [{"message": {"content": json.dumps({"observation": {"product_name": "发圈", "material": "satin"}})}}]},
         model="vision-test",
@@ -88,7 +88,5 @@ def test_measurement_supplement_only_fills_missing_fields():
         model="vision-test",
     )[0]
 
-    merged = RecognitionService._merge_observation(first, supplement)
-
-    assert merged.product_name == "发圈"
-    assert (merged.length_cm, merged.width_cm, merged.height_cm, merged.weight_g) == (12, 12, 3, 35)
+    assert first.product_name == "发圈"
+    assert supplement.length_cm == 12

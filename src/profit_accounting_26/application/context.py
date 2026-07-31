@@ -47,6 +47,7 @@ class AppContext:
         packaging_service = PackagingEstimationService(
             active_calibration["path"],
             calibration_version=str(active_calibration["version"]),
+            rule_registry_path=resource_path("calibration/logistics_v2/packaging_rule_registry_v1.json"),
         )
         calibration_manager.bind_service(packaging_service)
         api_profile_store = ApiProfileStore(paths.data_dir)

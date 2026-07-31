@@ -53,9 +53,9 @@ def test_unknown_structure_is_not_treated_as_safe_compression(tmp_path: Path):
         weight_g=100,
     )
     proposal = service.estimate(observation)
-    assert proposal.normal.packaging_state is PackagingState.UNKNOWN
+    assert proposal.normal.packaging_state is PackagingState.SHAPE_RETAINED
     assert proposal.needs_review
-    assert any("硬结构字段未知" in reason for reason in proposal.review_reasons)
+    assert any("未命中专用CAL规则" in reason for reason in proposal.review_reasons)
 
 
 def test_explicit_no_hard_structure_allows_data_driven_candidate(tmp_path: Path):
@@ -82,9 +82,9 @@ def test_explicit_no_hard_structure_allows_data_driven_candidate(tmp_path: Path)
         weight_g=100,
     )
     proposal = service.estimate(observation)
-    assert proposal.normal.packaging_state is PackagingState.MODERATE_COMPRESSION
-    assert set(proposal.applied_profile_ids) == {"CAL-X1", "CAL-X2"}
-    assert proposal.normal.length_cm < 20
+    assert proposal.normal.packaging_state is PackagingState.UNKNOWN
+    assert proposal.applied_profile_ids == []
+    assert proposal.normal.length_cm == 20
     assert proposal.normal.weight_g == 120
 
 
@@ -135,10 +135,11 @@ def test_external_ai_conflict_preserves_original_and_local(tmp_path: Path):
         needs_review=False,
     )
     proposal = service.estimate(observation, external_proposal=external)
-    assert proposal.normal.packaging_method == "AI袋装"
+    assert proposal.normal.packaging_method != "AI袋装"
+    assert proposal.original_scenarios["normal"]["packaging_method"] == "AI袋装"
     assert proposal.original_scenarios["normal"]["packaging_method"] == "AI袋装"
     assert proposal.local_proposed_scenarios["normal"]["packaging_method"] != "AI袋装"
-    assert proposal.adjusted_scenarios["normal"]["packaging_method"] == "AI袋装"
+    assert proposal.adjusted_scenarios["normal"]["packaging_method"] != "AI袋装"
     assert proposal.conflicts
     assert proposal.needs_review
 
@@ -169,4 +170,4 @@ def test_soft_item_without_matching_samples_is_not_auto_compressed(tmp_path: Pat
     proposal = service.estimate(observation)
     assert proposal.normal.length_cm == 20
     assert proposal.normal.needs_review
-    assert "未自动压缩尺寸" in "；".join(proposal.review_reasons)
+    assert "未命中专用CAL规则" in "；".join(proposal.review_reasons)
