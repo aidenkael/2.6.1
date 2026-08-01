@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
 )
 
 from profit_accounting_26.application import AppContext, CalculationService, ImageSession
+from profit_accounting_26.application.calculation_session import CalculationSession
+from profit_accounting_26.application.category_normalizer import normalize_observation
 from profit_accounting_26.application.recognition_service import (
     RecognitionCancellation,
     RecognitionCancelledError,
@@ -112,6 +114,7 @@ class CalculationPage(QWidget):
         self.settings = context.settings_service.load()
         self.observation = AIObservation()
         self.proposal: PackagingProposal | None = None
+        self.session = CalculationSession()
         self.record_id: str | None = None
         self.dirty = False
         self.packaging_stale = False
@@ -156,6 +159,14 @@ class CalculationPage(QWidget):
         if not self.dirty:
             self.dirty = True
             self.dirtyChanged.emit(True)
+
+    def _adopt_packaging(self, proposal: PackagingProposal) -> None:
+        """Keep one packaging authority for page, calculation, persistence and logs."""
+        self.proposal = proposal  # legacy UI alias; never independently calculated
+        self.session.adopt(proposal)
+
+    def _adopted_packaging(self) -> PackagingProposal | None:
+        return self.session.adopted_packaging or self.proposal
 
     def mark_saved(self) -> None:
         self.dirty = False
@@ -752,10 +763,16 @@ class CalculationPage(QWidget):
 
     @Slot(object, object)
     def _recognition_completed(self, observation: AIObservation, external_proposal: PackagingProposal | None) -> None:
-        self.observation = observation
+        self.session.ai_raw_response = observation.raw_payload
+        self.session.ai_raw_observation = dict(observation.raw_payload.get("observation") or {})
+        self.session.normalized_observation = observation
+        self.session.money_candidates = list(observation.raw_payload.get("money_candidates") or [])
+        self.session.ai_packaging_proposal = external_proposal
+        self.session.observation = observation
+        self.observation = self.session.observation
         self._apply_observation(observation)
-        self.proposal = self.context.packaging_service.estimate(observation, external_proposal=external_proposal)
-        self.apply_proposal(self.proposal)
+        self._adopt_packaging(self.context.packaging_service.estimate(observation, external_proposal=external_proposal))
+        self.apply_proposal(self._adopted_packaging())
         self._ai_baseline = {
             "summary": self._current_summary(),
             "bare_spec": {
@@ -775,13 +792,14 @@ class CalculationPage(QWidget):
         payload = observation.to_dict()
         missing = [key for key in ("product_cost_rmb", "domestic_shipping_rmb", "length_cm", "width_cm", "height_cm", "weight_g") if payload.get(key) in (None, "", "unknown")]
         op = self._diagnostic_operation
-        op.event("ai_request_completed"); op.event("ai_response_parsed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing); op.event("calibration_completed", matched_rule_ids=self.proposal.applied_profile_ids)
-        generated=self.proposal.normal.is_complete() and self.proposal.conservative.is_complete()
+        adopted = self._adopted_packaging()
+        op.event("ai_request_completed"); op.event("ai_response_parsed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing); op.event("calibration_completed", matched_rule_ids=adopted.applied_profile_ids)
+        generated=adopted.normal.is_complete() and adopted.conservative.is_complete()
         op.event("packaging_generated" if generated else "packaging_skipped", skip_reason=None if generated else "AI未返回尺寸/重量，且本地CAL未生成可用回退值")
         op.event("logistics_calculated" if self.current_quote else "logistics_skipped", reason=None if self.current_quote else "无可用包装尺寸和重量")
         op.event("page_updated", filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)])
         op.event("operation_completed")
-        op.summary(status="completed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing, field_evidence=observation.raw_payload.get("field_evidence",{}), raw_observation=observation.raw_payload.get("observation", {}), normalized_codes={"product_type_code": observation.product_type_code, "product_family_code": observation.product_family_code, "material_family_code": observation.material_family_code}, value_types={"product_cost": observation.product_cost_value_type, "domestic_shipping": observation.domestic_shipping_value_type}, value_sources={"dimensions": observation.dimension_value_source, "weight": observation.weight_value_source}, parse_error=None, matched_cal=self.proposal.applied_profile_ids, cal_rejected_rules=[], cal_rejection_reasons=[], generic_fallback=self.proposal.proposal_source == "generic_fallback", packaging_generated=generated, normal_packaging=self.proposal.normal.to_dict() if generated else None, conservative_packaging=self.proposal.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["AI未返回尺寸/重量，且本地CAL未生成可用回退值"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "无可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)], page_empty_fields=missing, warnings=self.proposal.review_reasons)
+        op.summary(status="completed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing, field_evidence=observation.raw_payload.get("field_evidence",{}), raw_observation=observation.raw_payload.get("observation", {}), normalized_codes={"product_type_code": observation.product_type_code, "product_family_code": observation.product_family_code, "material_family_code": observation.material_family_code}, value_types={"product_cost": observation.product_cost_value_type, "domestic_shipping": observation.domestic_shipping_value_type}, value_sources={"dimensions": observation.dimension_value_source, "weight": observation.weight_value_source}, ai_packaging_proposal=external_proposal.to_dict() if external_proposal else None, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=adopted.applied_profile_ids, cal_rejected_rules=[], cal_rejection_reasons=[], generic_fallback=adopted.proposal_source == "generic_fallback", packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["AI未返回尺寸/重量，且本地CAL未生成可用回退值"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "无可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)], page_empty_fields=missing, warnings=adopted.review_reasons)
 
     @Slot(str, str)
     def _recognition_failed(self, category: str, message: str) -> None:
@@ -928,18 +946,16 @@ class CalculationPage(QWidget):
         self._updating = True
         if result.recognition_summary:
             self.structure_summary.setText(result.recognition_summary)
-        changed = []
-        for key, value in result.observation_patch.items():
-            if key in self._accepted_bare_fields or key not in self.observation.__dataclass_fields__:
-                continue
-            if getattr(self.observation, key) != value:
-                setattr(self.observation, key, value)
-                changed.append(key)
+        changed = self.session.apply_observation_patch(result.observation_patch)
+        self.observation = self.session.observation
         self._updating = previous_updating
         self._apply_observation(self.observation)
         self.observation = self.collect_observation()
-        self.proposal = self.context.packaging_service.estimate(self.observation)
-        self.apply_proposal(self.proposal)
+        self.session.observation = self.observation
+        self.session.observation = normalize_observation(self.observation)
+        self.observation = self.session.observation
+        self._adopt_packaging(self.context.packaging_service.estimate(self.observation))
+        self.apply_proposal(self._adopted_packaging())
         if not changed:
             self.review_badge.setText("结构条件未变化")
         self.packaging_stale = False
@@ -947,12 +963,13 @@ class CalculationPage(QWidget):
         self.recalculate()
         op = self._local_diagnostic_operation
         op.event("local_reestimate_completed", observation_patch=result.observation_patch, changed_fields=result.changed_fields)
-        op.event("calibration_completed", matched_rule_ids=self.proposal.applied_profile_ids)
-        generated = self.proposal.normal.is_complete() and self.proposal.conservative.is_complete()
+        adopted = self._adopted_packaging()
+        op.event("calibration_completed", matched_rule_ids=adopted.applied_profile_ids)
+        generated = adopted.normal.is_complete() and adopted.conservative.is_complete()
         op.event("packaging_generated" if generated else "packaging_skipped")
         op.event("operation_completed")
         op.response(provider_raw_response=None, normalized_result={"observation_patch": result.observation_patch, "changed_fields": result.changed_fields}, parse_error=None)
-        op.summary(status="completed", returned_fields=list(result.observation_patch), missing_fields=[], field_evidence={}, parse_error=None, matched_cal=self.proposal.applied_profile_ids, cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=generated, normal_packaging=self.proposal.normal.to_dict() if generated else None, conservative_packaging=self.proposal.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["重估后没有完整包装数据"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "没有可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=result.changed_fields, page_empty_fields=[], warnings=self.proposal.review_reasons)
+        op.summary(status="completed", returned_fields=list(result.observation_patch), missing_fields=[], field_evidence={}, observation_patch=result.observation_patch, normalized_codes={"product_type_code": self.observation.product_type_code, "product_family_code": self.observation.product_family_code, "material_family_code": self.observation.material_family_code}, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=adopted.applied_profile_ids, cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["重估后没有完整包装数据"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "没有可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=result.changed_fields, page_empty_fields=[], warnings=adopted.review_reasons)
 
     @Slot(str, str)
     def _local_reestimate_failed(self, category: str, message: str) -> None:
@@ -1053,8 +1070,8 @@ class CalculationPage(QWidget):
         fields = self.normal_fields if self.normal_fields["radio"].isChecked() else self.conservative_fields
         label = str(fields["name"])
         source = None
-        if self.proposal:
-            source = self.proposal.normal if label == "正常档" else self.proposal.conservative
+        if self._adopted_packaging():
+            source = self._adopted_packaging().normal if label == "正常档" else self._adopted_packaging().conservative
         manual = label in self.manual_scenarios
         return PackagingScenario(
             label=label,
@@ -1313,7 +1330,7 @@ class CalculationPage(QWidget):
         scenario = self.current_scenario()
         normal = PackagingScenario(
             label="正常档",
-            packaging_state=self.proposal.normal.packaging_state if self.proposal else scenario.packaging_state,
+            packaging_state=self._adopted_packaging().normal.packaging_state if self._adopted_packaging() else scenario.packaging_state,
             packaging_method=self.normal_fields["method"].text(),
             length_cm=self.normal_fields["length"].value() or None,
             width_cm=self.normal_fields["width"].value() or None,
@@ -1325,7 +1342,7 @@ class CalculationPage(QWidget):
         )
         conservative = PackagingScenario(
             label="保守档",
-            packaging_state=self.proposal.conservative.packaging_state if self.proposal else scenario.packaging_state,
+            packaging_state=self._adopted_packaging().conservative.packaging_state if self._adopted_packaging() else scenario.packaging_state,
             packaging_method=self.conservative_fields["method"].text(),
             length_cm=self.conservative_fields["length"].value() or None,
             width_cm=self.conservative_fields["width"].value() or None,
@@ -1342,7 +1359,7 @@ class CalculationPage(QWidget):
             "layers": {
                 "ai_raw": {
                     "observation": self.collect_observation().to_dict(),
-                    "packaging_proposal": self.proposal.to_dict() if self.proposal else {},
+                    "packaging_proposal": self._adopted_packaging().to_dict() if self._adopted_packaging() else {},
                 },
                 "adopted": {
                     "bare": {
@@ -1427,6 +1444,7 @@ class CalculationPage(QWidget):
         self.record_id = None
         self.observation = AIObservation()
         self.proposal = None
+        self.session = CalculationSession()
         self._ai_baseline = None
         self._recognized_image_fingerprint = ()
         self._accepted_bare_fields.clear()
@@ -1497,9 +1515,10 @@ class CalculationPage(QWidget):
         proposal_raw = ai_raw.get("packaging_proposal") or {}
         if proposal_raw:
             try:
-                self.proposal = PackagingProposal.from_dict(proposal_raw)
+                self._adopt_packaging(PackagingProposal.from_dict(proposal_raw))
             except Exception:
                 self.proposal = None
+                self.session.adopted_packaging = None
         adopted = layers.get("adopted", {})
         self.packaging_stale = bool(adopted.get("packaging_estimate_stale", False))
         bare = adopted.get("bare", {})

@@ -12,8 +12,18 @@ class CalculationSession:
 
     images: list[dict[str, str]] = field(default_factory=list)
     ai_raw_response: dict[str, Any] = field(default_factory=dict)
+    ai_raw_observation: dict[str, Any] = field(default_factory=dict)
     observation: AIObservation = field(default_factory=AIObservation)
+    normalized_observation: AIObservation = field(default_factory=AIObservation)
     user_overrides: dict[str, Any] = field(default_factory=dict)
+    confirmed_fields: set[str] = field(default_factory=set)
+    field_sources: dict[str, str] = field(default_factory=dict)
+    field_confidence: dict[str, str] = field(default_factory=dict)
+    money_candidates: list[dict[str, Any]] = field(default_factory=list)
+    matched_cal_rules: list[str] = field(default_factory=list)
+    rejected_cal_rules: list[dict[str, Any]] = field(default_factory=list)
+    ai_packaging_proposal: PackagingProposal | None = None
+    local_packaging_proposal: PackagingProposal | None = None
     calibration_result: PackagingProposal | None = None
     adopted_packaging: PackagingProposal | None = None
     calculation_result: dict[str, Any] = field(default_factory=dict)
@@ -29,3 +39,9 @@ class CalculationSession:
                 setattr(self.observation, key, value)
                 changed.append(key)
         return changed
+
+    def adopt(self, proposal: PackagingProposal) -> None:
+        self.calibration_result = proposal
+        self.local_packaging_proposal = proposal
+        self.adopted_packaging = proposal
+        self.matched_cal_rules = list(proposal.applied_profile_ids)
