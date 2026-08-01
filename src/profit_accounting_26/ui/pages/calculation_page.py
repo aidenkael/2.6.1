@@ -523,6 +523,7 @@ class CalculationPage(QWidget):
         for index in range(count):
             slot = ImageSlotWidget(index, ImageType.MAIN)
             slot.changed.connect(self._image_changed)
+            slot.imageLoaded.connect(lambda slot_index, path, _kind: self.context.diagnostic_logger.event("image_loaded", index=slot_index, image=self.context.diagnostic_logger.image_metadata(path)))
             slot.removeRequested.connect(self.remove_image)
             if index < len(existing) and existing[index][0] is not None:
                 slot.load_path(existing[index][0])
@@ -549,6 +550,7 @@ class CalculationPage(QWidget):
 
     def remove_image(self, index: int) -> None:
         if 0 <= index < len(self.image_slots):
+            self.context.diagnostic_logger.event("image_deleted", index=index)
             self.image_slots[index].clear_image()
 
     def _image_fingerprint(self) -> tuple[tuple[str, str], ...]:
@@ -690,6 +692,8 @@ class CalculationPage(QWidget):
         if not image_items:
             QMessageBox.information(self, "没有图片", "请先导入至少一张图片。")
             return
+        self.context.diagnostic_logger.event("ai_recognition_requested", images=[self.context.diagnostic_logger.image_metadata(item["path"]) for item in image_items])
+        self.context.diagnostic_logger.ai_artifact("request", {"images": [self.context.diagnostic_logger.image_metadata(item["path"]) for item in image_items]})
         self._show_recognition_dialog()
         self.ai_button.setEnabled(False)
         self._recognition_cancellation = RecognitionCancellation()
@@ -765,9 +769,15 @@ class CalculationPage(QWidget):
         self.manual_scenarios.clear()
         self._mark_dirty()
         self.recalculate()
+        payload = observation.to_dict()
+        missing = [key for key in ("product_cost_rmb", "domestic_shipping_rmb", "length_cm", "width_cm", "height_cm", "weight_g") if payload.get(key) in (None, "", "unknown")]
+        self.context.diagnostic_logger.event("ai_recognition_completed", observation=payload, external_packaging=external_proposal.to_dict() if external_proposal else None, cal_rules=self.proposal.applied_profile_ids)
+        self.context.diagnostic_logger.ai_artifact("response", observation.raw_payload)
+        self.context.diagnostic_logger.diagnostic_summary(returned_fields=[key for key, value in payload.items() if value not in (None, "", "unknown")], missing_fields=missing, parse_error=None, matched_cal=self.proposal.applied_profile_ids, packaging_generated=self.proposal.normal.is_complete() and self.proposal.conservative.is_complete(), not_generated_reason=[] if self.proposal.normal.is_complete() else self.proposal.review_reasons, entered_logistics=self.current_quote is not None, page_filled_fields=["product_summary", "structure_summary", "bare_spec", "normal", "conservative"])
 
     @Slot(str, str)
     def _recognition_failed(self, category: str, message: str) -> None:
+        self.context.diagnostic_logger.event("ai_recognition_failed", category=category, message=message)
         if category == "cancelled":
             return
         title = {
@@ -829,6 +839,7 @@ class CalculationPage(QWidget):
     def reestimate_packaging(self) -> None:
         if self._local_thread is not None:
             return
+        self.context.diagnostic_logger.event("local_reestimate_requested", summary=self._current_summary())
         if self._ai_baseline is None:
             QMessageBox.information(self, "需要先识图", "请先完成一次 AI识图，再根据摘要进行局部重估。")
             return
@@ -923,6 +934,7 @@ class CalculationPage(QWidget):
         self.packaging_stale = False
         self._mark_dirty()
         self.recalculate()
+        self.context.diagnostic_logger.event("local_reestimate_completed", observation_patch=result.observation_patch, changed_fields=result.changed_fields, applied_rules=self.proposal.applied_profile_ids)
 
     @Slot(str, str)
     def _local_reestimate_failed(self, category: str, message: str) -> None:
@@ -1163,6 +1175,7 @@ class CalculationPage(QWidget):
         self.system_rows["logistics"].setText(f"¥{selected_quote.total_logistics_rmb:.2f}")
         self.system_total.setText(f"¥{system_cost:.2f}")
         self._forward_profit()
+        self.context.diagnostic_logger.event("forwarder_calculated", package=scenario.to_dict(), forwarder_id=selected_forwarder.id, quote=asdict(selected_quote), system_cost=system_cost)
 
     def rebuild_profit_rules(self) -> None:
         self.rule_combo.blockSignals(True)
@@ -1365,6 +1378,7 @@ class CalculationPage(QWidget):
             QMessageBox.critical(self, "保存失败", str(exc))
             return
         self.mark_saved()
+        self.context.diagnostic_logger.event("record_saved", record_id=self.record_id)
         # The local reestimate baseline belongs to one unsaved measurement
         # session only.  Saving ends that session; the record itself keeps its
         # existing auditable AI/adopted layers.
@@ -1437,6 +1451,7 @@ class CalculationPage(QWidget):
         self.recalculate()
 
     def load_record_payload(self, record_id: str) -> None:
+        self.context.diagnostic_logger.event("record_restore_requested", record_id=record_id)
         try:
             record = self.context.record_service.load(record_id)
         except Exception as exc:

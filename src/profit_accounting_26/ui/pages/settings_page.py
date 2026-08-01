@@ -4,7 +4,8 @@ from dataclasses import asdict
 from uuid import uuid4
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QDesktopServices
+from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QCheckBox,
@@ -124,11 +125,22 @@ class SettingsPage(QWidget):
         ):
             api_row.addWidget(widget)
         layout.addLayout(api_row)
+        log_row = QHBoxLayout()
+        self.log_directory = QuickLineEdit(str(context_path := self.context.paths.data_dir / "logs"))
+        self.log_directory.setReadOnly(True)
+        self.log_level = QComboBox(); self.log_level.addItems(["ERROR", "WARNING", "INFO", "DEBUG"])
+        self.log_retention_days = QDoubleSpinBox(); self.log_retention_days.setRange(1, 3650); self.log_retention_days.setDecimals(0); self.log_retention_days.setFixedWidth(80)
+        open_logs = QPushButton("打开日志目录")
+        open_logs.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(context_path))))
+        for widget in (QLabel("日志目录"), self.log_directory, QLabel("日志级别"), self.log_level, QLabel("保留天数"), self.log_retention_days, open_logs): log_row.addWidget(widget)
+        layout.addLayout(log_row)
         self.content_layout.addWidget(card)
         for widget in (self.display_name, self.vision_endpoint, self.vision_model, self.vision_key):
             widget.textChanged.connect(lambda _text: self._mark_dirty())
         self.visual_binding.currentIndexChanged.connect(lambda _index: self._mark_dirty())
         self.local_binding.currentIndexChanged.connect(lambda _index: self._mark_dirty())
+        self.log_level.currentIndexChanged.connect(lambda _index: self._mark_dirty())
+        self.log_retention_days.valueChanged.connect(lambda _value: self._mark_dirty())
 
     def _build_forwarders(self) -> None:
         card = Card()
@@ -359,6 +371,8 @@ class SettingsPage(QWidget):
         self.settings = self.context.settings_service.load()
         self._updating = True
         self.display_name.setText(str(self.settings.get("display_name") or "用户"))
+        self.log_level.setCurrentText(str(self.settings.get("log_level") or "INFO"))
+        self.log_retention_days.setValue(float(self.settings.get("log_retention_days", 30)))
         self.vision_endpoint.setText(str(self.settings.get("vision_api_endpoint") or ""))
         self.vision_model.setText(str(self.settings.get("vision_api_model") or ""))
         self.vision_key.setText(str(self.settings.get("vision_api_key") or ""))
@@ -667,6 +681,8 @@ class SettingsPage(QWidget):
             QMessageBox.warning(self, "无法保存", str(exc))
             return
         latest = self.context.settings_service.load()
+        latest["log_level"] = self.log_level.currentText()
+        latest["log_retention_days"] = int(self.log_retention_days.value())
         enabled_ids = [item["id"] for item in forwarders if item["enabled"] and not item["archived"]]
         selected_forwarder = latest.get("selected_forwarder_id")
         if selected_forwarder not in enabled_ids:
