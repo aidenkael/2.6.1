@@ -665,17 +665,17 @@ class CalculationPage(QWidget):
         self._set_combo_data(self.rigidity_combo, observation.rigidity)
         self._set_combo_data(self.foldability_combo, observation.foldability)
         self._set_combo_data(self.compressibility_combo, observation.compressibility)
-        if observation.product_cost_rmb is not None:
+        if observation.product_cost_rmb is not None and "product_cost_rmb" not in self.session.user_overrides:
             self.product_cost.setValue(observation.product_cost_rmb)
-        if observation.domestic_shipping_rmb is not None:
+        if observation.domestic_shipping_rmb is not None and "domestic_shipping_rmb" not in self.session.user_overrides:
             self.domestic_shipping.setValue(observation.domestic_shipping_rmb)
-        if observation.length_cm is not None:
+        if observation.length_cm is not None and "length_cm" not in self.session.user_overrides:
             self.bare_length.setValue(observation.length_cm)
-        if observation.width_cm is not None:
+        if observation.width_cm is not None and "width_cm" not in self.session.user_overrides:
             self.bare_width.setValue(observation.width_cm)
-        if observation.height_cm is not None:
+        if observation.height_cm is not None and "height_cm" not in self.session.user_overrides:
             self.bare_height.setValue(observation.height_cm)
-        if observation.weight_g is not None:
+        if observation.weight_g is not None and "weight_g" not in self.session.user_overrides:
             self.bare_weight.setValue(observation.weight_g)
         flags = {
             "has_hard_bottom": observation.has_hard_bottom,
