@@ -93,6 +93,9 @@ class RecognitionService:
 
     @classmethod
     def _prompt(cls, image_count: int) -> str:
+        return f"""You inspect {image_count} ecommerce images in one request. Return JSON only.
+Rules: (1) scan every image; do not restrict by image slot. (2) Price and domestic shipping need visible text evidence only. (3) extract selected SKU price before range, coupon, struck-through, or starting price. (4) retain estimated and starting shipping values with their type. (5) if product is recognizable but measurements are absent, estimate bare dimensions, bare weight, and both packaging candidates at low confidence. (6) only leave all packaging values null when the product itself is unrecognizable. (7) do not calculate freight, profit, or select a forwarder. (8) keep foldability, compressibility, state hint and hard-structure fields consistent. (9) output short evidence and no reasoning prose. (10) user-confirmed values supplied in context must not be changed.
+Schema: {{"observation":{{"product_name":"","product_type_raw":"","product_family_raw":"","material_raw":"","rigidity":"unknown|soft|semi_rigid|hard","foldability":"unknown|none|limited|good","compressibility":"unknown|none|limited|good","packaging_state_hint":"unknown|full_flat_fold|strong_compression|moderate_compression|shape_retained|bare_item","requires_shape_retention":null,"has_hard_bottom":null,"has_hard_backboard":null,"has_frame":null,"has_rigid_insert":null,"has_rigid_parts":null,"retail_box_visible":null,"hard_card_visible":null,"quantity":1,"product_cost_rmb":null,"product_cost_value_type":"exact|estimated|starting_from|range_min|unknown","domestic_shipping_rmb":null,"domestic_shipping_value_type":"exact|estimated|starting_from|range_min|unknown","length_cm":null,"width_cm":null,"height_cm":null,"weight_g":null,"dimension_value_source":"image_text|ai_visual_estimate|unknown","weight_value_source":"image_text|ai_visual_estimate|unknown","confidence":"low|medium|high"}},"money_candidates":[],"field_evidence":{{}},"packaging_proposal":{{}}}}"""
         return f"""
 你是跨境电商商品图片识别助手。本次共有 {image_count} 张图片。
 
@@ -276,7 +279,8 @@ Additional required behavior: `product_cost_rmb` and `domestic_shipping_rmb` mus
 
     def recognize(self, image_items: list[dict[str, str]], *,
                   cancellation: RecognitionCancellation | None = None,
-                  diagnostic_operation: DiagnosticOperation | None = None) -> tuple[AIObservation, PackagingProposal | None]:
+                  diagnostic_operation: DiagnosticOperation | None = None,
+                  user_context: dict[str, Any] | None = None) -> tuple[AIObservation, PackagingProposal | None]:
         if cancellation and cancellation.cancelled:
             raise RecognitionCancelledError("AI识图已终止。")
         settings = self.settings_service.load()
@@ -298,6 +302,8 @@ Additional required behavior: `product_cost_rmb` and `domestic_shipping_rmb` mus
             raise RecognitionUnavailableError("没有可用于AI识图的图片。")
 
         content: list[dict[str, Any]] = [{"type": "text", "text": self._prompt(len(paths))}]
+        if user_context:
+            content.append({"type": "text", "text": "User-confirmed values (do not replace): " + json.dumps(user_context, ensure_ascii=False)})
         for index, path in enumerate(paths, start=1):
             content.append({"type": "text", "text": f"图片{index}：请扫描全部字段，不设类型限制。"})
             content.append({"type": "image_url", "image_url": {"url": self._image_data_url(path), "detail": "high"}})

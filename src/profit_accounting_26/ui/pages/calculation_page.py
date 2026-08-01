@@ -55,12 +55,13 @@ class RecognitionWorker(QObject):
     completed = Signal(object, object)
     failed = Signal(str, str)
 
-    def __init__(self, service, image_items: list[dict[str, str]], cancellation: RecognitionCancellation, diagnostic_operation=None) -> None:
+    def __init__(self, service, image_items: list[dict[str, str]], cancellation: RecognitionCancellation, diagnostic_operation=None, user_context=None) -> None:
         super().__init__()
         self._service = service
         self._image_items = image_items
         self._cancellation = cancellation
         self._diagnostic_operation = diagnostic_operation
+        self._user_context = user_context or {}
 
     @Slot()
     def run(self) -> None:
@@ -69,6 +70,7 @@ class RecognitionWorker(QObject):
                 self._image_items,
                 cancellation=self._cancellation,
                 diagnostic_operation=self._diagnostic_operation,
+                user_context=self._user_context,
             )
         except RecognitionCancelledError as exc:
             self.failed.emit("cancelled", str(exc))
@@ -716,6 +718,7 @@ class CalculationPage(QWidget):
             image_items,
             self._recognition_cancellation,
             self._diagnostic_operation,
+            self.session.user_overrides,
         )
         self._recognition_worker.moveToThread(self._recognition_thread)
         self._recognition_thread.started.connect(self._recognition_worker.run)
