@@ -14,6 +14,7 @@ from profit_accounting_26.application.api_profile_store import ApiProfileStore, 
 from profit_accounting_26.application.settings_service import SettingsService
 from profit_accounting_26.domain.models import AIObservation, PackagingProposal
 from profit_accounting_26.application.diagnostic_logger import DiagnosticOperation, DiagnosticLogger
+from profit_accounting_26.application.category_normalizer import normalize_observation
 
 
 class RecognitionUnavailableError(RuntimeError):
@@ -70,7 +71,7 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-vision-all-fields-v3"
+    PROMPT_VERSION = "2.6.1-vision-missing-estimates-v4"
 
     def __init__(self, settings_service: SettingsService, profile_store: ApiProfileStore | None = None) -> None:
         self.settings_service = settings_service
@@ -131,11 +132,15 @@ class RecognitionService:
     "hard_card_visible": null,
     "protrusion_flattenable": null,
     "product_cost_rmb": null,
+    "product_cost_value_type": "exact|estimated|starting_from|range_min|unknown",
     "domestic_shipping_rmb": null,
+    "domestic_shipping_value_type": "exact|estimated|starting_from|range_min|unknown",
     "length_cm": null,
     "width_cm": null,
     "height_cm": null,
     "weight_g": null,
+    "dimension_value_source": "image_text|ai_visual_estimate|unknown",
+    "weight_value_source": "image_text|ai_visual_estimate|unknown",
     "dimension_scope": "unknown|product_size|shipping_package_size|display_size",
     "weight_scope": "unknown|net_weight|packaged_weight|original_box_weight",
     "quantity": 1,
@@ -167,6 +172,7 @@ class RecognitionService:
     "review_reasons": []
   }}
 }}
+Additional required behavior: `product_cost_rmb` and `domestic_shipping_rmb` must only come from visible text, but visible approximate, starting-from, or range text still must be extracted. Return `product_cost_value_type` and `domestic_shipping_value_type` as exact, estimated, starting_from, range_min, or unknown. If the product is recognizable but dimensions or weight are not printed, return low-confidence visual estimates and complete non-empty normal and conservative packaging candidates. Only leave dimensions, weight, and packaging empty when the product itself is not recognizable. Return `dimension_value_source` and `weight_value_source` as image_text, ai_visual_estimate, or unknown. Include product_type_raw, product_type_code, product_family_code and material_family_code if known.
 """.strip()
 
     @staticmethod
@@ -201,7 +207,20 @@ class RecognitionService:
         raw = payload.get("observation")
         if not isinstance(raw, dict):
             raw = payload
-        observation = AIObservation.from_dict(raw)
+        observation = normalize_observation(AIObservation.from_dict(raw))
+        for field, type_field in (("product_cost_rmb", "product_cost_value_type"), ("domestic_shipping_rmb", "domestic_shipping_value_type")):
+            if getattr(observation, field) is not None and getattr(observation, type_field) == "unknown":
+                evidence = payload.get("field_evidence", {}).get(field, {})
+                text = str(evidence.get("raw_text") or "").lower()
+                if any(token in text for token in ("\u9884\u4f30", "estimate", "approx", "about", "\u7ea6")):
+                    value_type = "estimated"
+                elif any(token in text for token in ("\u8d77", "starting", "from")):
+                    value_type = "starting_from"
+                elif any(token in text for token in ("range", "\u533a\u95f4")):
+                    value_type = "range_min"
+                else:
+                    value_type = "exact"
+                setattr(observation, type_field, value_type)
         observation.source = "vision_api"
         observation.model = model
         observation.prompt_version = cls.PROMPT_VERSION

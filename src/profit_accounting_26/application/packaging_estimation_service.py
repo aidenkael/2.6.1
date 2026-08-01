@@ -70,6 +70,9 @@ class PackagingEstimationService:
             observation.product_name, observation.product_type,
             getattr(observation, "product_family", ""), observation.material,
             getattr(observation, "material_family", ""),
+            getattr(observation, "product_type_code", ""),
+            getattr(observation, "product_family_code", ""),
+            getattr(observation, "material_family_code", ""),
         ]
         return " ".join(str(value or "").lower() for value in values)
 
@@ -199,6 +202,20 @@ class PackagingEstimationService:
         ranked.sort(key=lambda item: item[0], reverse=True)
         return [rule for _, rule in ranked[:8]]
 
+    @staticmethod
+    def _generic_fallback(observation: AIObservation):
+        """Low-confidence packaging input for a recognizable product with missing measurements."""
+        identifiable = bool(observation.product_name or observation.product_type or observation.product_family_code != "unknown")
+        if not identifiable:
+            return None
+        if observation.rigidity == "hard" or observation.requires_shape_retention is True:
+            return (20.0, 15.0, 8.0), (23.0, 18.0, 11.0), 250.0, 320.0, PackagingState.SHAPE_RETAINED, "hard_shape_retained"
+        if observation.rigidity == "semi_rigid":
+            return (20.0, 14.0, 5.0), (23.0, 17.0, 8.0), 150.0, 210.0, PackagingState.MODERATE_COMPRESSION, "semi_rigid_foldable"
+        if observation.compressibility == "good" and observation.foldability == "good":
+            return (25.0, 15.0, 2.0), (27.0, 17.0, 4.0), 60.0, 90.0, PackagingState.FULL_FLAT_FOLD, "soft_flat_foldable"
+        return (25.0, 18.0, 5.0), (28.0, 21.0, 8.0), 120.0, 180.0, PackagingState.MODERATE_COMPRESSION, "unknown_identifiable_product"
+
     def estimate(self, observation: AIObservation, *, external_proposal: PackagingProposal | None = None) -> PackagingProposal:
         obs_dims = (observation.length_cm, observation.width_cm, observation.height_cm)
         dims_complete = self._complete(obs_dims)
@@ -226,6 +243,12 @@ class PackagingEstimationService:
         else:
             base_weight = None
 
+        fallback = self._generic_fallback(observation) if base_dims is None or base_weight is None else None
+        if fallback:
+            fallback_normal_dims, fallback_conservative_dims, fallback_normal_weight, fallback_conservative_weight, fallback_state, fallback_id = fallback
+            base_dims = base_dims or fallback_normal_dims
+            base_weight = base_weight or fallback_normal_weight
+
         review: list[str] = []
         conflicts: list[str] = []
         applied_ids: list[str] = []
@@ -244,6 +267,9 @@ class PackagingEstimationService:
             review.append("命中历史CAL相似记录，但无专用动作规则；采用样本体积比例中位数。")
         else:
             review.append("未命中专用CAL规则，采用通用保护性候选。")
+        if fallback:
+            review.append(f"商品可识别但缺少尺寸或重量，采用低置信通用回退：{fallback_id}。")
+            applied_ids.append(f"GENERIC-{fallback_id.upper()}")
 
         normal_dims = conservative_dims = base_dims
         state = PackagingState.UNKNOWN
@@ -289,6 +315,12 @@ class PackagingEstimationService:
             else:
                 conservative_dims = tuple(v * 1.06 for v in base_dims)
 
+        if fallback:
+            if not dims_complete:
+                normal_dims, conservative_dims = fallback_normal_dims, fallback_conservative_dims
+            state = fallback_state
+            method_normal, method_conservative = f"通用回退：{fallback_id}", f"通用回退：{fallback_id}（保守）"
+
         if normal_dims and conservative_dims:
             conservative_dims = tuple(max(n, c) for n, c in zip(normal_dims, conservative_dims))
 
@@ -296,6 +328,8 @@ class PackagingEstimationService:
         conservative_weight = base_weight
         if base_weight is not None and not packaged_weight_authoritative:
             conservative_weight = max(base_weight, base_weight + max(20.0, base_weight * 0.08))
+        if fallback and not observation.weight_g:
+            normal_weight, conservative_weight = fallback_normal_weight, fallback_conservative_weight
         if packaged_weight_authoritative:
             review.append("包装重量为高优先级事实，本地规则未覆盖。")
 
@@ -312,7 +346,7 @@ class PackagingEstimationService:
             original = {"normal": external_proposal.normal.to_dict(), "conservative": external_proposal.conservative.to_dict()}
         return PackagingProposal(
             normal=normal, conservative=conservative,
-            proposal_source="local_calibration_authoritative",
+            proposal_source="generic_fallback" if fallback and not selected else "local_calibration_authoritative",
             needs_review=needs_review,
             review_reasons=list(dict.fromkeys(review)),
             original_scenarios=original,

@@ -64,3 +64,20 @@ def test_conservative_never_lower_than_normal(tmp_path: Path):
     assert p.conservative.width_cm >= p.normal.width_cm
     assert p.conservative.height_cm >= p.normal.height_cm
     assert p.conservative.weight_g >= p.normal.weight_g
+
+
+def test_recognizable_soft_main_image_without_measurements_uses_generic_fallback(tmp_path: Path):
+    s = service(tmp_path)
+    obs = AIObservation(product_name="袜子", product_type="socks", product_family_code="hosiery",
+                        rigidity="soft", foldability="good", compressibility="good", **no_hard_kwargs())
+    proposal = s.estimate(obs)
+    assert proposal.proposal_source == "local_calibration_authoritative"
+    assert proposal.normal.is_complete()
+    assert proposal.conservative.is_complete()
+    assert "AGR-THIN-TEXTILE-001" in proposal.applied_profile_ids
+
+
+def test_unrecognizable_input_does_not_invent_a_package(tmp_path: Path):
+    proposal = service(tmp_path).estimate(AIObservation())
+    assert not proposal.normal.is_complete()
+    assert not proposal.conservative.is_complete()
