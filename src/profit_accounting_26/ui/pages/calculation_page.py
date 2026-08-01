@@ -53,11 +53,12 @@ class RecognitionWorker(QObject):
     completed = Signal(object, object)
     failed = Signal(str, str)
 
-    def __init__(self, service, image_items: list[dict[str, str]], cancellation: RecognitionCancellation) -> None:
+    def __init__(self, service, image_items: list[dict[str, str]], cancellation: RecognitionCancellation, diagnostic_operation=None) -> None:
         super().__init__()
         self._service = service
         self._image_items = image_items
         self._cancellation = cancellation
+        self._diagnostic_operation = diagnostic_operation
 
     @Slot()
     def run(self) -> None:
@@ -65,6 +66,7 @@ class RecognitionWorker(QObject):
             observation, proposal = self._service.recognize(
                 self._image_items,
                 cancellation=self._cancellation,
+                diagnostic_operation=self._diagnostic_operation,
             )
         except RecognitionCancelledError as exc:
             self.failed.emit("cancelled", str(exc))
@@ -523,7 +525,6 @@ class CalculationPage(QWidget):
         for index in range(count):
             slot = ImageSlotWidget(index, ImageType.MAIN)
             slot.changed.connect(self._image_changed)
-            slot.imageLoaded.connect(lambda slot_index, path, _kind: self.context.diagnostic_logger.event("image_loaded", index=slot_index, image=self.context.diagnostic_logger.image_metadata(path)))
             slot.removeRequested.connect(self.remove_image)
             if index < len(existing) and existing[index][0] is not None:
                 slot.load_path(existing[index][0])
@@ -550,7 +551,6 @@ class CalculationPage(QWidget):
 
     def remove_image(self, index: int) -> None:
         if 0 <= index < len(self.image_slots):
-            self.context.diagnostic_logger.event("image_deleted", index=index)
             self.image_slots[index].clear_image()
 
     def _image_fingerprint(self) -> tuple[tuple[str, str], ...]:
@@ -692,8 +692,10 @@ class CalculationPage(QWidget):
         if not image_items:
             QMessageBox.information(self, "没有图片", "请先导入至少一张图片。")
             return
-        self.context.diagnostic_logger.event("ai_recognition_requested", images=[self.context.diagnostic_logger.image_metadata(item["path"]) for item in image_items])
-        self.context.diagnostic_logger.ai_artifact("request", {"images": [self.context.diagnostic_logger.image_metadata(item["path"]) for item in image_items]})
+        self._diagnostic_operation = self.context.diagnostic_logger.begin_operation("ai-recognition")
+        images = [self.context.diagnostic_logger.image_metadata(item["path"]) for item in image_items]
+        self._diagnostic_operation.event("image_attached", images=images)
+        self._diagnostic_operation.event("ai_request_started")
         self._show_recognition_dialog()
         self.ai_button.setEnabled(False)
         self._recognition_cancellation = RecognitionCancellation()
@@ -702,6 +704,7 @@ class CalculationPage(QWidget):
             self.context.recognition_service,
             image_items,
             self._recognition_cancellation,
+            self._diagnostic_operation,
         )
         self._recognition_worker.moveToThread(self._recognition_thread)
         self._recognition_thread.started.connect(self._recognition_worker.run)
@@ -771,13 +774,19 @@ class CalculationPage(QWidget):
         self.recalculate()
         payload = observation.to_dict()
         missing = [key for key in ("product_cost_rmb", "domestic_shipping_rmb", "length_cm", "width_cm", "height_cm", "weight_g") if payload.get(key) in (None, "", "unknown")]
-        self.context.diagnostic_logger.event("ai_recognition_completed", observation=payload, external_packaging=external_proposal.to_dict() if external_proposal else None, cal_rules=self.proposal.applied_profile_ids)
-        self.context.diagnostic_logger.ai_artifact("response", observation.raw_payload)
-        self.context.diagnostic_logger.diagnostic_summary(returned_fields=[key for key, value in payload.items() if value not in (None, "", "unknown")], missing_fields=missing, parse_error=None, matched_cal=self.proposal.applied_profile_ids, packaging_generated=self.proposal.normal.is_complete() and self.proposal.conservative.is_complete(), not_generated_reason=[] if self.proposal.normal.is_complete() else self.proposal.review_reasons, entered_logistics=self.current_quote is not None, page_filled_fields=["product_summary", "structure_summary", "bare_spec", "normal", "conservative"])
+        op = self._diagnostic_operation
+        op.event("ai_request_completed"); op.event("ai_response_parsed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing); op.event("calibration_completed", matched_rule_ids=self.proposal.applied_profile_ids)
+        generated=self.proposal.normal.is_complete() and self.proposal.conservative.is_complete()
+        op.event("packaging_generated" if generated else "packaging_skipped", skip_reason=None if generated else "AI未返回尺寸/重量，且本地CAL未生成可用回退值")
+        op.event("logistics_calculated" if self.current_quote else "logistics_skipped", reason=None if self.current_quote else "无可用包装尺寸和重量")
+        op.event("page_updated", filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)])
+        op.event("operation_completed")
+        op.summary(status="completed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing, field_evidence=observation.raw_payload.get("field_evidence",{}), parse_error=None, matched_cal=self.proposal.applied_profile_ids, cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=generated, normal_packaging=self.proposal.normal.to_dict() if generated else None, conservative_packaging=self.proposal.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["AI未返回尺寸/重量，且本地CAL未生成可用回退值"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "无可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)], page_empty_fields=missing, warnings=self.proposal.review_reasons)
 
     @Slot(str, str)
     def _recognition_failed(self, category: str, message: str) -> None:
-        self.context.diagnostic_logger.event("ai_recognition_failed", category=category, message=message)
+        if hasattr(self, "_diagnostic_operation"):
+            self._diagnostic_operation.event("ai_response_parse_failed" if category == "response" else "ai_request_failed", category=category, message=message); self._diagnostic_operation.event("operation_completed", status="failed"); self._diagnostic_operation.summary(status="failed", returned_fields=[], missing_fields=[], field_evidence={}, parse_error=message, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=False, normal_packaging=None, conservative_packaging=None, not_generated_reason=[message], entered_logistics=False, logistics_skip_reason="AI请求失败", logistics_inputs=None, logistics_outputs=None, page_filled_fields=[], page_empty_fields=[], warnings=[])
         if category == "cancelled":
             return
         title = {
@@ -839,7 +848,6 @@ class CalculationPage(QWidget):
     def reestimate_packaging(self) -> None:
         if self._local_thread is not None:
             return
-        self.context.diagnostic_logger.event("local_reestimate_requested", summary=self._current_summary())
         if self._ai_baseline is None:
             QMessageBox.information(self, "需要先识图", "请先完成一次 AI识图，再根据摘要进行局部重估。")
             return
@@ -871,6 +879,9 @@ class CalculationPage(QWidget):
             "original_observation": self.observation.to_dict(),
             "user_overrides": adopted_bare,
         }
+        self._local_diagnostic_operation = self.context.diagnostic_logger.begin_operation("local-reestimate")
+        self._local_diagnostic_operation.event("local_reestimate_requested", observation_patch=adopted_bare)
+        self._local_diagnostic_operation.request(request_type="local-reestimate", original_summary=context["original_summary"], current_summary=context["current_summary"], observation_patch=adopted_bare)
         self._show_local_dialog()
         self._local_thread = QThread(self)
         self._local_worker = LocalReestimateWorker(self.context.local_reestimate_service, context)
@@ -934,10 +945,22 @@ class CalculationPage(QWidget):
         self.packaging_stale = False
         self._mark_dirty()
         self.recalculate()
-        self.context.diagnostic_logger.event("local_reestimate_completed", observation_patch=result.observation_patch, changed_fields=result.changed_fields, applied_rules=self.proposal.applied_profile_ids)
+        op = self._local_diagnostic_operation
+        op.event("local_reestimate_completed", observation_patch=result.observation_patch, changed_fields=result.changed_fields)
+        op.event("calibration_completed", matched_rule_ids=self.proposal.applied_profile_ids)
+        generated = self.proposal.normal.is_complete() and self.proposal.conservative.is_complete()
+        op.event("packaging_generated" if generated else "packaging_skipped")
+        op.event("operation_completed")
+        op.response(provider_raw_response=None, normalized_result={"observation_patch": result.observation_patch, "changed_fields": result.changed_fields}, parse_error=None)
+        op.summary(status="completed", returned_fields=list(result.observation_patch), missing_fields=[], field_evidence={}, parse_error=None, matched_cal=self.proposal.applied_profile_ids, cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=generated, normal_packaging=self.proposal.normal.to_dict() if generated else None, conservative_packaging=self.proposal.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["重估后没有完整包装数据"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "没有可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=result.changed_fields, page_empty_fields=[], warnings=self.proposal.review_reasons)
 
     @Slot(str, str)
     def _local_reestimate_failed(self, category: str, message: str) -> None:
+        if hasattr(self, "_local_diagnostic_operation"):
+            self._local_diagnostic_operation.event("local_reestimate_failed", category=category, message=message)
+            self._local_diagnostic_operation.event("operation_completed", status="failed")
+            self._local_diagnostic_operation.response(provider_raw_response=None, normalized_result=None, parse_error=message)
+            self._local_diagnostic_operation.summary(status="failed", returned_fields=[], missing_fields=[], field_evidence={}, parse_error=message, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=False, normal_packaging=None, conservative_packaging=None, not_generated_reason=[message], entered_logistics=False, logistics_skip_reason="局部重估失败", logistics_inputs=None, logistics_outputs=None, page_filled_fields=[], page_empty_fields=[], warnings=[])
         title = "局部重估不可用" if category == "unavailable" else "局部重估失败"
         QMessageBox.warning(self, title, message)
 

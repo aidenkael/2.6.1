@@ -8,10 +8,12 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import urlparse
 
 from profit_accounting_26.application.api_profile_store import ApiProfileStore, VISUAL_AI
 from profit_accounting_26.application.settings_service import SettingsService
 from profit_accounting_26.domain.models import AIObservation, PackagingProposal
+from profit_accounting_26.application.diagnostic_logger import DiagnosticOperation, DiagnosticLogger
 
 
 class RecognitionUnavailableError(RuntimeError):
@@ -253,7 +255,8 @@ class RecognitionService:
                 cancellation.clear_response()
 
     def recognize(self, image_items: list[dict[str, str]], *,
-                  cancellation: RecognitionCancellation | None = None) -> tuple[AIObservation, PackagingProposal | None]:
+                  cancellation: RecognitionCancellation | None = None,
+                  diagnostic_operation: DiagnosticOperation | None = None) -> tuple[AIObservation, PackagingProposal | None]:
         if cancellation and cancellation.cancelled:
             raise RecognitionCancelledError("AI识图已终止。")
         settings = self.settings_service.load()
@@ -279,8 +282,28 @@ class RecognitionService:
             content.append({"type": "text", "text": f"图片{index}：请扫描全部字段，不设类型限制。"})
             content.append({"type": "image_url", "image_url": {"url": self._image_data_url(path), "detail": "high"}})
         timeout = max(10, int(settings.get("vision_api_timeout_seconds", 90) or 90))
-        payload = self._request_payload(
-            endpoint=endpoint, api_key=api_key, model=model,
-            content=content, timeout=timeout, cancellation=cancellation,
-        )
-        return self.parse_payload(payload, model=model)
+        if diagnostic_operation:
+            diagnostic_operation.request(
+                request_type="ai-recognition", provider_host=urlparse(endpoint).netloc,
+                model=model, prompt=self._prompt(len(paths)), schema_version=self.PROMPT_VERSION,
+                temperature=0, timeout_seconds=timeout,
+                request_started_at=diagnostic_operation.started_at.isoformat(),
+                images=[DiagnosticLogger.image_metadata(path) for path in paths],
+            )
+        try:
+            payload = self._request_payload(
+                endpoint=endpoint, api_key=api_key, model=model,
+                content=content, timeout=timeout, cancellation=cancellation,
+            )
+            observation, proposal = self.parse_payload(payload, model=model)
+        except Exception as exc:
+            if diagnostic_operation:
+                diagnostic_operation.response(provider_raw_response=None, normalized_result=None, parse_error=str(exc))
+            raise
+        if diagnostic_operation:
+            diagnostic_operation.response(
+                provider_raw_response=payload,
+                normalized_result={"observation": observation.to_dict(), "external_proposal": proposal.to_dict() if proposal else None},
+                parse_error=None,
+            )
+        return observation, proposal
