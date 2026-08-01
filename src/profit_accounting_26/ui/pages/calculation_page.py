@@ -963,13 +963,13 @@ class CalculationPage(QWidget):
         self._mark_dirty()
         self.recalculate()
         op = self._local_diagnostic_operation
-        op.event("local_reestimate_completed", observation_patch=result.observation_patch, changed_fields=result.changed_fields)
+        op.event("local_reestimate_completed", observation_patch=result.observation_patch, changed_fields=result.changed_fields, elapsed_ms=result.elapsed_ms)
         adopted = self._adopted_packaging()
         op.event("calibration_completed", matched_rule_ids=adopted.applied_profile_ids)
         generated = adopted.normal.is_complete() and adopted.conservative.is_complete()
         op.event("packaging_generated" if generated else "packaging_skipped")
         op.event("operation_completed")
-        op.response(provider_raw_response=None, normalized_result={"observation_patch": result.observation_patch, "changed_fields": result.changed_fields}, parse_error=None)
+        op.response(provider_raw_response=None, normalized_result={"observation_patch": result.observation_patch, "changed_fields": result.changed_fields}, parse_error=None, elapsed_ms=result.elapsed_ms)
         op.summary(status="completed", returned_fields=list(result.observation_patch), missing_fields=[], field_evidence={}, observation_patch=result.observation_patch, normalized_codes={"product_type_code": self.observation.product_type_code, "product_family_code": self.observation.product_family_code, "material_family_code": self.observation.material_family_code}, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=adopted.applied_profile_ids, cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["重估后没有完整包装数据"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "没有可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=result.changed_fields, page_empty_fields=[], warnings=adopted.review_reasons)
 
     @Slot(str, str)

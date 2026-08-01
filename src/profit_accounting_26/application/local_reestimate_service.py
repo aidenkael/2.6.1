@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -15,6 +16,7 @@ class LocalReestimateResult:
     recognition_summary: str
     observation_patch: dict[str, Any]
     changed_fields: list[str]
+    elapsed_ms: int = 0
 
 
 class LocalReestimateService:
@@ -87,6 +89,7 @@ class LocalReestimateService:
             headers={"Authorization": f"Bearer {api_key.strip()}", "Content-Type": "application/json"},
             method="POST",
         )
+        started = time.perf_counter()
         try:
             with urlopen(request, timeout=60) as response:  # noqa: S310
                 response_data = json.loads(response.read().decode("utf-8"))
@@ -113,4 +116,5 @@ class LocalReestimateService:
             recognition_summary=str(data.get("recognition_summary") or ""),
             observation_patch=patch,
             changed_fields=changed,
+            elapsed_ms=round((time.perf_counter() - started) * 1000),
         )

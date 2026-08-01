@@ -4,6 +4,7 @@ import base64
 import json
 import mimetypes
 import threading
+import time
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -309,6 +310,7 @@ Additional required behavior: `product_cost_rmb` and `domestic_shipping_rmb` mus
                 request_started_at=diagnostic_operation.started_at.isoformat(),
                 images=[DiagnosticLogger.image_metadata(path) for path in paths],
             )
+        started = time.perf_counter()
         try:
             payload = self._request_payload(
                 endpoint=endpoint, api_key=api_key, model=model,
@@ -324,5 +326,7 @@ Additional required behavior: `product_cost_rmb` and `domestic_shipping_rmb` mus
                 provider_raw_response=payload,
                 normalized_result={"observation": observation.to_dict(), "external_proposal": proposal.to_dict() if proposal else None},
                 parse_error=None,
+                elapsed_ms=round((time.perf_counter() - started) * 1000),
+                usage=payload.get("usage", {}),
             )
         return observation, proposal
