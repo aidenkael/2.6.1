@@ -45,12 +45,14 @@ class LocalReestimateService:
 
     @classmethod
     def _context(cls, *, original_summary: str, current_summary: str,
-                 original_observation: dict[str, Any], user_overrides: dict[str, Any]) -> str:
+                 original_observation: dict[str, Any], user_overrides: dict[str, Any],
+                 adopted_normal: dict[str, Any] | None = None) -> str:
         payload = {
             "original_summary": original_summary,
             "edited_summary": current_summary,
             "original_observation": original_observation,
             "user_confirmed_overrides": user_overrides,
+            "adopted_normal_packaging": adopted_normal or {},
         }
         fields = sorted(cls.ALLOWED_PATCH_FIELDS)
         return (

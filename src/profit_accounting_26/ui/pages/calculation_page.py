@@ -895,11 +895,12 @@ class CalculationPage(QWidget):
             "original_summary": str(original["summary"]),
             "current_summary": self._current_summary(),
             "original_observation": self.observation.to_dict(),
-            "user_overrides": adopted_bare,
+            "user_overrides": {**self.session.user_overrides, **adopted_bare},
+            "adopted_normal": self._adopted_packaging().normal.to_dict() if self._adopted_packaging() else {},
         }
         self._local_diagnostic_operation = self.context.diagnostic_logger.begin_operation("local-reestimate")
         self._local_diagnostic_operation.event("local_reestimate_requested", observation_patch=adopted_bare)
-        self._local_diagnostic_operation.request(request_type="local-reestimate", original_summary=context["original_summary"], current_summary=context["current_summary"], observation_patch=adopted_bare)
+        self._local_diagnostic_operation.request(request_type="local-reestimate", original_summary=context["original_summary"], current_summary=context["current_summary"], original_observation=context["original_observation"], user_overrides=context["user_overrides"], adopted_normal=context["adopted_normal"])
         self._show_local_dialog()
         self._local_thread = QThread(self)
         self._local_worker = LocalReestimateWorker(self.context.local_reestimate_service, context)
