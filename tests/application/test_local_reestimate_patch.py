@@ -18,3 +18,4 @@ def test_context_keeps_original_and_edited_summary_channels():
     )
     for expected in ("原商品", "改后商品", "原包装", "改后包装", "CAL-001", "missing_weight", "100g"):
         assert expected in prompt
+    assert "bulk information" in prompt

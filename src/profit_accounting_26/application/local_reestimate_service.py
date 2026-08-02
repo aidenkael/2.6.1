@@ -82,6 +82,8 @@ class LocalReestimateService:
             "存在硬底、框架、保形时不得同时标记完全压平。"
             f"允许字段：{fields}。"
             "根据修改后的两条摘要重新判断整体结构、包装容器/动作/保护和缺失估算；不得照抄用户文字。"
+            "Treat quantity-per-carton/bag and total-carton text as bulk information, never individual packaging evidence unless it explicitly says one piece or each item."
+            "Return packaging_summary as Chinese handling；final individual package type, without dimensions, weight, source, confidence, CAL IDs, risks, or internal codes."
             "返回的包装候选会经过本地校验和CAL仲裁，已确认数字不得覆盖。"
             "packaging_proposal must contain normal and conservative scenarios with packaging_method, length_cm, width_cm, height_cm, weight_g, confidence and needs_review."
             "只返回JSON：{\"recognition_summary\":\"\",\"product_summary\":\"\",\"packaging_summary\":\"\","

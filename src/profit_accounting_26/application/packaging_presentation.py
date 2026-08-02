@@ -43,11 +43,31 @@ def product_summary(observation: AIObservation) -> str:
     return "；".join(part for part in (_main_name(observation), form, handling) if part)[:30]
 
 
+def _bulk_only(text: str) -> bool:
+    value = str(text or "")
+    bulk_markers = ("每箱", "每袋", "装箱数", "整箱规格", "整箱", "件/箱", "个/箱", "只/箱", "套/箱", "件/袋", "个/袋")
+    return any(marker in value for marker in bulk_markers) or bool(re.search(r"\b(?:pcs?|pieces?)\s*/\s*(?:carton|box|bag)\b|\bper\s+(?:carton|bag)\b", value, re.I))
+
+
+def _single_package_type(observation: AIObservation, proposal: PackagingProposal) -> str:
+    method = str(proposal.normal.packaging_method or "")
+    if _bulk_only(method):
+        return "单件包装待确认"
+    if proposal.proposal_source == "merchant_candidate" and observation.retail_box_visible is True:
+        return "原包装发货"
+    for token, label in (("OPP", "预计OPP袋装"), ("自封", "预计自封袋装"), ("气泡", "预计气泡袋装"),
+                         ("泡沫", "预计泡沫盒装"), ("礼盒", "商家礼盒装"), ("纸盒", "单件纸盒装"),
+                         ("纸箱", "单件纸箱装"), ("盒", "单件纸盒装"), ("carton", "单件纸箱装"), ("box", "单件纸盒装")):
+        if token.lower() in method.lower():
+            return label
+    if observation.retail_box_visible is True:
+        return "原包装发货"
+    return "单件包装待确认"
+
+
 def packaging_summary(observation: AIObservation, proposal: PackagingProposal) -> str:
     supplied = _compact(observation.display_packaging_summary, 30)
-    if proposal.proposal_source == "merchant_candidate":
-        return "商家原包装；图片明确规格"
-    if supplied:
+    if supplied and not _bulk_only(supplied):
         return supplied
     actions = set(observation.packing_actions or [])
     constraints = set(observation.packing_constraints or [])
@@ -62,14 +82,15 @@ def packaging_summary(observation: AIObservation, proposal: PackagingProposal) -
     else:
         action = "保护包装"
     if "fragile_protrusion" in constraints or observation.overall_form == "fragile_protruding":
-        protection = "突出部防护"
+        protection = "保护突出部"
     elif proposal.normal.packaging_state == PackagingState.SHAPE_RETAINED:
         protection = "四周缓冲"
     elif "scratch_protect" in actions:
         protection = "仅防刮"
     else:
-        protection = "按结构保护"
-    return _compact(f"预计包装；{action}；{protection}", 30) or "预计保护包装"
+        protection = "轻度防护"
+    handling = action if action != "保护包装" else protection
+    return _compact(f"{handling}；{_single_package_type(observation, proposal)}", 26) or "轻度防护；单件包装待确认"
 
 
 def normal_reminder(observation: AIObservation, proposal: PackagingProposal, *, user_modified: bool = False) -> str:

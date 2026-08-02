@@ -31,3 +31,23 @@ def test_merchant_reminder_does_not_claim_generic_fallback():
     text = normal_reminder(AIObservation(), _proposal("merchant_candidate"))
     assert "图片明确规格" in text
     assert "通用" not in text
+
+
+def test_bulk_carton_text_is_not_displayed_as_an_individual_carton():
+    proposal = _proposal()
+    proposal.normal.packaging_method = "500个/箱 纸箱"
+    text = packaging_summary(AIObservation(), proposal)
+    assert text == "轻度防护；单件包装待确认"
+    assert "纸箱" not in text
+
+
+def test_explicit_single_box_can_be_displayed_as_individual_package():
+    proposal = _proposal()
+    proposal.normal.packaging_method = "1个/盒"
+    assert packaging_summary(AIObservation(), proposal) == "轻度防护；单件纸盒装"
+
+
+def test_unshown_individual_package_is_marked_as_estimated_or_pending():
+    text = packaging_summary(AIObservation(), _proposal())
+    assert "预计" in text or "待确认" in text
+    assert all(token not in text for token in ("20", "120", "ai_candidate", "CAL-"))
