@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import re
 from pathlib import Path
 from typing import Any
 
@@ -10,14 +9,13 @@ from profit_accounting_26.domain.models import AIObservation, PackagingProposal,
 
 
 class PackagingEstimationService:
-    """CAL-77 authoritative packaging engine.
+    """Arbitrate AI, CAL and generic packaging candidates under hard facts.
 
-    External AI candidates are retained for audit and fallback only. Matching
-    local rules produce the adopted normal/conservative scenarios. All 77 CAL
-    records have a runtime role through the versioned registry.
+    CAL is local experience: it may provide a compatible candidate, but it does
+    not replace a complete, self-consistent current AI packaging observation.
     """
 
-    ENGINE_VERSION = "packaging-estimation-v2-cal77-authoritative"
+    ENGINE_VERSION = "packaging-estimation-v2-candidate-arbitration"
     CALIBRATION_VERSION = "local-calibration-v3-77-samples-rules-v1"
 
     def __init__(self, calibration_path: str | Path | None = None, *,
@@ -66,14 +64,11 @@ class PackagingEstimationService:
 
     @staticmethod
     def _text(observation: AIObservation) -> str:
-        values = [
-            observation.product_name, observation.product_type,
-            getattr(observation, "product_family", ""), observation.material,
-            getattr(observation, "material_family", ""),
-            getattr(observation, "product_type_code", ""),
-            getattr(observation, "product_family_code", ""),
-            getattr(observation, "material_family_code", ""),
-        ]
+        values = (
+            observation.product_name, observation.product_type, observation.product_family,
+            observation.material, observation.material_family, observation.product_type_code,
+            observation.product_family_code, observation.material_family_code,
+        )
         return " ".join(str(value or "").lower() for value in values)
 
     @staticmethod
@@ -82,13 +77,21 @@ class PackagingEstimationService:
 
     @staticmethod
     def _hard_state(observation: AIObservation) -> tuple[bool, bool]:
-        values = [
+        values = (
             observation.has_hard_bottom, observation.has_hard_backboard,
             observation.has_frame, observation.has_rigid_insert,
             observation.has_rigid_parts, observation.retail_box_visible,
             observation.hard_card_visible, observation.requires_shape_retention,
-        ]
+        )
         return any(value is True for value in values), any(value is None for value in values)
+
+    @staticmethod
+    def _actions(observation: AIObservation) -> set[str]:
+        return {str(value) for value in (observation.packing_actions or []) if str(value)}
+
+    @staticmethod
+    def _constraints(observation: AIObservation) -> set[str]:
+        return {str(value) for value in (observation.packing_constraints or []) if str(value)}
 
     @staticmethod
     def _scenario(label: str, state: PackagingState, method: str,
@@ -97,7 +100,7 @@ class PackagingEstimationService:
                   defaults: list[str] | None = None) -> PackagingScenario:
         length = width = height = None
         if dims:
-            length, width, height = (round(max(0.5, float(v)), 1) for v in dims)
+            length, width, height = (round(max(0.5, float(value)), 1) for value in dims)
         return PackagingScenario(
             label=label, packaging_state=state, packaging_method=method,
             length_cm=length, width_cm=width, height_cm=height,
@@ -109,10 +112,10 @@ class PackagingEstimationService:
     def _match_rule(self, rule: dict[str, Any], observation: AIObservation) -> bool:
         match = rule.get("match") or {}
         text = self._text(observation)
-        terms = [str(v).lower() for v in match.get("any_terms") or []]
+        terms = [str(value).lower() for value in match.get("any_terms") or []]
         if terms and not any(term in text for term in terms):
             return False
-        materials = [str(v).lower() for v in match.get("materials") or []]
+        materials = [str(value).lower() for value in match.get("materials") or []]
         if materials and not any(term in str(observation.material or "").lower() for term in materials):
             return False
         for field in ("rigidity", "foldability", "compressibility"):
@@ -120,8 +123,8 @@ class PackagingEstimationService:
             if allowed and getattr(observation, field, "unknown") not in allowed:
                 return False
         if match.get("forbid_hard_structure"):
-            hard, unknown = self._hard_state(observation)
-            if hard or unknown:
+            hard, _ = self._hard_state(observation)
+            if hard:
                 return False
         expected_shape = match.get("requires_shape_retention")
         if expected_shape is not None and observation.requires_shape_retention is not expected_shape:
@@ -129,231 +132,253 @@ class PackagingEstimationService:
         guard = rule.get("guard") or {}
         if guard:
             hard, _ = self._hard_state(observation)
-            fold = observation.foldability
             guard_hit = bool(guard.get("any_hard_structure_or_shape_retention") and (hard or observation.requires_shape_retention is True))
-            if fold in guard.get("foldability_not", []):
+            if observation.foldability in guard.get("foldability_not", []):
                 guard_hit = False
-            if not guard_hit and hard is False and fold == "good":
+            if not guard_hit and hard is False and observation.foldability == "good":
                 return False
         return True
 
     @staticmethod
     def _scale_smallest(dims: tuple[float, float, float], scale: float, minimum: float) -> tuple[float, float, float]:
         values = list(map(float, dims))
-        idx = min(range(3), key=values.__getitem__)
-        values[idx] = max(minimum, values[idx] * scale)
+        values[min(range(3), key=values.__getitem__)] = max(minimum, min(values) * scale)
         return tuple(values)
 
     @staticmethod
     def _add_smallest(dims: tuple[float, float, float], amount: float) -> tuple[float, float, float]:
         values = list(map(float, dims))
-        idx = min(range(3), key=values.__getitem__)
-        values[idx] += amount
+        values[min(range(3), key=values.__getitem__)] += amount
         return tuple(values)
 
     @staticmethod
     def _volume_scale(dims: tuple[float, float, float], ratio: float) -> tuple[float, float, float]:
         factor = max(0.25, min(1.3, ratio)) ** (1 / 3)
-        return tuple(float(v) * factor for v in dims)
+        return tuple(float(value) * factor for value in dims)
 
     @staticmethod
     def _reference_template(current: tuple[float, float, float], action: dict[str, Any], key: str) -> tuple[float, float, float]:
-        ref = action["reference_product_size_cm"]
-        template = action[key]
-        current_volume = math.prod(current)
-        ref_volume = math.prod(float(v) for v in ref)
-        scale = (current_volume / ref_volume) ** (1 / 3) if ref_volume > 0 else 1.0
+        reference = action["reference_product_size_cm"]
+        scale = (math.prod(current) / math.prod(float(value) for value in reference)) ** (1 / 3)
         scale = max(float(action.get("scale_min", 0.5)), min(float(action.get("scale_max", 3.0)), scale))
-        return tuple(float(v) * scale for v in template)
+        return tuple(float(value) * scale for value in action[key])
 
     def _apply_action(self, dims: tuple[float, float, float], action: dict[str, Any], *, conservative: bool) -> tuple[float, float, float]:
         kind = action.get("type")
         if kind == "smallest_axis_scale":
-            scale = float(action["conservative" if conservative else "normal"])
-            return self._scale_smallest(dims, scale, float(action.get("min_cm", 0.5)))
+            return self._scale_smallest(dims, float(action["conservative" if conservative else "normal"]), float(action.get("min_cm", 0.5)))
         if kind == "smallest_axis_add":
-            amount = float(action["conservative_cm" if conservative else "normal_cm"])
-            return self._add_smallest(dims, amount)
+            return self._add_smallest(dims, float(action["conservative_cm" if conservative else "normal_cm"]))
         if kind == "volume_ratio":
-            ratio = float(action["conservative" if conservative else "normal"])
-            return self._volume_scale(dims, ratio)
+            return self._volume_scale(dims, float(action["conservative" if conservative else "normal"]))
         if kind == "reference_scaled_template":
-            key = "conservative_package_size_cm" if conservative else "normal_package_size_cm"
-            return self._reference_template(dims, action, key)
+            return self._reference_template(dims, action, "conservative_package_size_cm" if conservative else "normal_package_size_cm")
         return dims
 
-    def _sample_matches(self, observation: AIObservation) -> list[dict[str, Any]]:
-        text = self._text(observation)
-        material = str(observation.material or "").lower()
-        ranked: list[tuple[int, dict[str, Any]]] = []
-        for rule in self.registry.get("sample_rules", []):
-            score = 0
-            for term in rule.get("match_terms") or []:
-                term = str(term).lower().strip()
-                if len(term) >= 2 and term in text:
-                    score += 2
-            rule_material = str(rule.get("material") or "").lower()
-            if rule_material and rule_material in material:
-                score += 3
-            if rule.get("rigidity") == observation.rigidity and observation.rigidity != "unknown":
-                score += 2
-            if score >= 3:
-                ranked.append((score, rule))
-        ranked.sort(key=lambda item: item[0], reverse=True)
-        return [rule for _, rule in ranked[:8]]
+    def _state(self, observation: AIObservation) -> PackagingState:
+        hint = observation.packaging_state_hint
+        if hint != PackagingState.UNKNOWN.value and hint in {item.value for item in PackagingState}:
+            return PackagingState(hint)
+        actions, constraints = self._actions(observation), self._constraints(observation)
+        if observation.requires_shape_retention is True or "retain_shape" in actions or "rigid_outline" in constraints:
+            return PackagingState.SHAPE_RETAINED
+        if "flat_fold" in actions or observation.overall_form in {"soft_flat", "hard_flat"}:
+            return PackagingState.FULL_FLAT_FOLD
+        if "compress" in actions or observation.compressibility == "good":
+            return PackagingState.STRONG_COMPRESSION
+        return PackagingState.MODERATE_COMPRESSION
 
-    @staticmethod
-    def _generic_fallback(observation: AIObservation):
-        """Low-confidence packaging input for a recognizable product with missing measurements."""
+    def _generic_fallback(self, observation: AIObservation):
+        """Last-resort proposal based on physical form, never material hardness alone."""
         identifiable = bool(observation.product_name or observation.product_type or observation.product_family_code != "unknown")
         if not identifiable:
             return None
-        if observation.rigidity == "hard" or observation.requires_shape_retention is True:
-            return (20.0, 15.0, 8.0), (23.0, 18.0, 11.0), 250.0, 320.0, PackagingState.SHAPE_RETAINED, "hard_shape_retained"
-        if observation.rigidity == "semi_rigid":
-            return (20.0, 14.0, 5.0), (23.0, 17.0, 8.0), 150.0, 210.0, PackagingState.MODERATE_COMPRESSION, "semi_rigid_foldable"
+        form = observation.overall_form
+        actions, constraints = self._actions(observation), self._constraints(observation)
+        if observation.requires_shape_retention is True or "retain_shape" in actions or "rigid_outline" in constraints:
+            return (20.0, 15.0, 8.0), (23.0, 18.0, 11.0), 250.0, 320.0, PackagingState.SHAPE_RETAINED, "explicit_shape_retained"
+        if form in {"soft_flat", "hard_flat"} or "flat_fold" in actions:
+            return (25.0, 15.0, 2.0), (27.0, 17.0, 4.0), 60.0, 90.0, PackagingState.FULL_FLAT_FOLD, "flat_form"
+        if form == "flexible_chain" or "coil" in actions:
+            return (20.0, 15.0, 2.0), (23.0, 18.0, 4.0), 80.0, 120.0, PackagingState.MODERATE_COMPRESSION, "flexible_coiled"
+        if form == "hard_long":
+            return (25.0, 8.0, 4.0), (28.0, 10.0, 6.0), 180.0, 240.0, PackagingState.MODERATE_COMPRESSION, "hard_long_protected"
+        if form == "soft_bulky":
+            return (28.0, 20.0, 8.0), (31.0, 23.0, 11.0), 180.0, 250.0, PackagingState.MODERATE_COMPRESSION, "soft_bulky_protected"
         if observation.compressibility == "good" and observation.foldability == "good":
-            return (25.0, 15.0, 2.0), (27.0, 17.0, 4.0), 60.0, 90.0, PackagingState.FULL_FLAT_FOLD, "soft_flat_foldable"
+            return (25.0, 15.0, 2.0), (27.0, 17.0, 4.0), 60.0, 90.0, PackagingState.FULL_FLAT_FOLD, "soft_foldable"
         return (25.0, 18.0, 5.0), (28.0, 21.0, 8.0), 120.0, 180.0, PackagingState.MODERATE_COMPRESSION, "unknown_identifiable_product"
 
+    @staticmethod
+    def _monotonic(normal: PackagingScenario, conservative: PackagingScenario) -> bool:
+        return all(float(getattr(conservative, key) or 0) >= float(getattr(normal, key) or 0)
+                   for key in ("length_cm", "width_cm", "height_cm", "weight_g"))
+
+    def _validate_candidate(self, normal: PackagingScenario, conservative: PackagingScenario,
+                            observation: AIObservation) -> list[str]:
+        reasons: list[str] = []
+        if not normal.is_complete() or not conservative.is_complete():
+            reasons.append("missing_or_nonpositive_dimensions_or_weight")
+        if not self._monotonic(normal, conservative):
+            reasons.append("conservative_below_normal")
+        constraints = self._constraints(observation)
+        compressed = {PackagingState.FULL_FLAT_FOLD, PackagingState.STRONG_COMPRESSION}
+        if "do_not_compress" in constraints and normal.packaging_state in compressed:
+            reasons.append("violates_do_not_compress")
+        if "longest_nonfoldable_axis" in constraints and observation.length_cm and normal.length_cm and normal.length_cm < observation.length_cm:
+            reasons.append("shorter_than_nonfoldable_axis")
+        if "rigid_outline" in constraints and normal.packaging_state == PackagingState.FULL_FLAT_FOLD:
+            reasons.append("violates_rigid_outline")
+        return reasons
+
+    @staticmethod
+    def _record(source: str, normal: PackagingScenario | None, conservative: PackagingScenario | None,
+                *, confidence: str, evidence: list[str], matched_rule_ids: list[str] | None = None,
+                rejection_reasons: list[str] | None = None, adjustments: list[str] | None = None) -> dict[str, Any]:
+        return {
+            "source": source, "normal": normal.to_dict() if normal else None,
+            "conservative": conservative.to_dict() if conservative else None,
+            "confidence": confidence, "evidence": evidence,
+            "matched_rule_ids": list(matched_rule_ids or []),
+            "rejection_reasons": list(rejection_reasons or []), "adjustments": list(adjustments or []),
+        }
+
+    def _proposal_from_dims(self, observation: AIObservation, *, source: str,
+                            dims: tuple[float, float, float], weight: float,
+                            conservative_dims: tuple[float, float, float] | None = None,
+                            conservative_weight: float | None = None,
+                            method: str = "local protective packaging", confidence: str = "low",
+                            ids: list[str] | None = None) -> tuple[PackagingScenario, PackagingScenario]:
+        state = self._state(observation)
+        conservative_dims = conservative_dims or tuple(value * 1.06 for value in dims)
+        conservative_weight = conservative_weight if conservative_weight is not None else max(weight, weight + max(20.0, weight * 0.08))
+        normal = self._scenario("正常档", state, method, dims, weight, f"{source} candidate", confidence, True, ids)
+        conservative = self._scenario("保守档", state, method + " (conservative)", conservative_dims, conservative_weight,
+                                      f"{source} candidate", confidence, True, ids)
+        return normal, conservative
+
     def estimate(self, observation: AIObservation, *, external_proposal: PackagingProposal | None = None) -> PackagingProposal:
+        records: dict[str, dict[str, Any]] = {}
+        rejected: dict[str, list[str]] = {}
+        review: list[str] = []
+        applied_ids: list[str] = []
         obs_dims = (observation.length_cm, observation.width_cm, observation.height_cm)
         dims_complete = self._complete(obs_dims)
-        hard, hard_unknown = self._hard_state(observation)
-        shipping_dims_authoritative = observation.dimension_scope == "shipping_package_size" and dims_complete
-        packaged_weight_authoritative = observation.weight_scope == "packaged_weight" and observation.weight_g and observation.weight_g > 0
+        shipping_dims = observation.dimension_scope == "shipping_package_size" and dims_complete
+        shipping_weight = observation.weight_scope == "packaged_weight" and bool(observation.weight_g and observation.weight_g > 0)
+        ai_normal = external_proposal.normal if external_proposal else None
+        ai_conservative = external_proposal.conservative if external_proposal else None
 
-        external_normal = external_proposal.normal if external_proposal else None
-        if shipping_dims_authoritative:
-            base_dims = tuple(float(v) for v in obs_dims if v is not None)
-        elif dims_complete:
-            base_dims = tuple(float(v) for v in obs_dims if v is not None)
-        elif external_normal and external_normal.is_complete():
-            base_dims = (float(external_normal.length_cm), float(external_normal.width_cm), float(external_normal.height_cm))
-        else:
-            base_dims = None
+        # Strong facts are the only unconditional priorities.
+        merchant_normal = merchant_conservative = None
+        merchant_weight = float(observation.weight_g) if shipping_weight else (
+            float(ai_normal.weight_g) if ai_normal and ai_normal.weight_g and ai_normal.weight_g > 0 else None
+        )
+        if shipping_dims and merchant_weight is not None:
+            merchant_normal, merchant_conservative = self._proposal_from_dims(
+                observation, source="merchant", dims=tuple(float(value) for value in obs_dims), weight=merchant_weight,
+                conservative_dims=tuple(float(value) for value in obs_dims), conservative_weight=merchant_weight if shipping_weight else None,
+                method="verified shipping package", confidence="high")
+            records["merchant_candidate"] = self._record("merchant_candidate", merchant_normal, merchant_conservative,
+                                                           confidence="high", evidence=["merchant_shipping_package"])
 
-        if packaged_weight_authoritative:
-            base_weight = float(observation.weight_g)
-        elif external_normal and external_normal.weight_g and external_normal.weight_g > 0:
-            base_weight = float(external_normal.weight_g)
-        elif observation.weight_g and observation.weight_g > 0:
-            addition = max(20.0, min(300.0, float(observation.weight_g) * 0.08))
-            base_weight = float(observation.weight_g) + addition
-        else:
-            base_weight = None
+        if ai_normal and ai_conservative:
+            ai_reasons = self._validate_candidate(ai_normal, ai_conservative, observation)
+            if shipping_dims and ai_normal.is_complete() and tuple(round(float(value), 1) for value in (ai_normal.length_cm, ai_normal.width_cm, ai_normal.height_cm)) != tuple(round(float(value), 1) for value in obs_dims):
+                ai_reasons.append("conflicts_with_merchant_shipping_dimensions")
+            records["ai_candidate"] = self._record("ai_candidate", ai_normal, ai_conservative,
+                                                    confidence=ai_normal.confidence, evidence=["vision_packaging_proposal"],
+                                                    matched_rule_ids=external_proposal.applied_profile_ids,
+                                                    rejection_reasons=ai_reasons)
+            if ai_reasons:
+                rejected["ai_candidate"] = ai_reasons
 
-        fallback = self._generic_fallback(observation) if base_dims is None or base_weight is None else None
-        if fallback:
-            fallback_normal_dims, fallback_conservative_dims, fallback_normal_weight, fallback_conservative_weight, fallback_state, fallback_id = fallback
-            base_dims = base_dims or fallback_normal_dims
-            base_weight = base_weight or fallback_normal_weight
+        matched = [rule for rule in sorted(self.registry.get("aggregate_rules", []), key=lambda item: int(item.get("priority", 0)), reverse=True)
+                   if rule.get("enabled", True) and self._match_rule(rule, observation)]
+        selected = matched[0] if matched else None
+        base_dims = tuple(float(value) for value in obs_dims) if dims_complete else None
+        base_weight = float(observation.weight_g) if observation.weight_g and observation.weight_g > 0 else None
+        if not base_dims and ai_normal and ai_normal.is_complete():
+            base_dims = (float(ai_normal.length_cm), float(ai_normal.width_cm), float(ai_normal.height_cm))
+        if base_weight is None and ai_normal and ai_normal.weight_g:
+            base_weight = float(ai_normal.weight_g)
+        if base_weight is not None and not shipping_weight and observation.weight_g and observation.weight_scope != "packaged_weight":
+            base_weight += max(20.0, min(300.0, base_weight * 0.08))
 
-        review: list[str] = []
-        conflicts: list[str] = []
-        applied_ids: list[str] = []
-        matched_aggregate = [
-            rule for rule in sorted(self.registry.get("aggregate_rules", []), key=lambda r: int(r.get("priority", 0)), reverse=True)
-            if rule.get("enabled", True) and self._match_rule(rule, observation)
-        ]
-        selected = matched_aggregate[0] if matched_aggregate else None
-        sample_matches = self._sample_matches(observation)
-        applied_ids.extend(str(rule.get("rule_id")) for rule in sample_matches)
-
-        if selected:
-            applied_ids = list(dict.fromkeys(selected.get("source_cal_ids", []) + [selected["rule_id"]] + applied_ids))
-            review.append(f"命中本地规则：{selected['rule_id']}（{selected['name']}）")
-        elif sample_matches:
-            review.append("命中历史CAL相似记录，但无专用动作规则；采用样本体积比例中位数。")
-        else:
-            review.append("未命中专用CAL规则，采用通用保护性候选。")
-        if fallback:
-            review.append(f"商品可识别但缺少尺寸或重量，采用低置信通用回退：{fallback_id}。")
-            applied_ids.append(f"GENERIC-{fallback_id.upper()}")
-
-        normal_dims = conservative_dims = base_dims
-        state = PackagingState.UNKNOWN
-        method_normal, method_conservative = "常规包装", "保护性包装"
-        confidence = "low"
-
-        if shipping_dims_authoritative:
-            state = PackagingState.SHAPE_RETAINED if hard else PackagingState.UNKNOWN
-            method_normal = "已验证运输包装尺寸"
-            method_conservative = "已验证运输包装尺寸"
-            review.append("运输包装尺寸为高优先级事实，本地规则未覆盖。")
-        elif base_dims and selected:
+        cal_normal = cal_conservative = None
+        if selected and base_dims and base_weight is not None:
+            ids = list(dict.fromkeys([*selected.get("source_cal_ids", []), str(selected["rule_id"])]))
             normal_dims = self._apply_action(base_dims, selected.get("action") or {}, conservative=False)
             conservative_dims = self._apply_action(base_dims, selected.get("action") or {}, conservative=True)
-            hint = getattr(observation, "packaging_state_hint", "unknown")
-            if hint in {item.value for item in PackagingState}:
-                state = PackagingState(hint)
-            elif hard:
-                state = PackagingState.SHAPE_RETAINED
-            elif observation.compressibility == "good":
-                state = PackagingState.STRONG_COMPRESSION
+            cal_normal, cal_conservative = self._proposal_from_dims(
+                observation, source="cal", dims=normal_dims, weight=base_weight,
+                conservative_dims=conservative_dims, method=str(selected["name"]),
+                confidence=str(selected.get("confidence") or "low"), ids=ids)
+            cal_reasons = self._validate_candidate(cal_normal, cal_conservative, observation)
+            records["cal_candidate"] = self._record("cal_candidate", cal_normal, cal_conservative,
+                                                     confidence=cal_normal.confidence, evidence=["compatible_cal_rule"],
+                                                     matched_rule_ids=ids, rejection_reasons=cal_reasons)
+            if cal_reasons:
+                rejected["cal_candidate"] = cal_reasons
             else:
-                state = PackagingState.MODERATE_COMPRESSION
-            method_normal = selected["name"]
-            method_conservative = selected["name"] + "（保守）"
-            confidence = str(selected.get("confidence") or "low")
-        elif base_dims and sample_matches:
-            ratios = [float(rule["volume_ratio"]) for rule in sample_matches if isinstance(rule.get("volume_ratio"), (int, float)) and 0.05 <= float(rule["volume_ratio"]) <= 1.35]
-            if ratios:
-                ratios.sort()
-                ratio = ratios[len(ratios)//2]
-                normal_dims = self._volume_scale(base_dims, ratio)
-                conservative_dims = self._volume_scale(base_dims, min(1.0, (ratio + 1.0) / 2.0))
-                state = PackagingState.MODERATE_COMPRESSION
-                method_normal = "CAL相似样本比例修正"
-                method_conservative = "CAL相似样本保护性修正"
-        elif base_dims:
-            if hard or hard_unknown:
-                normal_dims = tuple(v * 1.02 for v in base_dims)
-                conservative_dims = tuple(v * 1.08 for v in base_dims)
-                state = PackagingState.SHAPE_RETAINED
-                method_normal, method_conservative = "保形包装", "加固保形包装"
-            else:
-                conservative_dims = tuple(v * 1.06 for v in base_dims)
+                applied_ids.extend(ids)
+        elif selected:
+            records["cal_candidate"] = self._record("cal_candidate", None, None, confidence="low",
+                                                     evidence=["compatible_cal_rule"], matched_rule_ids=[str(selected["rule_id"])],
+                                                     rejection_reasons=["missing_base_dimensions_or_weight"])
+            rejected["cal_candidate"] = ["missing_base_dimensions_or_weight"]
 
+        fallback = self._generic_fallback(observation)
+        generic_normal = generic_conservative = None
         if fallback:
-            if not dims_complete:
-                normal_dims, conservative_dims = fallback_normal_dims, fallback_conservative_dims
-            state = fallback_state
-            method_normal, method_conservative = f"通用回退：{fallback_id}", f"通用回退：{fallback_id}（保守）"
+            normal_dims, conservative_dims, normal_weight, conservative_weight, state, fallback_id = fallback
+            if base_dims and base_weight is not None:
+                generic_normal, generic_conservative = self._proposal_from_dims(
+                    observation, source="generic", dims=base_dims, weight=base_weight,
+                    method="generic structural protection", confidence="low", ids=["GENERIC-OBSERVED-STRUCTURE"])
+            else:
+                generic_normal = self._scenario("正常档", state, f"generic fallback: {fallback_id}", normal_dims, normal_weight,
+                                                "no valid AI or CAL candidate", "low", True, [f"GENERIC-{fallback_id.upper()}"])
+                generic_conservative = self._scenario("保守档", state, f"generic fallback: {fallback_id} (conservative)", conservative_dims,
+                                                      conservative_weight, "no valid AI or CAL candidate", "low", True,
+                                                      [f"GENERIC-{fallback_id.upper()}"])
+            generic_reasons = self._validate_candidate(generic_normal, generic_conservative, observation)
+            records["generic_candidate"] = self._record("generic_candidate", generic_normal, generic_conservative,
+                                                         confidence="low", evidence=["physical_form_fallback"],
+                                                         rejection_reasons=generic_reasons)
+            if generic_reasons:
+                rejected["generic_candidate"] = generic_reasons
 
-        if normal_dims and conservative_dims:
-            conservative_dims = tuple(max(n, c) for n, c in zip(normal_dims, conservative_dims))
+        # The selected output stays a single PackagingProposal for UI, logistics and history.
+        if merchant_normal and merchant_conservative:
+            source, normal, conservative = "merchant_candidate", merchant_normal, merchant_conservative
+            review.append("merchant shipping package facts adopted")
+        elif ai_normal and ai_conservative and "ai_candidate" not in rejected:
+            source, normal, conservative = "ai_candidate", ai_normal, ai_conservative
+            review.append("complete AI packaging candidate adopted after local validation")
+        elif cal_normal and cal_conservative and "cal_candidate" not in rejected:
+            source, normal, conservative = "cal_candidate", cal_normal, cal_conservative
+            review.append("AI candidate unavailable or invalid; compatible CAL candidate adopted")
+        elif generic_normal and generic_conservative and "generic_candidate" not in rejected:
+            source, normal, conservative = "generic_candidate", generic_normal, generic_conservative
+            review.append("AI and CAL could not form a valid candidate; generic physical-form fallback adopted")
+            applied_ids.append("GENERIC")
+        else:
+            source = "no_valid_candidate"
+            normal = self._scenario("正常档", PackagingState.UNKNOWN, "", None, None, "no valid candidate", "low", True)
+            conservative = self._scenario("保守档", PackagingState.UNKNOWN, "", None, None, "no valid candidate", "low", True)
+            review.append("no complete packaging candidate could be generated")
 
-        normal_weight = base_weight
-        conservative_weight = base_weight
-        if base_weight is not None and not packaged_weight_authoritative:
-            conservative_weight = max(base_weight, base_weight + max(20.0, base_weight * 0.08))
-        if fallback and not observation.weight_g:
-            normal_weight, conservative_weight = fallback_normal_weight, fallback_conservative_weight
-        if packaged_weight_authoritative:
-            review.append("包装重量为高优先级事实，本地规则未覆盖。")
-
-        if external_proposal:
-            conflicts.append("外部AI包装候选已保留用于审计；页面采用本地CAL输出。")
-        reason = selected.get("reason", "由本地CAL规则和当前结构化事实生成。") if selected else review[-1]
-        needs_review = True  # conservative档本身承担风险提示；单样本立即启用仍保留低置信标记
-        normal = self._scenario("正常档", state, method_normal, normal_dims, normal_weight, reason, confidence, needs_review, applied_ids)
-        conservative = self._scenario("保守档", state, method_conservative, conservative_dims, conservative_weight, "在正常档基础上减少压缩并保留保护余量。", confidence, needs_review, applied_ids)
-
-        local_map = {"normal": normal.to_dict(), "conservative": conservative.to_dict()}
-        original = {}
-        if external_proposal:
-            original = {"normal": external_proposal.normal.to_dict(), "conservative": external_proposal.conservative.to_dict()}
+        if rejected:
+            review.extend(f"{source} rejected: {', '.join(reasons)}" for source, reasons in rejected.items())
+        original = {"normal": ai_normal.to_dict(), "conservative": ai_conservative.to_dict()} if ai_normal and ai_conservative else {}
+        local = {"normal": normal.to_dict(), "conservative": conservative.to_dict()}
         return PackagingProposal(
-            normal=normal, conservative=conservative,
-            proposal_source="generic_fallback" if fallback and not selected else "local_calibration_authoritative",
-            needs_review=needs_review,
-            review_reasons=list(dict.fromkeys(review)),
-            original_scenarios=original,
-            local_proposed_scenarios=local_map,
-            adjusted_scenarios=local_map,
-            conflicts=conflicts,
-            applied_profile_ids=list(dict.fromkeys(applied_ids)),
-            engine_version=self.ENGINE_VERSION,
+            normal=normal, conservative=conservative, proposal_source=source,
+            needs_review=True, review_reasons=review, original_scenarios=original,
+            local_proposed_scenarios=local, adjusted_scenarios=local,
+            conflicts=[reason for reasons in rejected.values() for reason in reasons],
+            applied_profile_ids=list(dict.fromkeys(applied_ids)), candidate_records=records,
+            rejected_candidates=rejected, adjustments=[], engine_version=self.ENGINE_VERSION,
             calibration_version=self.calibration_version,
         )

@@ -26,7 +26,28 @@ def normalize_observation(observation: AIObservation) -> AIObservation:
                 observation.product_type_code = "split_toe_socks" if any(word in haystack for word in ("分趾", "二趾", "split toe", "tabi")) else "hosiery"
             else:
                 observation.product_type_code = key
-            return observation
+            return _normalize_physical_structure(observation)
     observation.product_type_code = observation.product_type_code if observation.product_type_code != "unknown" else "unknown"
     observation.product_family_code = observation.product_family_code if observation.product_family_code != "unknown" else "unknown"
+    return _normalize_physical_structure(observation)
+
+
+def _normalize_physical_structure(observation: AIObservation) -> AIObservation:
+    """Derive only safe transport-form defaults for older AI responses.
+
+    Material hardness is deliberately not used as a synonym for a rigid,
+    shape-retained product.
+    """
+    observation.packing_actions = [str(value) for value in (observation.packing_actions or []) if str(value)]
+    observation.packing_constraints = [str(value) for value in (observation.packing_constraints or []) if str(value)]
+    if observation.overall_form != "unknown":
+        return observation
+    if observation.requires_shape_retention is True:
+        observation.overall_form = "hard_3d"
+    elif "coil" in observation.packing_actions:
+        observation.overall_form = "flexible_chain"
+    elif "flat_fold" in observation.packing_actions:
+        observation.overall_form = "soft_flat"
+    elif observation.rigidity == "soft" and observation.foldability == "good":
+        observation.overall_form = "soft_flat"
     return observation

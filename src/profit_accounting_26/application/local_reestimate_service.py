@@ -29,6 +29,7 @@ class LocalReestimateService:
     ALLOWED_PATCH_FIELDS = {
         "product_name", "product_type", "product_family", "material", "material_family",
         "rigidity", "foldability", "compressibility", "packaging_state_hint",
+        "overall_form", "packing_actions", "packing_constraints",
         "requires_shape_retention", "has_hard_bottom", "has_hard_backboard",
         "has_frame", "has_rigid_insert", "has_rigid_parts", "retail_box_visible",
         "hard_card_visible", "protrusion_flattenable", "length_cm", "width_cm",
