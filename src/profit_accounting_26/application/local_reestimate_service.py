@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 
 from profit_accounting_26.application.api_profile_store import ApiProfileStore, LOCAL_REESTIMATE
 from profit_accounting_26.application.recognition_service import RecognitionResponseError, RecognitionUnavailableError
+from profit_accounting_26.domain.models import PackagingProposal
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +17,9 @@ class LocalReestimateResult:
     recognition_summary: str
     observation_patch: dict[str, Any]
     changed_fields: list[str]
+    product_summary: str = ""
+    packaging_summary: str = ""
+    packaging_proposal: PackagingProposal | None = None
     elapsed_ms: int = 0
 
 
@@ -49,13 +53,24 @@ class LocalReestimateService:
     @classmethod
     def _context(cls, *, original_summary: str, current_summary: str,
                  original_observation: dict[str, Any], user_overrides: dict[str, Any],
-                 adopted_normal: dict[str, Any] | None = None) -> str:
+                 adopted_normal: dict[str, Any] | None = None,
+                 original_product_summary: str = "", current_product_summary: str = "",
+                 original_packaging_summary: str = "", current_packaging_summary: str = "",
+                 cal_summary: list[str] | None = None, rejected_candidates: dict[str, list[str]] | None = None,
+                 visual_evidence: dict[str, Any] | None = None) -> str:
         payload = {
             "original_summary": original_summary,
             "edited_summary": current_summary,
             "original_observation": original_observation,
             "user_confirmed_overrides": user_overrides,
             "adopted_normal_packaging": adopted_normal or {},
+            "original_product_summary": original_product_summary,
+            "current_product_summary": current_product_summary,
+            "original_packaging_summary": original_packaging_summary,
+            "current_packaging_summary": current_packaging_summary,
+            "cal_summary": cal_summary or [],
+            "rejected_candidates": rejected_candidates or {},
+            "first_vision_evidence": visual_evidence or {},
         }
         fields = sorted(cls.ALLOWED_PATCH_FIELDS)
         return (
@@ -66,8 +81,11 @@ class LocalReestimateService:
             "compressibility=good、packaging_state_hint=strong_compression 或 full_flat_fold；"
             "存在硬底、框架、保形时不得同时标记完全压平。"
             f"允许字段：{fields}。"
-            "只返回JSON：{\"recognition_summary\":\"\","
-            "\"observation_patch\":{},\"changed_fields\":[]}。输入：\n"
+            "根据修改后的两条摘要重新判断整体结构、包装容器/动作/保护和缺失估算；不得照抄用户文字。"
+            "返回的包装候选会经过本地校验和CAL仲裁，已确认数字不得覆盖。"
+            "packaging_proposal must contain normal and conservative scenarios with packaging_method, length_cm, width_cm, height_cm, weight_g, confidence and needs_review."
+            "只返回JSON：{\"recognition_summary\":\"\",\"product_summary\":\"\",\"packaging_summary\":\"\","
+            "\"observation_patch\":{},\"changed_fields\":[],\"packaging_proposal\":{}}。输入：\n"
             + json.dumps(payload, ensure_ascii=False)
         )
 
@@ -113,9 +131,19 @@ class LocalReestimateService:
         changed = [key for key in data.get("changed_fields", []) if key in patch]
         if not changed:
             changed = list(patch)
+        proposal = None
+        proposal_raw = data.get("packaging_proposal")
+        if isinstance(proposal_raw, dict) and proposal_raw.get("normal") and proposal_raw.get("conservative"):
+            try:
+                proposal = PackagingProposal.from_dict(proposal_raw)
+            except (KeyError, TypeError, ValueError):
+                proposal = None
         return LocalReestimateResult(
             recognition_summary=str(data.get("recognition_summary") or ""),
             observation_patch=patch,
             changed_fields=changed,
+            product_summary=str(data.get("product_summary") or ""),
+            packaging_summary=str(data.get("packaging_summary") or ""),
+            packaging_proposal=proposal,
             elapsed_ms=round((time.perf_counter() - started) * 1000),
         )

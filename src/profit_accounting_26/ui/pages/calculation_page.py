@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from profit_accounting_26.application import AppContext, CalculationService, ImageSession
 from profit_accounting_26.application.calculation_session import CalculationSession
 from profit_accounting_26.application.category_normalizer import normalize_observation
+from profit_accounting_26.application.packaging_presentation import normal_reminder, packaging_summary, product_summary
 from profit_accounting_26.application.recognition_service import (
     RecognitionCancellation,
     RecognitionCancelledError,
@@ -274,7 +275,7 @@ class CalculationPage(QWidget):
                 item.widget().hide()
         self.content_layout.addWidget(card)
 
-    def _package_card(self, title: str, *, selected: bool = False) -> tuple[Card, dict[str, Any]]:
+    def _package_card(self, title: str, *, selected: bool = False, frozen_reminder: bool = False) -> tuple[Card, dict[str, Any]]:
         card = Card(soft=True)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(8, 7, 8, 8)
@@ -288,6 +289,13 @@ class CalculationPage(QWidget):
         changed.setProperty("primary", True)
         title_row.addWidget(changed)
         layout.addLayout(title_row)
+        reason = QLabel("待估算")
+        reason.setWordWrap(True)
+        reason.setProperty("muted", True)
+        reason.setMaximumHeight(34)
+        if frozen_reminder:
+            reason.setProperty("frozen", True)
+            layout.addWidget(reason)
         method = QuickLineEdit()
         method.setPlaceholderText("包装方式")
         layout.addWidget(method)
@@ -301,11 +309,8 @@ class CalculationPage(QWidget):
         layout.addLayout(dims)
         weight = LabeledSpin("包装后重量", suffix="g", decimals=1, maximum=100000, input_width=84, special_text="—")
         layout.addWidget(weight)
-        reason = QLabel("待估算")
-        reason.setWordWrap(True)
-        reason.setProperty("muted", True)
-        reason.setMaximumHeight(34)
-        layout.addWidget(reason)
+        if not frozen_reminder:
+            layout.addWidget(reason)
         return card, {
             "name": title,
             "card": card,
@@ -355,7 +360,7 @@ class CalculationPage(QWidget):
         bare_layout.addWidget(self.bare_weight)
         bare_layout.addStretch(1)
 
-        normal_card, self.normal_fields = self._package_card("正常档", selected=True)
+        normal_card, self.normal_fields = self._package_card("正常档", selected=True, frozen_reminder=True)
         conservative_card, self.conservative_fields = self._package_card("保守档")
         self.package_group = QButtonGroup(self)
         self.package_group.setExclusive(True)
@@ -660,10 +665,10 @@ class CalculationPage(QWidget):
         previous_updating = self._updating
         self._updating = True
         if observation.product_name or observation.product_type:
-            self.product_summary.setText(observation.product_name or observation.product_type)
+            self.product_summary.setText(product_summary(observation))
         if observation.material:
             self.material_summary.setText(observation.material)
-        self.structure_summary.setText(self._observation_structure_summary(observation))
+        self.structure_summary.setText(observation.display_packaging_summary or self._observation_structure_summary(observation))
         self._set_combo_data(self.rigidity_combo, observation.rigidity)
         self._set_combo_data(self.foldability_combo, observation.foldability)
         self._set_combo_data(self.compressibility_combo, observation.compressibility)
@@ -692,6 +697,13 @@ class CalculationPage(QWidget):
             self.structure_checks[key].setChecked(value is True)
         known_false = flags and all(value is False for value in flags.values())
         self.structure_checks["no_hard_structure"].setChecked(known_false)
+        self._updating = previous_updating
+
+    def _refresh_display_summaries(self, observation: AIObservation, proposal: PackagingProposal) -> None:
+        previous_updating = self._updating
+        self._updating = True
+        self.product_summary.setText(product_summary(observation))
+        self.structure_summary.setText(packaging_summary(observation, proposal))
         self._updating = previous_updating
 
     def run_recognition(self) -> None:
@@ -773,11 +785,14 @@ class CalculationPage(QWidget):
         self.session.ai_packaging_proposal = external_proposal
         self.session.observation = observation
         self.observation = self.session.observation
-        self._apply_observation(observation)
         self._adopt_packaging(self.context.packaging_service.estimate(observation, external_proposal=external_proposal))
+        self._apply_observation(observation)
+        self._refresh_display_summaries(observation, self._adopted_packaging())
         self.apply_proposal(self._adopted_packaging())
         self._ai_baseline = {
             "summary": self._current_summary(),
+            "product_summary": self.product_summary.text(),
+            "packaging_summary": self.structure_summary.text(),
             "bare_spec": {
                 "length_cm": observation.length_cm, "width_cm": observation.width_cm,
                 "height_cm": observation.height_cm, "weight_g": observation.weight_g,
@@ -897,9 +912,16 @@ class CalculationPage(QWidget):
         context = {
             "original_summary": str(original["summary"]),
             "current_summary": self._current_summary(),
-            "original_observation": self.observation.to_dict(),
+            "original_observation": dict(self.session.ai_raw_observation or self.observation.to_dict()),
             "user_overrides": {**self.session.user_overrides, **adopted_bare},
-            "adopted_normal": self._adopted_packaging().normal.to_dict() if self._adopted_packaging() else {},
+            "adopted_normal": adopted_normal or (self._adopted_packaging().normal.to_dict() if self._adopted_packaging() else {}),
+            "original_product_summary": str(original.get("product_summary") or ""),
+            "current_product_summary": self.product_summary.text().strip(),
+            "original_packaging_summary": str(original.get("packaging_summary") or ""),
+            "current_packaging_summary": self.structure_summary.text().strip(),
+            "cal_summary": list(self.session.matched_cal_rules),
+            "rejected_candidates": dict(self._adopted_packaging().rejected_candidates) if self._adopted_packaging() else {},
+            "visual_evidence": dict(self.session.ai_raw_response.get("field_evidence") or {}),
         }
         self._local_diagnostic_operation = self.context.diagnostic_logger.begin_operation("local-reestimate")
         self._local_diagnostic_operation.event("local_reestimate_requested", observation_patch=adopted_bare)
@@ -946,20 +968,36 @@ class CalculationPage(QWidget):
 
     @Slot(object)
     def _local_reestimate_completed(self, result: Any) -> None:
+        confirmed_normal = self._scenario_data(self.normal_fields) if "正常档" in self.manual_scenarios else None
         previous_updating = self._updating
         self._updating = True
-        if result.recognition_summary:
-            self.structure_summary.setText(result.recognition_summary)
+        current_product_summary = self.product_summary.text().strip()
+        current_packaging_summary = self.structure_summary.text().strip()
         changed = self.session.apply_observation_patch(result.observation_patch)
         self.observation = self.session.observation
+        self.observation.display_product_summary = result.product_summary or current_product_summary
+        self.observation.display_packaging_summary = result.packaging_summary or current_packaging_summary
         self._updating = previous_updating
         self._apply_observation(self.observation)
         self.observation = self.collect_observation()
         self.session.observation = self.observation
         self.session.observation = normalize_observation(self.observation)
         self.observation = self.session.observation
-        self._adopt_packaging(self.context.packaging_service.estimate(self.observation))
+        self._adopt_packaging(self.context.packaging_service.estimate(self.observation, external_proposal=result.packaging_proposal))
         self.apply_proposal(self._adopted_packaging())
+        if confirmed_normal:
+            self._updating = True
+            for key, field in (("packaging_method", self.normal_fields["method"]), ("length_cm", self.normal_fields["length"]),
+                               ("width_cm", self.normal_fields["width"]), ("height_cm", self.normal_fields["height"]),
+                               ("weight_g", self.normal_fields["weight"])):
+                value = confirmed_normal.get(key)
+                if key == "packaging_method":
+                    field.setText(str(value or ""))
+                else:
+                    field.setValue(float(value or 0))
+            self.normal_fields["reason"].setText(normal_reminder(self.observation, self._adopted_packaging(), user_modified=True))
+            self._updating = False
+        self._refresh_display_summaries(self.observation, self._adopted_packaging())
         if not changed:
             self.review_badge.setText("结构条件未变化")
         self.packaging_stale = False
@@ -1000,15 +1038,18 @@ class CalculationPage(QWidget):
         previous_updating = self._updating
         self._updating = True
         for scenario, fields in ((proposal.normal, self.normal_fields), (proposal.conservative, self.conservative_fields)):
-            fields["method"].setText(scenario.packaging_method)
+            fields["method"].setText(packaging_summary(self.observation, proposal) if fields is self.normal_fields else scenario.packaging_method)
             fields["length"].setValue(scenario.length_cm or 0)
             fields["width"].setValue(scenario.width_cm or 0)
             fields["height"].setValue(scenario.height_cm or 0)
             fields["weight"].setValue(scenario.weight_g or 0)
-            fields["reason"].setText(scenario.reasoning_summary or "待人工补充")
+            if fields is self.normal_fields:
+                fields["reason"].setText(normal_reminder(self.observation, proposal))
+            else:
+                fields["reason"].setText(scenario.reasoning_summary or "待人工补充")
             fields["changed"].setText("")
         self._updating = previous_updating
-        summary = proposal.normal.packaging_method or "包装信息待补充"
+        summary = packaging_summary(self.observation, proposal)
         self.packaging_summary.setText(summary)
         if proposal.needs_review:
             self.review_badge.setText("需要复核")
@@ -1042,7 +1083,10 @@ class CalculationPage(QWidget):
             return
         self.manual_scenarios.add(name)
         fields = self.normal_fields if name == "正常档" else self.conservative_fields
-        fields["reason"].setText("人工修改 · 需要复核")
+        if name == "正常档" and self._adopted_packaging():
+            fields["reason"].setText(normal_reminder(self.observation, self._adopted_packaging(), user_modified=True))
+        else:
+            fields["reason"].setText("人工修改 · 需要复核")
         fields["changed"].setText("✓")
         self.review_badge.setText("人工修改 · 需要复核")
         self.review_badge.setProperty("warning", True)

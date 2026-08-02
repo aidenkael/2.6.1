@@ -104,6 +104,8 @@ class AIObservation:
     material_family: str = ""
     material_family_code: str = "unknown"
     packaging_state_hint: str = "unknown"
+    display_product_summary: str = ""
+    display_packaging_summary: str = ""
     # Overall transport form is intentionally independent from material rigidity.
     overall_form: str = "unknown"
     packing_actions: list[str] = field(default_factory=list)
