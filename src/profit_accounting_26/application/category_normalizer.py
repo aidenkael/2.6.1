@@ -40,6 +40,19 @@ def _normalize_physical_structure(observation: AIObservation) -> AIObservation:
     """
     observation.packing_actions = [str(value) for value in (observation.packing_actions or []) if str(value)]
     observation.packing_constraints = [str(value) for value in (observation.packing_constraints or []) if str(value)]
+    if observation.overall_form == "soft_bulky":
+        evidence = " ".join(str(value or "").lower() for value in (
+            observation.product_name, observation.product_type, observation.product_family,
+            observation.material, observation.material_family,
+        ))
+        bulky_evidence = ("蓬松", "填充", "毛绒", "海绵", "厚软", "padded", "stuffed", "plush", "foam", "bulky")
+        if not any(term in evidence for term in bulky_evidence):
+            if "coil" in observation.packing_actions:
+                observation.overall_form = "flexible_chain"
+            elif "flat_fold" in observation.packing_actions or observation.foldability == "good":
+                observation.overall_form = "soft_flat"
+            else:
+                observation.overall_form = "unknown"
     if observation.overall_form != "unknown":
         return observation
     if observation.requires_shape_retention is True:

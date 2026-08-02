@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import mimetypes
 import threading
@@ -72,7 +73,7 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-vision-missing-estimates-v4"
+    PROMPT_VERSION = "2.6.1-vision-evidence-merge-v5"
 
     def __init__(self, settings_service: SettingsService, profile_store: ApiProfileStore | None = None) -> None:
         self.settings_service = settings_service
@@ -91,10 +92,22 @@ class RecognitionService:
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
         return f"data:{mime};base64,{encoded}"
 
+    @staticmethod
+    def _stable_paths(image_items: list[dict[str, str]]) -> list[Path]:
+        """Make equivalent multi-image requests independent of UI slot order."""
+        paths = [Path(str(item.get("path") or "")) for item in image_items]
+        keyed_paths: list[tuple[str, str, Path]] = []
+        for path in paths:
+            if not path.is_file():
+                continue
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            keyed_paths.append((digest, str(path.resolve()).lower(), path))
+        return [path for _, _, path in sorted(keyed_paths)]
+
     @classmethod
     def _prompt(cls, image_count: int) -> str:
         return f"""You inspect {image_count} ecommerce images in one request. Return JSON only.
-Rules: (1) scan every image; do not restrict by image slot. (2) Price and domestic shipping need visible text evidence only. (3) extract selected SKU price before range, coupon, struck-through, or starting price. (4) retain estimated and starting shipping values with their type. (5) if product is recognizable but measurements are absent, estimate bare dimensions, bare weight, and both packaging candidates at low confidence. (6) any missing packaging method, normal/conservative dimensions, or normal/conservative weight must be completed as a low-confidence estimate when the product is recognizable; only leave the entire packaging proposal empty when the product itself is unrecognizable. (7) do not interpret packaging not shown as a bare item without packaging. (8) every-box, every-bag, quantity-per-carton, total-carton, or “500 pcs/carton” evidence is bulk purchasing/outer-carton information only, never proof of an individual box or bag. Individual packaging is factual only with explicit “1 piece/box”, “each item OPP bag”, or equivalent evidence. (9) do not calculate freight, profit, or select a forwarder. (10) keep foldability, compressibility, state hint and hard-structure fields consistent. (11) output short evidence and no reasoning prose. (12) user-confirmed values supplied in context must not be changed. (13) display_product_summary is a concise Chinese product subject plus packaging-relevant structure and folding/compression trait, not a copied title, max 30 Chinese characters. (14) display_packaging_summary is Chinese “handling；final individual package type”, max 26 characters; do not include dimensions, weight, source, confidence, CAL IDs, risks, or internal codes. If individual packaging is not shown, use 预计 or 待确认 rather than bare item/no packaging.
+Rules: (1) scan every image; do not restrict by image slot. First classify each image as product, SKU/price, dimensions, weight, individual packaging, bulk carton, or supporting evidence. Treat all images as evidence for the same SKU unless their content clearly proves otherwise. Merge product, price, dimensions, weight, structure, and packaging evidence by evidence quality before deciding overall_form or a packaging candidate; image sequence and image slot have no semantic meaning. (2) Price and domestic shipping need visible text evidence only. (3) extract selected SKU price before range, coupon, struck-through, or starting price. (4) retain estimated and starting shipping values with their type. (5) if product is recognizable but measurements are absent, estimate bare dimensions, bare weight, and both packaging candidates at low confidence. (6) any missing packaging method, normal/conservative dimensions, or normal/conservative weight must be completed as a low-confidence estimate when the product is recognizable; only leave the entire packaging proposal empty when the product itself is unrecognizable. (7) do not interpret packaging not shown as a bare item without packaging. (8) every-box, every-bag, quantity-per-carton, total-carton, or “500 pcs/carton” evidence is bulk purchasing/outer-carton information only, never proof of an individual box or bag. Individual packaging is factual only with explicit “1 piece/box”, “each item OPP bag”, or equivalent evidence. (9) do not calculate freight, profit, or select a forwarder. (10) keep foldability, compressibility, state hint and hard-structure fields consistent. (11) output short evidence and no reasoning prose. (12) user-confirmed values supplied in context must not be changed. (13) display_product_summary is a concise Chinese product subject plus packaging-relevant structure and folding/compression trait, not a copied title, max 30 Chinese characters. (14) display_packaging_summary is Chinese “handling；final individual package type”, max 26 characters; do not include dimensions, weight, source, confidence, CAL IDs, risks, or internal codes. If individual packaging is not shown, use 预计 or 待确认 rather than bare item/no packaging.
 Schema: {{"observation":{{"product_name":"","product_type_raw":"","product_family_raw":"","material_raw":"","display_product_summary":"","display_packaging_summary":"","overall_form":"soft_flat|soft_bulky|flexible_chain|articulated|hard_flat|hard_long|hard_3d|hollow_crushable|fragile_protruding|mixed|unknown","packing_actions":[],"packing_constraints":[],"rigidity":"unknown|soft|semi_rigid|hard","foldability":"unknown|none|limited|good","compressibility":"unknown|none|limited|good","packaging_state_hint":"unknown|full_flat_fold|strong_compression|moderate_compression|shape_retained|bare_item","requires_shape_retention":null,"has_hard_bottom":null,"has_hard_backboard":null,"has_frame":null,"has_rigid_insert":null,"has_rigid_parts":null,"retail_box_visible":null,"hard_card_visible":null,"quantity":1,"product_cost_rmb":null,"product_cost_value_type":"exact|estimated|starting_from|range_min|unknown","domestic_shipping_rmb":null,"domestic_shipping_value_type":"exact|estimated|starting_from|range_min|unknown","length_cm":null,"width_cm":null,"height_cm":null,"weight_g":null,"dimension_value_source":"image_text|ai_visual_estimate|unknown","weight_value_source":"image_text|ai_visual_estimate|unknown","confidence":"low|medium|high"}},"money_candidates":[],"field_evidence":{{}},"packaging_proposal":{{}}}}"""
         return f"""
 你是跨境电商商品图片识别助手。本次共有 {image_count} 张图片。
@@ -338,16 +351,15 @@ Additional required behavior: `product_cost_rmb` and `domestic_shipping_rmb` mus
         if not endpoint or not api_key or not model:
             raise RecognitionUnavailableError("AI识图尚未配置，请先在设置中填写API地址、密钥和模型。")
 
-        paths = [Path(str(item.get("path") or "")) for item in image_items]
-        paths = [path for path in paths if path.is_file()]
+        paths = self._stable_paths(image_items)
         if not paths:
             raise RecognitionUnavailableError("没有可用于AI识图的图片。")
 
         content: list[dict[str, Any]] = [{"type": "text", "text": self._prompt(len(paths))}]
         if user_context:
             content.append({"type": "text", "text": "User-confirmed values (do not replace): " + json.dumps(user_context, ensure_ascii=False)})
-        for index, path in enumerate(paths, start=1):
-            content.append({"type": "text", "text": f"图片{index}：请扫描全部字段，不设类型限制。"})
+        for path in paths:
+            content.append({"type": "text", "text": "证据图：请扫描全部字段；位置不代表字段职责。"})
             content.append({"type": "image_url", "image_url": {"url": self._image_data_url(path), "detail": "high"}})
         timeout = max(10, int(settings.get("vision_api_timeout_seconds", 90) or 90))
         if diagnostic_operation:

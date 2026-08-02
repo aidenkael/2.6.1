@@ -65,9 +65,28 @@ def _single_package_type(observation: AIObservation, proposal: PackagingProposal
     return "单件包装待确认"
 
 
+def _valid_packaging_summary(text: str) -> bool:
+    """Accept only a user-facing handling plus individual-package statement."""
+    value = str(text or "").strip()
+    if _bulk_only(value) or any(token in value.lower() for token in ("ai_candidate", "generic_candidate", "cal-", "confidence", "source")):
+        return False
+    if re.search(r"\d+(?:\.\d+)?\s*(?:cm|mm|g|kg)\b", value, re.I):
+        return False
+    parts = [part.strip() for part in value.split("；")]
+    if len(parts) != 2 or not all(parts):
+        return False
+    handling, package_type = parts
+    if handling in {"预计", "待确认", "袋装", "裸品", "无包装"}:
+        return False
+    if package_type in {"预计", "待确认", "袋装", "裸品", "无包装"}:
+        return False
+    allowed_type_markers = ("opp", "自封", "气泡", "泡沫", "纸盒", "纸箱", "礼盒", "原包装", "单件包装待确认")
+    return any(marker in package_type.lower() for marker in allowed_type_markers)
+
+
 def packaging_summary(observation: AIObservation, proposal: PackagingProposal) -> str:
     supplied = _compact(observation.display_packaging_summary, 30)
-    if supplied and not _bulk_only(supplied):
+    if supplied and _valid_packaging_summary(supplied):
         return supplied
     actions = set(observation.packing_actions or [])
     constraints = set(observation.packing_constraints or [])

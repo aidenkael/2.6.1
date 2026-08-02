@@ -94,6 +94,21 @@ def test_single_vision_response_keeps_the_first_observation_as_the_only_input():
     assert supplement.length_cm == 12
 
 
+def test_multi_image_payload_order_is_stable_for_product_and_weight_evidence(tmp_path):
+    product = tmp_path / "product.png"
+    weight = tmp_path / "weight.png"
+    product.write_bytes(b"product-evidence")
+    weight.write_bytes(b"weight-evidence")
+
+    forward = RecognitionService._stable_paths([{"path": str(product)}, {"path": str(weight)}])
+    reversed_order = RecognitionService._stable_paths([{"path": str(weight)}, {"path": str(product)}])
+
+    assert forward == reversed_order
+    prompt = RecognitionService._prompt(2)
+    assert "Merge product, price, dimensions, weight, structure, and packaging evidence" in prompt
+    assert "image sequence and image slot have no semantic meaning" in prompt
+
+
 @pytest.mark.parametrize("overall_form", ["soft_flat", "flexible_chain", "hard_flat", "soft_bulky"])
 def test_recognizable_outline_with_missing_weight_gets_complete_low_confidence_candidate(overall_form: str):
     content = {

@@ -116,7 +116,9 @@ class LocalReestimateService:
                 response_data = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             raise RecognitionUnavailableError(f"局部重估请求失败（HTTP {exc.code}）。") from exc
-        except (URLError, TimeoutError, OSError) as exc:
+        except TimeoutError as exc:
+            raise RecognitionUnavailableError("局部重估超时，当前结果未改变，可稍后重试。") from exc
+        except (URLError, OSError) as exc:
             raise RecognitionUnavailableError(f"局部重估无法连接：{exc}") from exc
         except json.JSONDecodeError as exc:
             raise RecognitionResponseError("局部重估服务返回了无法解析的响应。") from exc

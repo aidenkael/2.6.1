@@ -15,7 +15,7 @@ def test_display_summaries_are_structural_and_not_raw_title_copy():
         display_packaging_summary="自封袋；盘绕收纳；仅防刮",
     )
     assert product_summary(observation) == "柔性商品；柔性链状；可盘绕"
-    assert packaging_summary(observation, _proposal()) == "自封袋；盘绕收纳；仅防刮"
+    assert packaging_summary(observation, _proposal()) == "盘绕收纳；单件包装待确认"
 
 
 def test_reminder_uses_adopted_source_and_real_weight_risk_in_chinese():
@@ -45,6 +45,14 @@ def test_explicit_single_box_can_be_displayed_as_individual_package():
     proposal = _proposal()
     proposal.normal.packaging_method = "1个/盒"
     assert packaging_summary(AIObservation(), proposal) == "轻度防护；单件纸盒装"
+
+
+def test_ambiguous_bag_summary_is_regenerated_as_a_valid_package_statement():
+    observation = AIObservation(display_packaging_summary="预计；袋装")
+    text = packaging_summary(observation, _proposal())
+    assert text != "预计；袋装"
+    assert "；" in text
+    assert "单件包装待确认" in text or "预计" in text
 
 
 def test_unshown_individual_package_is_marked_as_estimated_or_pending():
