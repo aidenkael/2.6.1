@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from profit_accounting_26.application.recognition_service import RecognitionService
 
 
@@ -90,3 +92,23 @@ def test_single_vision_response_keeps_the_first_observation_as_the_only_input():
 
     assert first.product_name == "发圈"
     assert supplement.length_cm == 12
+
+
+@pytest.mark.parametrize("overall_form", ["soft_flat", "flexible_chain", "hard_flat", "soft_bulky"])
+def test_recognizable_outline_with_missing_weight_gets_complete_low_confidence_candidate(overall_form: str):
+    content = {
+        "observation": {
+            "product_name": "结构化商品", "overall_form": overall_form,
+            "length_cm": 20, "width_cm": 10, "height_cm": 4, "weight_g": None,
+        },
+        "packaging_proposal": {},
+    }
+    observation, proposal = RecognitionService.parse_payload(
+        {"choices": [{"message": {"content": json.dumps(content, ensure_ascii=False)}}]}, model="vision-test"
+    )
+    assert proposal is not None
+    assert proposal.normal.is_complete()
+    assert proposal.conservative.is_complete()
+    assert proposal.normal.confidence == "low"
+    assert proposal.normal.length_cm >= observation.length_cm
+    assert observation.raw_payload["vision_packaging_completion"] == "generated_from_recognized_outline"

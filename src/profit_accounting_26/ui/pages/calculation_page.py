@@ -216,14 +216,11 @@ class CalculationPage(QWidget):
         self.review_badge.setProperty("warning", True)
         first.addWidget(self.review_badge)
         self.product_summary = QuickLineEdit()
-        self.product_summary.setPlaceholderText("商品类型/名称")
+        self.product_summary.setPlaceholderText("商品结构摘要")
         self.material_summary = QuickLineEdit()
         self.material_summary.setVisible(False)
         self.structure_summary = QuickLineEdit()
-        self.structure_summary.setPlaceholderText("材质、软硬、结构与包装说明")
-        self.packaging_summary = QuickLineEdit()
-        self.packaging_summary.setVisible(False)
-        self.packaging_summary.setReadOnly(True)
+        self.structure_summary.setPlaceholderText("包装意见")
         reestimate = QPushButton("局部重估")
         reestimate.clicked.connect(self.reestimate_packaging)
         first.addWidget(self.product_summary, 3)
@@ -296,9 +293,11 @@ class CalculationPage(QWidget):
         if frozen_reminder:
             reason.setProperty("frozen", True)
             layout.addWidget(reason)
-        method = QuickLineEdit()
-        method.setPlaceholderText("包装方式")
-        layout.addWidget(method)
+        method = None
+        if not frozen_reminder:
+            method = QuickLineEdit()
+            method.setPlaceholderText("包装方式")
+            layout.addWidget(method)
         dims = QHBoxLayout()
         dims.setSpacing(3)
         length = LabeledSpin("长", suffix="cm", decimals=1, maximum=500, input_width=62, special_text="—")
@@ -311,18 +310,20 @@ class CalculationPage(QWidget):
         layout.addWidget(weight)
         if not frozen_reminder:
             layout.addWidget(reason)
-        return card, {
+        fields = {
             "name": title,
             "card": card,
             "radio": radio,
             "changed": changed,
-            "method": method,
             "length": length,
             "width": width,
             "height": height,
             "weight": weight,
             "reason": reason,
         }
+        if method is not None:
+            fields["method"] = method
+        return card, fields
 
     def _build_cost_section(self) -> None:
         container = Card()
@@ -487,7 +488,8 @@ class CalculationPage(QWidget):
         self.product_link.textChanged.connect(lambda _text: self._mark_dirty())
 
         for name, fields in (("正常档", self.normal_fields), ("保守档", self.conservative_fields)):
-            fields["method"].textEdited.connect(lambda _text, n=name: self._scenario_manually_changed(n))
+            if "method" in fields:
+                fields["method"].textEdited.connect(lambda _text, n=name: self._scenario_manually_changed(n))
             for key in ("length", "width", "height", "weight"):
                 fields[key].valueChanged.connect(lambda _value, n=name: self._scenario_manually_changed(n))
 
@@ -811,6 +813,8 @@ class CalculationPage(QWidget):
         missing = [key for key in ("product_cost_rmb", "domestic_shipping_rmb", "length_cm", "width_cm", "height_cm", "weight_g") if payload.get(key) in (None, "", "unknown")]
         op = self._diagnostic_operation
         adopted = self._adopted_packaging()
+        if observation.raw_payload.get("vision_packaging_completion"):
+            op.event("vision_packaging_estimate_missing", completion=observation.raw_payload["vision_packaging_completion"])
         op.event("ai_request_completed"); op.event("ai_response_parsed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing); op.event("calibration_completed", matched_rule_ids=adopted.applied_profile_ids)
         generated=adopted.normal.is_complete() and adopted.conservative.is_complete()
         op.event("packaging_generated" if generated else "packaging_skipped", skip_reason=None if generated else "AI未返回尺寸/重量，且本地CAL未生成可用回退值")
@@ -848,6 +852,8 @@ class CalculationPage(QWidget):
     def collect_observation(self) -> AIObservation:
         observation = AIObservation.from_dict(self.observation.to_dict())
         observation.product_name = self.product_summary.text().strip()
+        observation.display_product_summary = self.product_summary.text().strip()
+        observation.display_packaging_summary = self.structure_summary.text().strip()
         # Product name is display text; keep the AI-normalized product_type for CAL routing.
         observation.material = self.material_summary.text().strip()
         observation.rigidity = str(self.rigidity_combo.currentData())
@@ -939,10 +945,11 @@ class CalculationPage(QWidget):
         self._local_thread.finished.connect(self._local_worker.deleteLater)
         self._local_thread.start()
 
-    @staticmethod
-    def _scenario_data(fields: dict[str, Any]) -> dict[str, Any]:
+    def _scenario_data(self, fields: dict[str, Any]) -> dict[str, Any]:
+        proposal = self._adopted_packaging()
+        scenario = proposal.normal if proposal and fields is self.normal_fields else (proposal.conservative if proposal else None)
         return {
-            "packaging_method": fields["method"].text().strip(),
+            "packaging_method": fields.get("method").text().strip() if fields.get("method") else (scenario.packaging_method if scenario else ""),
             "length_cm": fields["length"].value() or None,
             "width_cm": fields["width"].value() or None,
             "height_cm": fields["height"].value() or None,
@@ -987,14 +994,11 @@ class CalculationPage(QWidget):
         self.apply_proposal(self._adopted_packaging())
         if confirmed_normal:
             self._updating = True
-            for key, field in (("packaging_method", self.normal_fields["method"]), ("length_cm", self.normal_fields["length"]),
+            for key, field in (("length_cm", self.normal_fields["length"]),
                                ("width_cm", self.normal_fields["width"]), ("height_cm", self.normal_fields["height"]),
                                ("weight_g", self.normal_fields["weight"])):
                 value = confirmed_normal.get(key)
-                if key == "packaging_method":
-                    field.setText(str(value or ""))
-                else:
-                    field.setValue(float(value or 0))
+                field.setValue(float(value or 0))
             self.normal_fields["reason"].setText(normal_reminder(self.observation, self._adopted_packaging(), user_modified=True))
             self._updating = False
         self._refresh_display_summaries(self.observation, self._adopted_packaging())
@@ -1038,7 +1042,8 @@ class CalculationPage(QWidget):
         previous_updating = self._updating
         self._updating = True
         for scenario, fields in ((proposal.normal, self.normal_fields), (proposal.conservative, self.conservative_fields)):
-            fields["method"].setText(packaging_summary(self.observation, proposal) if fields is self.normal_fields else scenario.packaging_method)
+            if "method" in fields:
+                fields["method"].setText(scenario.packaging_method)
             fields["length"].setValue(scenario.length_cm or 0)
             fields["width"].setValue(scenario.width_cm or 0)
             fields["height"].setValue(scenario.height_cm or 0)
@@ -1049,8 +1054,6 @@ class CalculationPage(QWidget):
                 fields["reason"].setText(scenario.reasoning_summary or "待人工补充")
             fields["changed"].setText("")
         self._updating = previous_updating
-        summary = packaging_summary(self.observation, proposal)
-        self.packaging_summary.setText(summary)
         if proposal.needs_review:
             self.review_badge.setText("需要复核")
             self.review_badge.setProperty("warning", True)
@@ -1071,7 +1074,6 @@ class CalculationPage(QWidget):
         self._mark_dirty()
         if self.proposal is not None:
             self.packaging_stale = True
-            self.packaging_summary.setText("包装估算已过期")
             self.review_badge.setText("估算已过期 · 禁止保存")
             self.review_badge.setProperty("warning", True)
             self.review_badge.setProperty("success", False)
@@ -1107,7 +1109,8 @@ class CalculationPage(QWidget):
             # Normal packaging is the editable adopted proposal.  Conservative
             # packaging is generated by the local rule and is selectable only.
             editable = fields is self.normal_fields
-            fields["method"].setEnabled(editable)
+            if "method" in fields:
+                fields["method"].setEnabled(editable)
             for key in ("length", "width", "height", "weight"):
                 fields[key].setEnabled(editable)
             fields["changed"].setText("✓" if selected and self.package_selection_changed else "")
@@ -1124,7 +1127,7 @@ class CalculationPage(QWidget):
         return PackagingScenario(
             label=label,
             packaging_state=source.packaging_state if source else self.observation_to_state(),
-            packaging_method=fields["method"].text().strip(),
+            packaging_method=source.packaging_method if source else "",
             length_cm=fields["length"].value() or None,
             width_cm=fields["width"].value() or None,
             height_cm=fields["height"].value() or None,
@@ -1379,7 +1382,7 @@ class CalculationPage(QWidget):
         normal = PackagingScenario(
             label="正常档",
             packaging_state=self._adopted_packaging().normal.packaging_state if self._adopted_packaging() else scenario.packaging_state,
-            packaging_method=self.normal_fields["method"].text(),
+            packaging_method=self._adopted_packaging().normal.packaging_method if self._adopted_packaging() else "",
             length_cm=self.normal_fields["length"].value() or None,
             width_cm=self.normal_fields["width"].value() or None,
             height_cm=self.normal_fields["height"].value() or None,
@@ -1501,7 +1504,6 @@ class CalculationPage(QWidget):
         self.product_summary.clear()
         self.material_summary.clear()
         self.structure_summary.clear()
-        self.packaging_summary.clear()
         self.product_link.clear()
         for combo in (self.rigidity_combo, self.foldability_combo, self.compressibility_combo):
             combo.setCurrentIndex(0)
@@ -1523,7 +1525,8 @@ class CalculationPage(QWidget):
         ):
             widget.setValue(0)
         for fields in (self.normal_fields, self.conservative_fields):
-            fields["method"].clear()
+            if "method" in fields:
+                fields["method"].clear()
             for key in ("length", "width", "height", "weight"):
                 fields[key].setValue(0)
             fields["reason"].setText("待估算")
@@ -1576,7 +1579,8 @@ class CalculationPage(QWidget):
         self.bare_weight.setValue(float(bare.get("weight_g") or 0))
         for key, fields in (("normal", self.normal_fields), ("conservative", self.conservative_fields)):
             raw = adopted.get(key, {})
-            fields["method"].setText(str(raw.get("packaging_method") or ""))
+            if "method" in fields:
+                fields["method"].setText(str(raw.get("packaging_method") or ""))
             fields["length"].setValue(float(raw.get("length_cm") or 0))
             fields["width"].setValue(float(raw.get("width_cm") or 0))
             fields["height"].setValue(float(raw.get("height_cm") or 0))
@@ -1584,6 +1588,11 @@ class CalculationPage(QWidget):
             fields["reason"].setText(str(raw.get("reasoning_summary") or ""))
             if raw.get("needs_review"):
                 self.manual_scenarios.add("正常档" if key == "normal" else "保守档")
+            if key == "normal" and raw.get("needs_review") and not self.observation.display_packaging_summary:
+                legacy_instruction = str(raw.get("packaging_method") or "").strip()
+                if legacy_instruction:
+                    self.observation.display_packaging_summary = legacy_instruction
+                    self.structure_summary.setText(legacy_instruction)
         selected_package = str(adopted.get("selected_packaging") or "正常档")
         self.selected_forwarder_id = str(adopted.get("selected_forwarder_id") or self.selected_forwarder_id)
         calculated = layers.get("calculated", {})
@@ -1607,12 +1616,10 @@ class CalculationPage(QWidget):
         self.rebuild_profit_rules()
         self._select_package(selected_package, user=False)
         if self.packaging_stale:
-            self.packaging_summary.setText("包装估算已过期")
             self.review_badge.setText("估算已过期 · 禁止保存")
             self.review_badge.setProperty("warning", True)
             self.review_badge.setProperty("success", False)
         elif self.proposal is not None:
-            self.packaging_summary.setText(self.proposal.normal.packaging_method or "包装方案已载入")
             if self.proposal.needs_review or self.manual_scenarios:
                 self.review_badge.setText("需要复核")
                 self.review_badge.setProperty("warning", True)
@@ -1622,7 +1629,6 @@ class CalculationPage(QWidget):
                 self.review_badge.setProperty("success", True)
                 self.review_badge.setProperty("warning", False)
         else:
-            self.packaging_summary.setText("人工包装方案")
             self.review_badge.setText("人工方案 · 需要复核")
             self.review_badge.setProperty("warning", True)
             self.review_badge.setProperty("success", False)

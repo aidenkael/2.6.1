@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 from profit_accounting_26.application.api_profile_store import ApiProfileStore, VISUAL_AI
 from profit_accounting_26.application.settings_service import SettingsService
-from profit_accounting_26.domain.models import AIObservation, PackagingProposal
+from profit_accounting_26.domain.models import AIObservation, PackagingProposal, PackagingScenario, PackagingState
 from profit_accounting_26.application.diagnostic_logger import DiagnosticOperation, DiagnosticLogger
 from profit_accounting_26.application.category_normalizer import normalize_observation
 
@@ -94,7 +94,7 @@ class RecognitionService:
     @classmethod
     def _prompt(cls, image_count: int) -> str:
         return f"""You inspect {image_count} ecommerce images in one request. Return JSON only.
-Rules: (1) scan every image; do not restrict by image slot. (2) Price and domestic shipping need visible text evidence only. (3) extract selected SKU price before range, coupon, struck-through, or starting price. (4) retain estimated and starting shipping values with their type. (5) if product is recognizable but measurements are absent, estimate bare dimensions, bare weight, and both packaging candidates at low confidence. (6) only leave all packaging values null when the product itself is unrecognizable. (7) do not calculate freight, profit, or select a forwarder. (8) keep foldability, compressibility, state hint and hard-structure fields consistent. (9) output short evidence and no reasoning prose. (10) user-confirmed values supplied in context must not be changed. (11) display_product_summary is a concise Chinese product subject plus packaging-relevant structure and folding/compression trait, not a copied title, max 30 Chinese characters. (12) display_packaging_summary is concise Chinese container plus action plus protection based on actual evidence/candidate, max 30 Chinese characters.
+Rules: (1) scan every image; do not restrict by image slot. (2) Price and domestic shipping need visible text evidence only. (3) extract selected SKU price before range, coupon, struck-through, or starting price. (4) retain estimated and starting shipping values with their type. (5) if product is recognizable but measurements are absent, estimate bare dimensions, bare weight, and both packaging candidates at low confidence. (6) any missing packaging method, normal/conservative dimensions, or normal/conservative weight must be completed as a low-confidence estimate when the product is recognizable; only leave the entire packaging proposal empty when the product itself is unrecognizable. (7) do not interpret packaging not shown as a bare item without packaging. (8) do not calculate freight, profit, or select a forwarder. (9) keep foldability, compressibility, state hint and hard-structure fields consistent. (10) output short evidence and no reasoning prose. (11) user-confirmed values supplied in context must not be changed. (12) display_product_summary is a concise Chinese product subject plus packaging-relevant structure and folding/compression trait, not a copied title, max 30 Chinese characters. (13) display_packaging_summary is concise Chinese container plus action plus protection based on actual evidence/candidate, max 30 Chinese characters.
 Schema: {{"observation":{{"product_name":"","product_type_raw":"","product_family_raw":"","material_raw":"","display_product_summary":"","display_packaging_summary":"","overall_form":"soft_flat|soft_bulky|flexible_chain|articulated|hard_flat|hard_long|hard_3d|hollow_crushable|fragile_protruding|mixed|unknown","packing_actions":[],"packing_constraints":[],"rigidity":"unknown|soft|semi_rigid|hard","foldability":"unknown|none|limited|good","compressibility":"unknown|none|limited|good","packaging_state_hint":"unknown|full_flat_fold|strong_compression|moderate_compression|shape_retained|bare_item","requires_shape_retention":null,"has_hard_bottom":null,"has_hard_backboard":null,"has_frame":null,"has_rigid_insert":null,"has_rigid_parts":null,"retail_box_visible":null,"hard_card_visible":null,"quantity":1,"product_cost_rmb":null,"product_cost_value_type":"exact|estimated|starting_from|range_min|unknown","domestic_shipping_rmb":null,"domestic_shipping_value_type":"exact|estimated|starting_from|range_min|unknown","length_cm":null,"width_cm":null,"height_cm":null,"weight_g":null,"dimension_value_source":"image_text|ai_visual_estimate|unknown","weight_value_source":"image_text|ai_visual_estimate|unknown","confidence":"low|medium|high"}},"money_candidates":[],"field_evidence":{{}},"packaging_proposal":{{}}}}"""
         return f"""
 你是跨境电商商品图片识别助手。本次共有 {image_count} 张图片。
@@ -236,7 +236,49 @@ Additional required behavior: `product_cost_rmb` and `domestic_shipping_rmb` mus
                 proposal = PackagingProposal.from_dict(proposal_raw)
             except (KeyError, TypeError, ValueError):
                 proposal = None
+        proposal = cls._complete_missing_visual_packaging(observation, proposal)
         return observation, proposal
+
+    @staticmethod
+    def _complete_missing_visual_packaging(observation: AIObservation,
+                                           proposal: PackagingProposal | None) -> PackagingProposal | None:
+        """Provide a low-confidence, outline-related candidate only after a visual omission.
+
+        This is not a second model request and does not change arbitration.  It
+        only prevents a recognizable item with measured outer dimensions from
+        being treated as an unrelated fixed generic package.
+        """
+        if proposal and proposal.normal.is_complete() and proposal.conservative.is_complete():
+            return proposal
+        recognizable = bool(observation.product_name or observation.product_type or observation.product_family)
+        dimensions = (observation.length_cm, observation.width_cm, observation.height_cm)
+        if not recognizable or not all(value is not None and float(value) > 0 for value in dimensions):
+            return proposal
+        base_dims = tuple(float(value) for value in dimensions)
+        form_density = {
+            "soft_flat": 0.025, "soft_bulky": 0.04, "flexible_chain": 0.08,
+            "hard_flat": 0.10, "hard_long": 0.10, "hard_3d": 0.12,
+            "fragile_protruding": 0.09, "mixed": 0.08,
+        }.get(observation.overall_form, 0.06)
+        bare_weight = float(observation.weight_g) if observation.weight_g and observation.weight_g > 0 else max(20.0, base_dims[0] * base_dims[1] * base_dims[2] * form_density)
+        normal_weight = bare_weight + max(20.0, min(300.0, bare_weight * 0.08))
+        state = PackagingState.MODERATE_COMPRESSION
+        if observation.packaging_state_hint in {item.value for item in PackagingState if item is not PackagingState.UNKNOWN}:
+            state = PackagingState(observation.packaging_state_hint)
+        elif "flat_fold" in (observation.packing_actions or []) or observation.overall_form in {"soft_flat", "hard_flat"}:
+            state = PackagingState.FULL_FLAT_FOLD
+        elif observation.requires_shape_retention is True or "retain_shape" in (observation.packing_actions or []):
+            state = PackagingState.SHAPE_RETAINED
+        normal_dims = tuple(round(value * 1.02, 1) for value in base_dims)
+        conservative_dims = tuple(round(value * 1.08, 1) for value in base_dims)
+        normal = PackagingScenario("正常档", state, "包装未展示；按结构估算", *normal_dims, normal_weight,
+                                   "视觉AI包装候选缺失，按已识别外廓补全", "low", True)
+        conservative = PackagingScenario("保守档", state, "包装未展示；按结构估算", *conservative_dims,
+                                         max(normal_weight, normal_weight * 1.12), "视觉AI包装候选缺失，保守补全", "low", True)
+        observation.raw_payload["vision_packaging_completion"] = "generated_from_recognized_outline"
+        return PackagingProposal(normal, conservative, proposal_source="vision_completion", needs_review=True,
+                                 review_reasons=["vision_packaging_estimate_missing"],
+                                 original_scenarios=proposal.to_dict() if proposal else {})
 
     def _request_payload(self, *, endpoint: str, api_key: str, model: str,
                          content: list[dict[str, Any]], timeout: int,
