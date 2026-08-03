@@ -286,6 +286,7 @@ class SettingsPage(QWidget):
         public = self.context.api_profile_store.load_public()
         profiles = [item for item in public["profiles"] if isinstance(item, dict)]
         bindings = public["button_bindings"]
+        current_profile_id = str(self.api_profile_select.currentData() or "")
         for combo in (self.api_profile_select, self.visual_binding, self.local_binding):
             combo.blockSignals(True)
             combo.clear()
@@ -295,6 +296,10 @@ class SettingsPage(QWidget):
             combo.blockSignals(False)
         self.visual_binding.setCurrentIndex(max(0, self.visual_binding.findData(bindings.get(VISUAL_AI))))
         self.local_binding.setCurrentIndex(max(0, self.local_binding.findData(bindings.get(LOCAL_REESTIMATE))))
+        available_ids = {str(item.get("profile_id") or "") for item in profiles}
+        selected_id = current_profile_id if current_profile_id in available_ids else str(bindings.get(VISUAL_AI) or "")
+        self.api_profile_select.setCurrentIndex(max(0, self.api_profile_select.findData(selected_id)))
+        self._load_selected_api_profile(self.api_profile_select.currentIndex())
 
     def _load_selected_api_profile(self, _index: int) -> None:
         profile_id = str(self.api_profile_select.currentData() or "")
@@ -359,10 +364,13 @@ class SettingsPage(QWidget):
         self.settings = self.context.settings_service.load()
         self._updating = True
         self.display_name.setText(str(self.settings.get("display_name") or "用户"))
-        self.vision_endpoint.setText(str(self.settings.get("vision_api_endpoint") or ""))
-        self.vision_model.setText(str(self.settings.get("vision_api_model") or ""))
-        self.vision_key.setText(str(self.settings.get("vision_api_key") or ""))
         self._refresh_api_profiles()
+        # API profiles are the source of truth when present.  Only retain the
+        # pre-profile fields as a compatibility fallback for an empty profile list.
+        if not self.context.api_profile_store.load_public()["profiles"]:
+            self.vision_endpoint.setText(str(self.settings.get("vision_api_endpoint") or ""))
+            self.vision_model.setText(str(self.settings.get("vision_api_model") or ""))
+            self.vision_key.setText(str(self.settings.get("vision_api_key") or ""))
         self._load_forwarder_rows(self.settings.get("forwarders", []))
         self.rules_data = list(self.settings.get("profit_rules", []))
         self.refresh_rule_list()
@@ -409,10 +417,13 @@ class SettingsPage(QWidget):
         enabled_box.setEnabled(not is_archived)
         enabled_box.toggled.connect(lambda _checked: self._mark_dirty())
         self.forwarder_table.setCellWidget(row, 4, enabled_box)
-        operation = QPushButton("已归档" if data.get("archived", False) else "归档")
+        operation = QPushButton("删除" if data.get("archived", False) else "归档")
         identifier = str(data.get("id") or f"forwarder_{uuid4().hex}")
-        operation.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
-        operation.setEnabled(not bool(data.get("archived", False)))
+        if data.get("archived", False):
+            operation.setProperty("danger", True)
+            operation.clicked.connect(lambda _checked=False, fid=identifier: self.delete_archived_forwarder(fid))
+        else:
+            operation.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
         self.forwarder_table.setCellWidget(row, 5, operation)
         self.forwarder_table.setItem(row, 6, QTableWidgetItem(identifier))
         self.forwarder_table.setItem(row, 7, QTableWidgetItem("1" if data.get("archived", False) else "0"))
@@ -448,14 +459,33 @@ class SettingsPage(QWidget):
             enabled_box.setEnabled(False)
         operation = self.forwarder_table.cellWidget(row, 5)
         if isinstance(operation, QPushButton):
-            operation.setText("已归档")
-            operation.setEnabled(False)
+            operation.clicked.disconnect()
+            operation.setText("删除")
+            operation.setProperty("danger", True)
+            operation.clicked.connect(lambda _checked=False, fid=identifier: self.delete_archived_forwarder(fid))
         for col in range(4):
             item = self.forwarder_table.item(row, col)
             if item is not None:
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self._mark_dirty()
         self.filter_forwarders(self._show_archived_forwarders)
+
+    def delete_archived_forwarder(self, identifier: str) -> None:
+        row = self._find_forwarder_row(identifier)
+        if row < 0 or self.forwarder_table.item(row, 7).text() != "1":
+            return
+        name = self.forwarder_table.item(row, 0).text().strip() or "该货代"
+        answer = QMessageBox.question(
+            self,
+            "删除已归档货代",
+            f"确定永久删除“{name}”吗？此操作无法恢复。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.forwarder_table.removeRow(row)
+        self._mark_dirty()
 
     def filter_forwarders(self, archived: bool) -> None:
         self._show_archived_forwarders = archived

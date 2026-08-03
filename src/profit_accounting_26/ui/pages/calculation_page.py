@@ -11,7 +11,6 @@ from PySide6.QtGui import QCursor, QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
-    QCheckBox,
     QComboBox,
     QDialog,
     QGridLayout,
@@ -199,13 +198,8 @@ class CalculationPage(QWidget):
         first.addWidget(self.review_badge)
         self.product_summary = QuickLineEdit()
         self.product_summary.setPlaceholderText("商品类型/名称")
-        self.material_summary = QuickLineEdit()
-        self.material_summary.setVisible(False)
         self.structure_summary = QuickLineEdit()
         self.structure_summary.setPlaceholderText("材质、软硬、结构与包装说明")
-        self.packaging_summary = QuickLineEdit()
-        self.packaging_summary.setVisible(False)
-        self.packaging_summary.setReadOnly(True)
         reestimate = QPushButton("局部重估")
         reestimate.clicked.connect(self.reestimate_packaging)
         first.addWidget(self.product_summary, 3)
@@ -213,48 +207,6 @@ class CalculationPage(QWidget):
         first.addWidget(reestimate)
         layout.addLayout(first)
 
-        # Structured values stay internal for deterministic packaging rules.
-        # Users edit the two natural-language summaries instead of a row of
-        # specialist switches; text AI normalizes their edit on local reestimate.
-        second = QHBoxLayout()
-        second.setSpacing(7)
-        self.rigidity_combo = QComboBox()
-        self.rigidity_combo.addItem("软硬：未知", "unknown")
-        self.rigidity_combo.addItem("柔软", "soft")
-        self.rigidity_combo.addItem("半硬", "semi_rigid")
-        self.rigidity_combo.addItem("硬质", "hard")
-        self.foldability_combo = QComboBox()
-        self.foldability_combo.addItem("折叠：未知", "unknown")
-        self.foldability_combo.addItem("不可折叠", "none")
-        self.foldability_combo.addItem("有限折叠", "limited")
-        self.foldability_combo.addItem("可折叠", "good")
-        self.compressibility_combo = QComboBox()
-        self.compressibility_combo.addItem("压缩：未知", "unknown")
-        self.compressibility_combo.addItem("不可压缩", "none")
-        self.compressibility_combo.addItem("有限压缩", "limited")
-        self.compressibility_combo.addItem("可压缩", "good")
-        second.addWidget(self.rigidity_combo)
-        second.addWidget(self.foldability_combo)
-        second.addWidget(self.compressibility_combo)
-        self.structure_checks: dict[str, QCheckBox] = {}
-        for key, text in (
-            ("no_hard_structure", "无硬结构"),
-            ("has_hard_bottom", "硬底"),
-            ("has_hard_backboard", "硬背板"),
-            ("has_frame", "框架"),
-            ("has_rigid_insert", "硬内衬"),
-            ("requires_shape_retention", "保形"),
-            ("retail_box_visible", "原盒"),
-            ("hard_card_visible", "硬卡"),
-        ):
-            box = QCheckBox(text)
-            self.structure_checks[key] = box
-            second.addWidget(box)
-        second.addStretch(1)
-        for index in range(second.count()):
-            item = second.itemAt(index)
-            if item.widget():
-                item.widget().hide()
         self.content_layout.addWidget(card)
 
     def _package_card(self, title: str, *, selected: bool = False) -> tuple[Card, dict[str, Any]]:
@@ -476,40 +428,12 @@ class CalculationPage(QWidget):
         for key, widget in (("length_cm", self.bare_length), ("width_cm", self.bare_width), ("height_cm", self.bare_height), ("weight_g", self.bare_weight)):
             widget.editingFinished.connect(lambda k=key: self._accept_bare_field(k))
         self.product_summary.textChanged.connect(lambda _text: self._upstream_changed())
-        self.material_summary.textChanged.connect(lambda _text: self._upstream_changed())
         self.structure_summary.textChanged.connect(lambda _text: self._upstream_changed())
-        for combo in (self.rigidity_combo, self.foldability_combo, self.compressibility_combo):
-            combo.currentIndexChanged.connect(lambda _index: self._upstream_changed())
-        for key, box in self.structure_checks.items():
-            if key == "no_hard_structure":
-                box.toggled.connect(self._on_no_structure_toggled)
-            else:
-                box.toggled.connect(lambda checked, k=key: self._on_structure_toggled(k, checked))
         self.tail_fee_rmb.editingFinished.connect(self._tail_rmb_changed)
         self.tail_fee_usd.editingFinished.connect(self._tail_usd_changed)
         self.sale_price.editingFinished.connect(self._forward_profit)
         self.reserve_percent.editingFinished.connect(self._forward_profit)
         self.rule_combo.currentIndexChanged.connect(self._profit_rule_changed)
-
-    def _on_no_structure_toggled(self, checked: bool) -> None:
-        if self._updating:
-            return
-        if checked:
-            self._updating = True
-            for key, box in self.structure_checks.items():
-                if key != "no_hard_structure":
-                    box.setChecked(False)
-            self._updating = False
-        self._upstream_changed()
-
-    def _on_structure_toggled(self, _key: str, checked: bool) -> None:
-        if self._updating:
-            return
-        if checked and self.structure_checks["no_hard_structure"].isChecked():
-            self._updating = True
-            self.structure_checks["no_hard_structure"].setChecked(False)
-            self._updating = False
-        self._upstream_changed()
 
     def rebuild_image_slots(self, count: int) -> None:
         while self.image_slots_layout.count():
@@ -571,6 +495,14 @@ class CalculationPage(QWidget):
         if self._ai_baseline is not None and self._image_fingerprint() != self._recognized_image_fingerprint:
             self.ai_button.setText("AI整体重估")
             self.ai_button.setEnabled(self._recognition_thread is None)
+        elif self._ai_baseline is not None:
+            # Deleting a newly added/replaced image restores exactly the image
+            # set the current AI baseline was built from.
+            self.packaging_stale = False
+            if self.proposal is not None:
+                self.apply_proposal(self.proposal)
+            self.ai_button.setText("AI识图")
+            self.ai_button.setEnabled(False)
         elif self._ai_baseline is None:
             self.ai_button.setText("AI识图")
             self.ai_button.setEnabled(self._recognition_thread is None)
@@ -618,11 +550,6 @@ class CalculationPage(QWidget):
         super().keyPressEvent(event)
 
     @staticmethod
-    def _set_combo_data(combo: QComboBox, value: str) -> None:
-        index = combo.findData(value)
-        combo.setCurrentIndex(index if index >= 0 else 0)
-
-    @staticmethod
     def _observation_structure_summary(observation: AIObservation) -> str:
         parts = [observation.material] if observation.material else []
         labels = {
@@ -650,12 +577,7 @@ class CalculationPage(QWidget):
         self._updating = True
         if observation.product_name or observation.product_type:
             self.product_summary.setText(observation.product_name or observation.product_type)
-        if observation.material:
-            self.material_summary.setText(observation.material)
         self.structure_summary.setText(self._observation_structure_summary(observation))
-        self._set_combo_data(self.rigidity_combo, observation.rigidity)
-        self._set_combo_data(self.foldability_combo, observation.foldability)
-        self._set_combo_data(self.compressibility_combo, observation.compressibility)
         if observation.product_cost_rmb is not None:
             self.product_cost.setValue(observation.product_cost_rmb)
         if observation.domestic_shipping_rmb is not None:
@@ -668,19 +590,6 @@ class CalculationPage(QWidget):
             self.bare_height.setValue(observation.height_cm)
         if observation.weight_g is not None:
             self.bare_weight.setValue(observation.weight_g)
-        flags = {
-            "has_hard_bottom": observation.has_hard_bottom,
-            "has_hard_backboard": observation.has_hard_backboard,
-            "has_frame": observation.has_frame,
-            "has_rigid_insert": observation.has_rigid_insert,
-            "requires_shape_retention": observation.requires_shape_retention,
-            "retail_box_visible": observation.retail_box_visible,
-            "hard_card_visible": observation.hard_card_visible,
-        }
-        for key, value in flags.items():
-            self.structure_checks[key].setChecked(value is True)
-        known_false = flags and all(value is False for value in flags.values())
-        self.structure_checks["no_hard_structure"].setChecked(known_false)
         self._updating = previous_updating
 
     def run_recognition(self) -> None:
@@ -798,30 +707,6 @@ class CalculationPage(QWidget):
         observation = AIObservation.from_dict(self.observation.to_dict())
         observation.product_name = self.product_summary.text().strip()
         observation.product_type = self.product_summary.text().strip()
-        observation.material = self.material_summary.text().strip()
-        observation.rigidity = str(self.rigidity_combo.currentData())
-        observation.foldability = str(self.foldability_combo.currentData())
-        observation.compressibility = str(self.compressibility_combo.currentData())
-        no_structure = self.structure_checks["no_hard_structure"].isChecked()
-        for key in (
-            "has_hard_bottom",
-            "has_hard_backboard",
-            "has_frame",
-            "has_rigid_insert",
-            "requires_shape_retention",
-            "retail_box_visible",
-            "hard_card_visible",
-        ):
-            checked = self.structure_checks[key].isChecked()
-            setattr(observation, key, checked if checked else (False if no_structure else None))
-        rigid_values = [
-            getattr(observation, key)
-            for key in ("has_hard_bottom", "has_hard_backboard", "has_frame", "has_rigid_insert")
-        ]
-        observation.has_rigid_parts = (
-            True if any(value is True for value in rigid_values)
-            else (False if no_structure else None)
-        )
         observation.length_cm = self.bare_length.value() or None
         observation.width_cm = self.bare_width.value() or None
         observation.height_cm = self.bare_height.value() or None
@@ -960,8 +845,6 @@ class CalculationPage(QWidget):
             fields["reason"].setText(scenario.reasoning_summary or "待人工补充")
             fields["changed"].setText("")
         self._updating = previous_updating
-        summary = proposal.normal.packaging_method or "包装信息待补充"
-        self.packaging_summary.setText(summary)
         if proposal.needs_review:
             self.review_badge.setText("需要复核")
             self.review_badge.setProperty("warning", True)
@@ -982,7 +865,6 @@ class CalculationPage(QWidget):
         self._mark_dirty()
         if self.proposal is not None:
             self.packaging_stale = True
-            self.packaging_summary.setText("包装估算已过期")
             self.review_badge.setText("估算已过期 · 禁止保存")
             self.review_badge.setProperty("warning", True)
             self.review_badge.setProperty("success", False)
@@ -1355,12 +1237,9 @@ class CalculationPage(QWidget):
         }
 
     def save_record(self) -> None:
-        if self.packaging_stale:
-            QMessageBox.warning(self, "无法保存", "包装估算已过期，请先重新估算规格。")
-            return
-        if self.current_quote is None or self.current_system_cost is None:
-            QMessageBox.warning(self, "无法保存", "请先补全成本、包装和货代数据。")
-            return
+        # Saving is a user-authorized snapshot, including incomplete or stale
+        # estimates.  The payload keeps the current flags so history remains
+        # truthful without blocking a user who intentionally changed images.
         images = ImageSession(len(self.image_slots))
         for slot in self.image_slots:
             if slot.path:
@@ -1404,14 +1283,8 @@ class CalculationPage(QWidget):
         self.packaging_stale = False
         self.manual_scenarios.clear()
         self.product_summary.clear()
-        self.material_summary.clear()
         self.structure_summary.clear()
-        self.packaging_summary.clear()
         self.product_link.clear()
-        for combo in (self.rigidity_combo, self.foldability_combo, self.compressibility_combo):
-            combo.setCurrentIndex(0)
-        for box in self.structure_checks.values():
-            box.setChecked(False)
         for widget in (
             self.product_cost,
             self.domestic_shipping,
@@ -1510,12 +1383,10 @@ class CalculationPage(QWidget):
         self.rebuild_profit_rules()
         self._select_package(selected_package, user=False)
         if self.packaging_stale:
-            self.packaging_summary.setText("包装估算已过期")
             self.review_badge.setText("估算已过期 · 禁止保存")
             self.review_badge.setProperty("warning", True)
             self.review_badge.setProperty("success", False)
         elif self.proposal is not None:
-            self.packaging_summary.setText(self.proposal.normal.packaging_method or "包装方案已载入")
             if self.proposal.needs_review or self.manual_scenarios:
                 self.review_badge.setText("需要复核")
                 self.review_badge.setProperty("warning", True)
@@ -1525,7 +1396,6 @@ class CalculationPage(QWidget):
                 self.review_badge.setProperty("success", True)
                 self.review_badge.setProperty("warning", False)
         else:
-            self.packaging_summary.setText("人工包装方案")
             self.review_badge.setText("人工方案 · 需要复核")
             self.review_badge.setProperty("warning", True)
             self.review_badge.setProperty("success", False)

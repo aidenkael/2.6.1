@@ -69,7 +69,7 @@ class RecognitionService:
     the stable internal observation/proposal schema.
     """
 
-    PROMPT_VERSION = "2.6.1-vision-slots-v2"
+    PROMPT_VERSION = "2.6.1-vision-slots-v4"
 
     def __init__(self, settings_service: SettingsService, profile_store: ApiProfileStore | None = None) -> None:
         self.settings_service = settings_service
@@ -97,7 +97,8 @@ class RecognitionService:
             for index, item in enumerate(image_items)
         )
         return f"""
-你是跨境电商商品图片识别助手。请严格依据图片框类型识别，不要臆造看不清的数据。
+你是跨境电商商品图片识别与估算助手。必须按图片框类型读取每张图片，并把估算结果作为候选数据返回。
+强制回填规则：只要存在至少一张可识别商品的主图，即使图中没有尺寸、重量或文字，也必须依据商品形态、材质、软硬、结构和常见包装方式，估算并返回裸件长宽高、裸重，以及正常档和保守档的包装长宽高、包装重量与包装方式。不得因缺少文字或比例参照而返回 null、unknown 或空的包装候选。无法确认时使用保守估算，confidence 必须为 low，needs_review 必须为 true，reasoning_summary 明确写“主图视觉估算，需复核”。
 
 图片框用途：
 - 主图：识别商品类型、主要材质、软硬、折叠/压缩能力、保形需求及硬结构；即使只有一张主图，也要在商品形态足够明确时给出低置信度的裸件尺寸、裸重与两档包装候选估算。
@@ -136,13 +137,41 @@ class RecognitionService:
     "quantity": 1,
     "confidence": "low|medium|high"
   }},
-  "packaging_proposal": null
+  "packaging_proposal": {{
+    "normal": {{
+      "label": "正常档",
+      "packaging_state": "unknown|shape_retained|moderate_compression",
+      "packaging_method": "",
+      "length_cm": 0,
+      "width_cm": 0,
+      "height_cm": 0,
+      "weight_g": 0,
+      "reasoning_summary": "",
+      "confidence": "low|medium|high",
+      "needs_review": true
+    }},
+    "conservative": {{
+      "label": "保守档",
+      "packaging_state": "unknown|shape_retained|moderate_compression",
+      "packaging_method": "",
+      "length_cm": 0,
+      "width_cm": 0,
+      "height_cm": 0,
+      "weight_g": 0,
+      "reasoning_summary": "",
+      "confidence": "low|medium|high",
+      "needs_review": true
+    }},
+    "proposal_source": "vision_api",
+    "needs_review": true,
+    "review_reasons": []
+  }}
 }}
 
 包装候选规则：
-- 只要图片能辨认出具体商品形态，`packaging_proposal` 必须返回正常档与保守档，填写 `length_cm`、`width_cm`、`height_cm`、`weight_g`、`packaging_method`、`confidence` 和 `needs_review`。
-- 单主图且没有尺寸、重量文字时，可作保守视觉估算，但必须使用 `confidence: "low"`、`needs_review: true`，并在 `reasoning_summary` 明确写“主图视觉估算，需复核”。
-- 无法辨认商品形态时才使用null或unknown，并将 `packaging_proposal` 设为null。
+- 对任何可识别商品，packaging_proposal 必须返回完整的正常档与保守档；两档均需填写长、宽、高、重量、包装方式、置信度、复核状态和理由。
+- 上方的 0、空字符串和空数组只是 JSON 字段类型示例，绝不能原样返回；对可识别商品必须替换为大于 0 的估算数值和非空说明。
+- 详情图的尺寸、重量、成本、国内运费等明确文字优先；主图视觉估算用于补齐任何缺失字段。
 - 不得输出物流费用、利润、售价或货代选择。
 """.strip()
 

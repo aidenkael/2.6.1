@@ -1,0 +1,1943 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SettingsPage</class>
+ <widget class="QWidget" name="SettingsPage">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1450</width>
+    <height>860</height>
+   </rect>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>980</width>
+    <height>650</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>设置</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">
+QMainWindow, QWidget {
+    background: #f5f8fc;
+    color: #172033;
+    font-family: "Microsoft YaHei UI";
+    font-size: 10pt;
+}
+QFrame#sidebarFrame { background: #f8fbff; border-right: 1px solid #dce6f2; }
+QFrame#headerFrame { background: white; border-bottom: 1px solid #dce6f2; }
+QFrame[card="true"] { background: white; border: 1px solid #d9e4f2; border-radius: 10px; }
+QFrame#imageCard1, QFrame#imageCard2, QFrame#imageCard3, QFrame#imageCard4, QFrame#imageCard5,
+QFrame#bareProductCard, QFrame#normalPackageCard, QFrame#conservativePackageCard,
+QFrame#forwarderCardShenzhen, QFrame#forwarderCardYiwu {
+    background: #fbfdff; border: 1px solid #dbe5f1; border-radius: 8px;
+}
+QLabel[sectionTitle="true"] { font-size: 12pt; font-weight: 700; color: #172033; }
+QLabel#lblGreetingTitle { font-size: 16pt; font-weight: 700; }
+QLabel#lblGreetingSubtitle, QLabel[hint="true"] { color: #738198; font-size: 9pt; }
+QPushButton { background: white; border: 1px solid #d7e2ef; border-radius: 7px; padding: 6px 12px; }
+QPushButton:hover { border-color: #4083ff; color: #1767e8; }
+QPushButton[primary="true"] { background: #176ff2; color: white; border-color: #176ff2; font-weight: 600; }
+QPushButton[navActive="true"] { background: #eaf2ff; color: #176ff2; border: none; text-align: left; font-weight: 600; }
+QPushButton[navItem="true"] { background: transparent; border: none; text-align: left; padding: 10px 12px; }
+QLineEdit, QComboBox, QDoubleSpinBox { background: white; border: 1px solid #d7e2ef; border-radius: 6px; padding: 5px 8px; min-height: 24px; }
+QLineEdit[preview="true"], QDoubleSpinBox[preview="true"] { background: #f1f5fa; color: #607089; }
+QLabel[dropZone="true"] { background: #fbfdff; border: 1px dashed #c9d7e8; border-radius: 7px; color: #42526a; }
+QFrame#normalPackageCard[selected="true"], QFrame#forwarderCardShenzhen[selected="true"] { border: 2px solid #4d8dff; background: #f7fbff; }
+QLabel#lblSubsidyStatus { background: #ecfff4; color: #1b9a5a; border: 1px solid #bdebd1; border-radius: 6px; padding: 6px 10px; font-weight: 600; }
+QLabel#lblSaveStatus { background: #fff4df; color: #e27c12; border-radius: 6px; padding: 5px 10px; }
+QLabel[logoBadge="true"], QLabel[userBadge="true"] { background: #176ff2; color: white; border-radius: 8px; font-weight: 700; }
+QLabel[totalValue="true"] { color: #176ff2; font-weight: 700; }
+QLabel[statusOk="true"] { color: #1b9a5a; font-weight: 600; }
+QLabel[conclusion="true"] { background: #eef5ff; border: 1px solid #cfe0f7; border-radius: 6px; padding: 7px; color: #33445d; }
+QSplitter::handle { background: #edf2f8; width: 6px; }
+QScrollArea { border: none; background: transparent; }
+QScrollBar:vertical { width: 10px; background: transparent; }
+QScrollBar::handle:vertical { background: #c8d5e5; border-radius: 5px; min-height: 30px; }
+
+QListWidget { background: #f8fbff; border: 1px solid #d9e4f2; border-radius: 8px; padding: 6px; }
+QListWidget::item { background: white; border: 1px solid #e0e8f2; border-radius: 7px; padding: 10px; margin: 3px; }
+QListWidget::item:selected { background: #edf4ff; border-color: #4b8cff; color: #1767e8; }
+</string>
+  </property>
+  <layout class="QVBoxLayout" name="settingsRootLayout">
+   <property name="leftMargin">
+    <number>0</number>
+   </property>
+   <property name="topMargin">
+    <number>0</number>
+   </property>
+   <property name="rightMargin">
+    <number>0</number>
+   </property>
+   <property name="bottomMargin">
+    <number>0</number>
+   </property>
+   <property name="spacing">
+    <number>0</number>
+   </property>
+   <item>
+    <widget class="QScrollArea" name="settingsScrollArea">
+     <property name="widgetResizable">
+      <bool>true</bool>
+     </property>
+     <property name="frameShape">
+      <enum>QFrame::NoFrame</enum>
+     </property>
+     <widget class="QWidget" name="settingsBody">
+      <property name="minimumSize">
+       <size>
+        <width>1200</width>
+        <height>0</height>
+       </size>
+      </property>
+      <layout class="QVBoxLayout" name="settingsLayout">
+       <property name="leftMargin">
+        <number>16</number>
+       </property>
+       <property name="topMargin">
+        <number>14</number>
+       </property>
+       <property name="rightMargin">
+        <number>16</number>
+       </property>
+       <property name="bottomMargin">
+        <number>14</number>
+       </property>
+       <property name="spacing">
+        <number>10</number>
+       </property>
+       <item>
+        <widget class="QFrame" name="apiConfigSection">
+         <property name="card" stdset="0">
+          <bool>true</bool>
+         </property>
+         <layout class="QVBoxLayout" name="apiConfigLayout">
+          <property name="leftMargin">
+           <number>14</number>
+          </property>
+          <property name="topMargin">
+           <number>12</number>
+          </property>
+          <property name="rightMargin">
+           <number>14</number>
+          </property>
+          <property name="bottomMargin">
+           <number>12</number>
+          </property>
+          <property name="spacing">
+           <number>9</number>
+          </property>
+          <item>
+           <layout class="QHBoxLayout" name="apiHeaderLayout">
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>0</number>
+            </property>
+            <property name="spacing">
+             <number>8</number>
+            </property>
+            <item>
+             <widget class="QLabel" name="lblApiConfigTitle">
+              <property name="text">
+               <string>API 配置管理</string>
+              </property>
+              <property name="sectionTitle" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="lblApiConfigHint">
+              <property name="text">
+               <string>配置多套 API 供不同模块使用，支持按功能绑定并快速切换。</string>
+              </property>
+              <property name="hint" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="apiHeaderSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>20</width>
+                <height>20</height>
+               </size>
+              </property>
+              <property name="sizeType">
+               <enum>QSizePolicy::Expanding</enum>
+              </property>
+             </spacer>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btnAddApiConfig">
+              <property name="text">
+               <string>＋ 新增 API 配置</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>140</width>
+                <height>34</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QGridLayout" name="apiBindingLayout" columnstretch="1,1,2">
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>0</number>
+            </property>
+            <property name="spacing">
+             <number>7</number>
+            </property>
+            <item row="0" column="0">
+             <widget class="QLabel" name="lblVisionBinding">
+              <property name="text">
+               <string>AI识图 / AI整体重估</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QLabel" name="lblPartialEstimateBinding">
+              <property name="text">
+               <string>局部重估计算</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QComboBox" name="cmbVisionApiConfig">
+              <item>
+               <property name="text">
+                <string>已绑定：GLM视觉模型</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>百炼备用模型</string>
+               </property>
+              </item>
+              <property name="minimumSize">
+               <size>
+                <width>260</width>
+                <height>34</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QComboBox" name="cmbPartialEstimateApiConfig">
+              <item>
+               <property name="text">
+                <string>已绑定：DeepSeek文字模型</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>GLM视觉模型</string>
+               </property>
+              </item>
+              <property name="minimumSize">
+               <size>
+                <width>260</width>
+                <height>34</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="2">
+             <spacer name="apiBindingSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>20</width>
+                <height>20</height>
+               </size>
+              </property>
+              <property name="sizeType">
+               <enum>QSizePolicy::Expanding</enum>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QGridLayout" name="apiRowsGrid" columnstretch="2,1,3,2,3,0,0,0,0">
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>0</number>
+            </property>
+            <property name="spacing">
+             <number>6</number>
+            </property>
+            <item row="0" column="0">
+             <widget class="QLabel" name="lblApiHeader0">
+              <property name="text">
+               <string>配置名称</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QLabel" name="lblApiHeader1">
+              <property name="text">
+               <string>服务商</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="2">
+             <widget class="QLabel" name="lblApiHeader2">
+              <property name="text">
+               <string>API 地址（endpoint）</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="3">
+             <widget class="QLabel" name="lblApiHeader3">
+              <property name="text">
+               <string>模型名称</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="4">
+             <widget class="QLabel" name="lblApiHeader4">
+              <property name="text">
+               <string>API Key</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="5">
+             <widget class="QLabel" name="lblApiHeader5">
+              <property name="text">
+               <string />
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="6">
+             <widget class="QLabel" name="lblApiHeader6">
+              <property name="text">
+               <string>保存</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="7">
+             <widget class="QLabel" name="lblApiHeader7">
+              <property name="text">
+               <string>删除</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="8">
+             <widget class="QLabel" name="lblApiHeader8">
+              <property name="text">
+               <string>验证</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLineEdit" name="txtApiConfigName1">
+              <property name="text">
+               <string>GLM视觉模型</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QComboBox" name="cmbApiProvider1">
+              <item>
+               <property name="text">
+                <string>GLM</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>DeepSeek</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>阿里云百炼</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>OpenAI</string>
+               </property>
+              </item>
+             </widget>
+            </item>
+            <item row="1" column="2">
+             <widget class="QLineEdit" name="txtApiEndpoint1">
+              <property name="text">
+               <string>https://open.bigmodel.cn/api/paas/v4</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="3">
+             <widget class="QLineEdit" name="txtApiModel1">
+              <property name="text">
+               <string>glm-4v-flash</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="4">
+             <widget class="QLineEdit" name="txtApiKey1">
+              <property name="text">
+               <string>sk-••••••••••••••••</string>
+              </property>
+              <property name="echoMode">
+               <enum>QLineEdit::Password</enum>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="5">
+             <widget class="QPushButton" name="btnShowApiKey1">
+              <property name="text">
+               <string>◉</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>34</width>
+                <height>32</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>34</width>
+                <height>32</height>
+               </size>
+              </property>
+              <property name="toolTip">
+               <string>显示或隐藏 API Key</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="6">
+             <widget class="QPushButton" name="btnSaveApi1">
+              <property name="text">
+               <string>保存</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>58</width>
+                <height>32</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="7">
+             <widget class="QPushButton" name="btnDeleteApi1">
+              <property name="text">
+               <string>删除</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>58</width>
+                <height>32</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="8">
+             <widget class="QPushButton" name="btnTestApi1">
+              <property name="text">
+               <string>验证</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>58</width>
+                <height>32</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLineEdit" name="txtApiConfigName2">
+              <property name="text">
+               <string>DeepSeek文字模型</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QComboBox" name="cmbApiProvider2">
+              <item>
+               <property name="text">
+                <string>GLM</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>DeepSeek</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>阿里云百炼</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>OpenAI</string>
+               </property>
+              </item>
+              <property name="currentIndex">
+               <number>1</number>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="2">
+             <widget class="QLineEdit" name="txtApiEndpoint2">
+              <property name="text">
+               <string>https://api.deepseek.com/v1</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="3">
+             <widget class="QLineEdit" name="txtApiModel2">
+              <property name="text">
+               <string>deepseek-chat</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="4">
+             <widget class="QLineEdit" name="txtApiKey2">
+              <property name="text">
+               <string>sk-••••••••••••••••</string>
+              </property>
+              <property name="echoMode">
+               <enum>QLineEdit::Password</enum>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="5">
+             <widget class="QPushButton" name="btnShowApiKey2">
+              <property name="text">
+               <string>◉</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>34</width>
+                <height>32</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>34</width>
+                <height>32</height>
+               </size>
+              </property>
+              <property name="toolTip">
+               <string>显示或隐藏 API Key</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="6">
+             <widget class="QPushButton" name="btnSaveApi2">
+              <property name="text">
+               <string>保存</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>58</width>
+                <height>32</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="7">
+             <widget class="QPushButton" name="btnDeleteApi2">
+              <property name="text">
+               <string>删除</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>58</width>
+                <height>32</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="8">
+             <widget class="QPushButton" name="btnTestApi2">
+              <property name="text">
+               <string>验证</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>58</width>
+                <height>32</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="0">
+             <widget class="QLineEdit" name="txtApiConfigName3">
+              <property name="text">
+               <string>百炼备用模型</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="1">
+             <widget class="QComboBox" name="cmbApiProvider3">
+              <item>
+               <property name="text">
+                <string>GLM</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>DeepSeek</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>阿里云百炼</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>OpenAI</string>
+               </property>
+              </item>
+              <property name="currentIndex">
+               <number>2</number>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="2">
+             <widget class="QLineEdit" name="txtApiEndpoint3">
+              <property name="text">
+               <string>https://dashscope.aliyuncs.com/compatible-mode/v1</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="3">
+             <widget class="QLineEdit" name="txtApiModel3">
+              <property name="text">
+               <string>qwen-vl-max</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="4">
+             <widget class="QLineEdit" name="txtApiKey3">
+              <property name="text">
+               <string>sk-••••••••••••••••</string>
+              </property>
+              <property name="echoMode">
+               <enum>QLineEdit::Password</enum>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="5">
+             <widget class="QPushButton" name="btnShowApiKey3">
+              <property name="text">
+               <string>◉</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>34</width>
+                <height>32</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>34</width>
+                <height>32</height>
+               </size>
+              </property>
+              <property name="toolTip">
+               <string>显示或隐藏 API Key</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="6">
+             <widget class="QPushButton" name="btnSaveApi3">
+              <property name="text">
+               <string>保存</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>58</width>
+                <height>32</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="7">
+             <widget class="QPushButton" name="btnDeleteApi3">
+              <property name="text">
+               <string>删除</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>58</width>
+                <height>32</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="8">
+             <widget class="QPushButton" name="btnTestApi3">
+              <property name="text">
+               <string>验证</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>58</width>
+                <height>32</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QFrame" name="basicSettingsSection">
+         <property name="card" stdset="0">
+          <bool>true</bool>
+         </property>
+         <layout class="QVBoxLayout" name="basicSettingsLayout">
+          <property name="leftMargin">
+           <number>14</number>
+          </property>
+          <property name="topMargin">
+           <number>10</number>
+          </property>
+          <property name="rightMargin">
+           <number>14</number>
+          </property>
+          <property name="bottomMargin">
+           <number>10</number>
+          </property>
+          <property name="spacing">
+           <number>8</number>
+          </property>
+          <item>
+           <layout class="QHBoxLayout" name="basicHeaderLayout">
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>0</number>
+            </property>
+            <property name="spacing">
+             <number>8</number>
+            </property>
+            <item>
+             <widget class="QLabel" name="lblBasicSettingsTitle">
+              <property name="text">
+               <string>基础设置</string>
+              </property>
+              <property name="sectionTitle" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="lblBasicSettingsHint">
+              <property name="text">
+               <string>修改后自动保存到本地配置</string>
+              </property>
+              <property name="hint" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="basicHeaderSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>20</width>
+                <height>20</height>
+               </size>
+              </property>
+              <property name="sizeType">
+               <enum>QSizePolicy::Expanding</enum>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QGridLayout" name="basicFieldsGrid" columnstretch="0,2,0,1,0,1">
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>0</number>
+            </property>
+            <property name="spacing">
+             <number>8</number>
+            </property>
+            <item row="0" column="0">
+             <widget class="QLabel" name="lblDisplayName">
+              <property name="text">
+               <string>显示名称</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QLineEdit" name="txtDisplayName">
+              <property name="text">
+               <string>张三</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="2">
+             <widget class="QLabel" name="lblDefaultTailUsd">
+              <property name="text">
+               <string>默认尾程费用 USD</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="3">
+             <widget class="QDoubleSpinBox" name="spinDefaultTailUsd">
+              <property name="decimals">
+               <number>2</number>
+              </property>
+              <property name="minimum">
+               <double>0.0</double>
+              </property>
+              <property name="maximum">
+               <double>9999</double>
+              </property>
+              <property name="singleStep">
+               <double>1.0</double>
+              </property>
+              <property name="value">
+               <double>5.56</double>
+              </property>
+              <property name="suffix">
+               <string> USD</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="4">
+             <widget class="QLabel" name="lblDefaultTailRmb">
+              <property name="text">
+               <string>RMB（预览）</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="5">
+             <widget class="QDoubleSpinBox" name="spinDefaultTailRmbPreview">
+              <property name="decimals">
+               <number>2</number>
+              </property>
+              <property name="minimum">
+               <double>0.0</double>
+              </property>
+              <property name="maximum">
+               <double>99999</double>
+              </property>
+              <property name="singleStep">
+               <double>1.0</double>
+              </property>
+              <property name="value">
+               <double>40</double>
+              </property>
+              <property name="suffix">
+               <string> RMB</string>
+              </property>
+              <property name="readOnly">
+               <bool>true</bool>
+              </property>
+              <property name="preview" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QFrame" name="freightManagementSection">
+         <property name="card" stdset="0">
+          <bool>true</bool>
+         </property>
+         <layout class="QVBoxLayout" name="freightManagementLayout">
+          <property name="leftMargin">
+           <number>14</number>
+          </property>
+          <property name="topMargin">
+           <number>10</number>
+          </property>
+          <property name="rightMargin">
+           <number>14</number>
+          </property>
+          <property name="bottomMargin">
+           <number>10</number>
+          </property>
+          <property name="spacing">
+           <number>8</number>
+          </property>
+          <item>
+           <layout class="QHBoxLayout" name="freightHeaderLayout">
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>0</number>
+            </property>
+            <property name="spacing">
+             <number>8</number>
+            </property>
+            <item>
+             <widget class="QLabel" name="lblFreightManagementTitle">
+              <property name="text">
+               <string>货代管理</string>
+              </property>
+              <property name="sectionTitle" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="lblFreightManagementHint">
+              <property name="text">
+               <string>支持新增、停用、归档和恢复</string>
+              </property>
+              <property name="hint" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="freightHeaderSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>20</width>
+                <height>20</height>
+               </size>
+              </property>
+              <property name="sizeType">
+               <enum>QSizePolicy::Expanding</enum>
+              </property>
+             </spacer>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btnShowActiveFreight">
+              <property name="text">
+               <string>使用中的货代(2)</string>
+              </property>
+              <property name="checkable">
+               <bool>true</bool>
+              </property>
+              <property name="checked">
+               <bool>true</bool>
+              </property>
+              <property name="primary" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btnShowArchivedFreight">
+              <property name="text">
+               <string>已归档(0)</string>
+              </property>
+              <property name="checkable">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btnAddFreightForwarder">
+              <property name="text">
+               <string>新增货代</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>100</width>
+                <height>34</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QGridLayout" name="freightRowsGrid" columnstretch="2,2,2,2,1,0,0">
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>0</number>
+            </property>
+            <property name="spacing">
+             <number>6</number>
+            </property>
+            <item row="0" column="0">
+             <widget class="QLabel" name="lblFreightHeader0">
+              <property name="text">
+               <string>名称</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QLabel" name="lblFreightHeader1">
+              <property name="text">
+               <string>头程单价（RMB/kg）</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="2">
+             <widget class="QLabel" name="lblFreightHeader2">
+              <property name="text">
+               <string>固定服务费（RMB）</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="3">
+             <widget class="QLabel" name="lblFreightHeader3">
+              <property name="text">
+               <string>体积重除数</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="4">
+             <widget class="QLabel" name="lblFreightHeader4">
+              <property name="text">
+               <string>状态</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="5">
+             <widget class="QLabel" name="lblFreightHeader5">
+              <property name="text">
+               <string>启用/停用</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="6">
+             <widget class="QLabel" name="lblFreightHeader6">
+              <property name="text">
+               <string>归档</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLineEdit" name="txtFreightName1">
+              <property name="text">
+               <string>深圳货代</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QDoubleSpinBox" name="spinFreightRate1">
+              <property name="decimals">
+               <number>2</number>
+              </property>
+              <property name="minimum">
+               <double>0.0</double>
+              </property>
+              <property name="maximum">
+               <double>9999</double>
+              </property>
+              <property name="singleStep">
+               <double>1.0</double>
+              </property>
+              <property name="value">
+               <double>80</double>
+              </property>
+              <property name="suffix">
+               <string> RMB/kg</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="2">
+             <widget class="QDoubleSpinBox" name="spinFreightFixedFee1">
+              <property name="decimals">
+               <number>2</number>
+              </property>
+              <property name="minimum">
+               <double>0.0</double>
+              </property>
+              <property name="maximum">
+               <double>9999</double>
+              </property>
+              <property name="singleStep">
+               <double>1.0</double>
+              </property>
+              <property name="value">
+               <double>10</double>
+              </property>
+              <property name="suffix">
+               <string> RMB</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="3">
+             <widget class="QDoubleSpinBox" name="spinFreightDivisor1">
+              <property name="decimals">
+               <number>0</number>
+              </property>
+              <property name="minimum">
+               <double>0.0</double>
+              </property>
+              <property name="maximum">
+               <double>999999</double>
+              </property>
+              <property name="singleStep">
+               <double>1.0</double>
+              </property>
+              <property name="value">
+               <double>8000</double>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="4">
+             <widget class="QLabel" name="lblFreightStatus1">
+              <property name="text">
+               <string>✓ 已启用</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+              <property name="statusOk" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="5">
+             <widget class="QPushButton" name="btnToggleFreight1">
+              <property name="text">
+               <string>停用</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>70</width>
+                <height>32</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="6">
+             <widget class="QPushButton" name="btnArchiveFreight1">
+              <property name="text">
+               <string>归档</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>70</width>
+                <height>32</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLineEdit" name="txtFreightName2">
+              <property name="text">
+               <string>义乌货代</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QDoubleSpinBox" name="spinFreightRate2">
+              <property name="decimals">
+               <number>2</number>
+              </property>
+              <property name="minimum">
+               <double>0.0</double>
+              </property>
+              <property name="maximum">
+               <double>9999</double>
+              </property>
+              <property name="singleStep">
+               <double>1.0</double>
+              </property>
+              <property name="value">
+               <double>100</double>
+              </property>
+              <property name="suffix">
+               <string> RMB/kg</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="2">
+             <widget class="QDoubleSpinBox" name="spinFreightFixedFee2">
+              <property name="decimals">
+               <number>2</number>
+              </property>
+              <property name="minimum">
+               <double>0.0</double>
+              </property>
+              <property name="maximum">
+               <double>9999</double>
+              </property>
+              <property name="singleStep">
+               <double>1.0</double>
+              </property>
+              <property name="value">
+               <double>6</double>
+              </property>
+              <property name="suffix">
+               <string> RMB</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="3">
+             <widget class="QDoubleSpinBox" name="spinFreightDivisor2">
+              <property name="decimals">
+               <number>0</number>
+              </property>
+              <property name="minimum">
+               <double>0.0</double>
+              </property>
+              <property name="maximum">
+               <double>999999</double>
+              </property>
+              <property name="singleStep">
+               <double>1.0</double>
+              </property>
+              <property name="value">
+               <double>8000</double>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="4">
+             <widget class="QLabel" name="lblFreightStatus2">
+              <property name="text">
+               <string>✓ 已启用</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+              <property name="statusOk" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="5">
+             <widget class="QPushButton" name="btnToggleFreight2">
+              <property name="text">
+               <string>停用</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>70</width>
+                <height>32</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="6">
+             <widget class="QPushButton" name="btnArchiveFreight2">
+              <property name="text">
+               <string>归档</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>70</width>
+                <height>32</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QFrame" name="profitRulesSection">
+         <property name="card" stdset="0">
+          <bool>true</bool>
+         </property>
+         <layout class="QVBoxLayout" name="profitRulesLayout">
+          <property name="leftMargin">
+           <number>14</number>
+          </property>
+          <property name="topMargin">
+           <number>10</number>
+          </property>
+          <property name="rightMargin">
+           <number>14</number>
+          </property>
+          <property name="bottomMargin">
+           <number>10</number>
+          </property>
+          <property name="spacing">
+           <number>8</number>
+          </property>
+          <item>
+           <layout class="QHBoxLayout" name="profitRulesHeaderLayout">
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>0</number>
+            </property>
+            <property name="spacing">
+             <number>8</number>
+            </property>
+            <item>
+             <widget class="QLabel" name="lblProfitRulesTitle">
+              <property name="text">
+               <string>利润调整规则</string>
+              </property>
+              <property name="sectionTitle" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="lblProfitRulesHint">
+              <property name="text">
+               <string>设置带有“≈”号的基于“跟进、条件匹配利润调整”应用到该规则。</string>
+              </property>
+              <property name="hint" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="profitRulesHeaderSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>20</width>
+                <height>20</height>
+               </size>
+              </property>
+              <property name="sizeType">
+               <enum>QSizePolicy::Expanding</enum>
+              </property>
+             </spacer>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btnAddProfitRule">
+              <property name="text">
+               <string>＋ 新增规则</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>110</width>
+                <height>34</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QSplitter" name="profitRulesSplitter">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="childrenCollapsible">
+             <bool>false</bool>
+            </property>
+            <property name="opaqueResize">
+             <bool>true</bool>
+            </property>
+            <widget class="QListWidget" name="listProfitRules">
+             <property name="minimumSize">
+              <size>
+               <width>310</width>
+               <height>210</height>
+              </size>
+             </property>
+             <item>
+              <property name="text">
+               <string>SHEIN 29美元以下运费补贴
+最终售价（美元）小于29 → 增加收入 2.99 USD
+已启用</string>
+              </property>
+             </item>
+             <item>
+              <property name="text">
+               <string>无利润调整
+不增加收入，也不增加成本
+已停用</string>
+              </property>
+             </item>
+             <item>
+              <property name="text">
+               <string>示例：推广扣除
+最终售价人民币的百分比成本
+已停用</string>
+              </property>
+             </item>
+             <property name="currentRow">
+              <number>0</number>
+             </property>
+            </widget>
+            <widget class="QFrame" name="profitRuleEditor">
+             <layout class="QVBoxLayout" name="profitRuleEditorLayout">
+              <property name="leftMargin">
+               <number>10</number>
+              </property>
+              <property name="topMargin">
+               <number>8</number>
+              </property>
+              <property name="rightMargin">
+               <number>10</number>
+              </property>
+              <property name="bottomMargin">
+               <number>8</number>
+              </property>
+              <property name="spacing">
+               <number>8</number>
+              </property>
+              <item>
+               <widget class="QLabel" name="lblProfitRuleEditorTitle">
+                <property name="text">
+                 <string>编辑规则（SHEIN 29美元以下运费补贴）</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <layout class="QGridLayout" name="profitRuleEditorGrid" columnstretch="1,1,1,1,1,1">
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>0</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>0</number>
+                </property>
+                <property name="spacing">
+                 <number>7</number>
+                </property>
+                <item row="0" column="0">
+                 <widget class="QLabel" name="lblRuleName">
+                  <property name="text">
+                   <string>规则名称</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="0">
+                 <widget class="QLineEdit" name="txtRuleName">
+                  <property name="text">
+                   <string>SHEIN 29美元以下运费补贴</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="0" column="1">
+                 <widget class="QLabel" name="lblRuleConditionField">
+                  <property name="text">
+                   <string>条件字段</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="1">
+                 <widget class="QComboBox" name="cmbRuleConditionField">
+                  <item>
+                   <property name="text">
+                    <string>最终售价（美元）</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>最终售价（人民币）</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>系统总成本（人民币）</string>
+                   </property>
+                  </item>
+                 </widget>
+                </item>
+                <item row="0" column="2">
+                 <widget class="QLabel" name="lblRuleCompareMode">
+                  <property name="text">
+                   <string>比较方式</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="2">
+                 <widget class="QComboBox" name="cmbRuleCompareMode">
+                  <item>
+                   <property name="text">
+                    <string>小于</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>小于等于</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>大于</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>大于等于</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>等于</string>
+                   </property>
+                  </item>
+                 </widget>
+                </item>
+                <item row="0" column="3">
+                 <widget class="QLabel" name="lblRuleConditionValue">
+                  <property name="text">
+                   <string>条件值</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="1" column="3">
+                 <widget class="QDoubleSpinBox" name="spinRuleConditionValue">
+                  <property name="decimals">
+                   <number>2</number>
+                  </property>
+                  <property name="minimum">
+                   <double>0.0</double>
+                  </property>
+                  <property name="maximum">
+                   <double>999999</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>1.0</double>
+                  </property>
+                  <property name="value">
+                   <double>29</double>
+                  </property>
+                  <property name="suffix">
+                   <string> USD</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="2" column="0">
+                 <widget class="QLabel" name="lblRuleAdjustmentDirection">
+                  <property name="text">
+                   <string>调整方向</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="3" column="0">
+                 <widget class="QComboBox" name="cmbRuleAdjustmentDirection">
+                  <item>
+                   <property name="text">
+                    <string>增加收入</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>增加成本</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>减少收入</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>减少成本</string>
+                   </property>
+                  </item>
+                 </widget>
+                </item>
+                <item row="2" column="1">
+                 <widget class="QLabel" name="lblRuleAdjustmentType">
+                  <property name="text">
+                   <string>调整类型</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="3" column="1">
+                 <widget class="QComboBox" name="cmbRuleAdjustmentType">
+                  <item>
+                   <property name="text">
+                    <string>固定金额</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>百分比</string>
+                   </property>
+                  </item>
+                 </widget>
+                </item>
+                <item row="2" column="2">
+                 <widget class="QLabel" name="lblRuleAdjustmentValue">
+                  <property name="text">
+                   <string>调整值</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="3" column="2">
+                 <widget class="QDoubleSpinBox" name="spinRuleAdjustmentValue">
+                  <property name="decimals">
+                   <number>2</number>
+                  </property>
+                  <property name="minimum">
+                   <double>0.0</double>
+                  </property>
+                  <property name="maximum">
+                   <double>999999</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>1.0</double>
+                  </property>
+                  <property name="value">
+                   <double>2.99</double>
+                  </property>
+                  <property name="suffix">
+                   <string> USD</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="2" column="3">
+                 <widget class="QLabel" name="lblRuleCurrency">
+                  <property name="text">
+                   <string>币种</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="3" column="3">
+                 <widget class="QComboBox" name="cmbRuleCurrency">
+                  <item>
+                   <property name="text">
+                    <string>美元</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>人民币</string>
+                   </property>
+                  </item>
+                 </widget>
+                </item>
+                <item row="2" column="4">
+                 <widget class="QLabel" name="lblRulePercentBase">
+                  <property name="text">
+                   <string>百分比基数</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="3" column="4">
+                 <widget class="QComboBox" name="cmbRulePercentBase">
+                  <item>
+                   <property name="text">
+                    <string>固定金额不适用</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>目标售价</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>SHEIN核价</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>系统总成本</string>
+                   </property>
+                  </item>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <widget class="QLabel" name="lblRuleDescription">
+                <property name="text">
+                 <string>说明</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLineEdit" name="txtRuleDescription">
+                <property name="text">
+                 <string>目标售价低于29美元时补贴2.99美元；主页面按当前目标售价自动判断。</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="profitRuleEditorButtons">
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>0</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>0</number>
+                </property>
+                <property name="spacing">
+                 <number>8</number>
+                </property>
+                <item>
+                 <widget class="QPushButton" name="btnSaveProfitRule">
+                  <property name="text">
+                   <string>保存规则</string>
+                  </property>
+                  <property name="minimumSize">
+                   <size>
+                    <width>100</width>
+                    <height>34</height>
+                   </size>
+                  </property>
+                  <property name="primary" stdset="0">
+                   <bool>true</bool>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="btnDisableProfitRule">
+                  <property name="text">
+                   <string>停用</string>
+                  </property>
+                  <property name="minimumSize">
+                   <size>
+                    <width>80</width>
+                    <height>34</height>
+                   </size>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="btnArchiveProfitRule">
+                  <property name="text">
+                   <string>归档</string>
+                  </property>
+                  <property name="minimumSize">
+                   <size>
+                    <width>80</width>
+                    <height>34</height>
+                   </size>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="btnDeleteProfitRule">
+                  <property name="text">
+                   <string>删除</string>
+                  </property>
+                  <property name="minimumSize">
+                   <size>
+                    <width>80</width>
+                    <height>34</height>
+                   </size>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <spacer name="profitRuleButtonsSpacer">
+                  <property name="orientation">
+                   <enum>Qt::Horizontal</enum>
+                  </property>
+                  <property name="sizeHint" stdset="0">
+                   <size>
+                    <width>20</width>
+                    <height>20</height>
+                   </size>
+                  </property>
+                  <property name="sizeType">
+                   <enum>QSizePolicy::Expanding</enum>
+                  </property>
+                 </spacer>
+                </item>
+               </layout>
+              </item>
+             </layout>
+            </widget>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QFrame" name="settingsActionsSection">
+         <property name="card" stdset="0">
+          <bool>true</bool>
+         </property>
+         <layout class="QHBoxLayout" name="settingsActionsLayout">
+          <property name="leftMargin">
+           <number>12</number>
+          </property>
+          <property name="topMargin">
+           <number>8</number>
+          </property>
+          <property name="rightMargin">
+           <number>12</number>
+          </property>
+          <property name="bottomMargin">
+           <number>8</number>
+          </property>
+          <property name="spacing">
+           <number>10</number>
+          </property>
+          <item>
+           <spacer name="settingsActionLeftSpacer">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>20</width>
+              <height>20</height>
+             </size>
+            </property>
+            <property name="sizeType">
+             <enum>QSizePolicy::Expanding</enum>
+            </property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btnSaveSettings">
+            <property name="text">
+             <string>保存设置</string>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>170</width>
+              <height>38</height>
+             </size>
+            </property>
+            <property name="primary" stdset="0">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btnDiscardSettings">
+            <property name="text">
+             <string>放弃修改</string>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>150</width>
+              <height>38</height>
+             </size>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="settingsActionRightSpacer">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>20</width>
+              <height>20</height>
+             </size>
+            </property>
+            <property name="sizeType">
+             <enum>QSizePolicy::Expanding</enum>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="settingsBottomSpacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>1</width>
+           <height>1</height>
+          </size>
+         </property>
+         <property name="sizeType">
+          <enum>QSizePolicy::Expanding</enum>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources />
+ <connections />
+</ui>

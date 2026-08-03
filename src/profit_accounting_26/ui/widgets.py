@@ -88,6 +88,17 @@ class CompactDoubleSpinBox(QDoubleSpinBox):
         self.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        super().focusInEvent(event)
+        self.lineEdit().selectAll()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        super().mousePressEvent(event)
+        # A special value such as “—” is a display placeholder, not text the
+        # user must erase.  Every click prepares the whole numeric value for
+        # direct replacement.
+        self.lineEdit().selectAll()
+
     def contextMenuEvent(self, event) -> None:  # noqa: N802
         menu = QMenu(self)
         copy_action = menu.addAction("复制")

@@ -3,6 +3,20 @@ import json
 from profit_accounting_26.application.recognition_service import RecognitionService
 
 
+def test_main_image_prompt_requires_complete_low_confidence_estimates():
+    prompt = RecognitionService._prompt([{"path": "main.png", "type": "主图"}])
+
+    assert "即使图中没有尺寸、重量或文字" in prompt
+    assert "不得因缺少文字或比例参照而返回 null、unknown 或空的包装候选" in prompt
+    assert "正常档和保守档的包装长宽高、包装重量与包装方式" in prompt
+    assert "confidence 必须为 low" in prompt
+    assert "needs_review 必须为 true" in prompt
+    assert '"normal": {' in prompt
+    assert '"conservative": {' in prompt
+    assert "绝不能原样返回" in prompt
+    assert "不得输出物流费用、利润、售价或货代选择" in prompt
+
+
 def test_parse_openai_compatible_vision_payload():
     content = {
         "observation": {
