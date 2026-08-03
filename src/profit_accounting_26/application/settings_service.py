@@ -53,6 +53,8 @@ class SettingsService:
             }
         data.setdefault("profit_rules", [deepcopy(DEFAULT_SUBSIDY_RULE)])
         data.setdefault("image_slot_types", ["主图", "商品信息", "尺寸/重量", "商品信息", "尺寸/重量"])
+        data.setdefault("log_level", "INFO")
+        data.setdefault("log_retention_days", 30)
         return data
 
     def load(self) -> dict:

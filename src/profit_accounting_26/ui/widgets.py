@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
-    QDoubleSpinBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -24,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from profit_accounting_26.domain.models import ImageType, LogisticsQuote
+from profit_accounting_26.ui.input_editing import DraftAwareDoubleSpinBox
 
 
 class Card(QFrame):
@@ -78,13 +78,12 @@ class QuickLineEdit(QLineEdit):
             self.clear()
 
 
-class CompactDoubleSpinBox(QDoubleSpinBox):
+class CompactDoubleSpinBox(DraftAwareDoubleSpinBox):
     """Compact numeric editor: no arrow buttons, wheel adjustment retained."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self.setKeyboardTracking(False)
         self.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -92,7 +91,7 @@ class CompactDoubleSpinBox(QDoubleSpinBox):
         menu = QMenu(self)
         copy_action = menu.addAction("复制")
         paste_action = menu.addAction("粘贴")
-        clear_action = menu.addAction("清除")
+        unknown_action = menu.addAction("设为未知")
         chosen = menu.exec(event.globalPos())
         editor = self.lineEdit()
         if chosen is copy_action:
@@ -106,9 +105,8 @@ class CompactDoubleSpinBox(QDoubleSpinBox):
                 return
             self.setValue(value)
             editor.selectAll()
-        elif chosen is clear_action and not self.isReadOnly():
-            self.setValue(self.minimum())
-            editor.selectAll()
+        elif chosen is unknown_action and not self.isReadOnly():
+            self.request_unknown()
 
 
 class LabeledSpin(QWidget):
@@ -214,18 +212,13 @@ class ImageSlotWidget(Card):
 
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
+        header.addStretch(1)
+
         self.upload_button = QPushButton("↑")
         self.upload_button.setToolTip("上传图片")
         self.upload_button.setFixedSize(30, 28)
         self.upload_button.clicked.connect(self.select_file)
         header.addWidget(self.upload_button)
-
-        self.type_combo = QComboBox()
-        self.type_combo.addItems([item.value for item in ImageType])
-        self.type_combo.setCurrentText(image_type.value)
-        self.type_combo.setFixedWidth(112)
-        self.type_combo.currentTextChanged.connect(lambda _: self.changed.emit())
-        header.addWidget(self.type_combo, 1)
 
         self.delete_button = QPushButton("×")
         self.delete_button.setToolTip("删除图片")
@@ -243,10 +236,10 @@ class ImageSlotWidget(Card):
         layout.addWidget(self.preview)
 
     def image_type(self) -> ImageType:
-        return ImageType(self.type_combo.currentText())
+        return ImageType.MAIN
 
     def set_image_type(self, image_type: ImageType) -> None:
-        self.type_combo.setCurrentText(image_type.value)
+        return
 
     def select_file(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(

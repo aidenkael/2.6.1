@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, Qt, Signal
-from PySide6.QtGui import QDragEnterEvent, QDropEvent, QKeyEvent, QKeySequence, QPixmap
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent, QKeyEvent, QKeySequence, QPixmap
 from PySide6.QtWidgets import QApplication, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
 from profit_accounting_26.application import AppContext
@@ -119,11 +118,8 @@ class ImageSearchPage(QWidget):
 
     def _open_1688(self) -> None:
         url = "https://www.1688.com/"
-        if sys.platform.startswith("win"):
-            subprocess.Popen(["cmd", "/c", "start", "", "msedge", url], shell=False)
-        else:
-            import webbrowser
-            webbrowser.open(url)
+        if not QDesktopServices.openUrl(QUrl(url)):
+            raise RuntimeError("无法打开默认浏览器。")
 
     def search_image(self) -> None:
         if not self.path:
@@ -135,7 +131,7 @@ class ImageSearchPage(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "打开失败", str(exc))
             return
-        self.status.setText("图片已复制到剪贴板，1688已打开；可直接使用浏览器中的以图搜图入口或现有插件。")
+        self.status.setText("图片已复制到剪贴板，已打开1688首页；请在1688的以图搜图入口粘贴或上传图片。")
         self.status.setProperty("success", True)
         self.status.style().unpolish(self.status)
         self.status.style().polish(self.status)

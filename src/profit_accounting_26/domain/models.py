@@ -96,7 +96,20 @@ class AIObservation:
 
     product_name: str = ""
     product_type: str = ""
+    product_family: str = ""
+    product_type_raw: str = ""
+    product_type_code: str = "unknown"
+    product_family_code: str = "unknown"
     material: str = ""
+    material_family: str = ""
+    material_family_code: str = "unknown"
+    packaging_state_hint: str = "unknown"
+    display_product_summary: str = ""
+    display_packaging_summary: str = ""
+    # Overall transport form is intentionally independent from material rigidity.
+    overall_form: str = "unknown"
+    packing_actions: list[str] = field(default_factory=list)
+    packing_constraints: list[str] = field(default_factory=list)
     rigidity: str = "unknown"
     foldability: str = "unknown"
     compressibility: str = "unknown"
@@ -110,11 +123,15 @@ class AIObservation:
     hard_card_visible: bool | None = None
     protrusion_flattenable: bool | None = None
     product_cost_rmb: float | None = None
+    product_cost_value_type: str = "unknown"
     domestic_shipping_rmb: float | None = None
+    domestic_shipping_value_type: str = "unknown"
     length_cm: float | None = None
     width_cm: float | None = None
     height_cm: float | None = None
     weight_g: float | None = None
+    dimension_value_source: str = "unknown"
+    weight_value_source: str = "unknown"
     dimension_scope: str = "unknown"
     weight_scope: str = "unknown"
     quantity: int = 1
@@ -188,6 +205,9 @@ class PackagingProposal:
     adjusted_scenarios: dict[str, Any] = field(default_factory=dict)
     conflicts: list[str] = field(default_factory=list)
     applied_profile_ids: list[str] = field(default_factory=list)
+    candidate_records: dict[str, dict[str, Any]] = field(default_factory=dict)
+    rejected_candidates: dict[str, list[str]] = field(default_factory=dict)
+    adjustments: list[str] = field(default_factory=list)
     engine_version: str = "packaging-estimation-v1"
     calibration_version: str = "local-calibration-v3"
     schema_version: str = "2.6.1"
@@ -204,6 +224,9 @@ class PackagingProposal:
             "adjusted_scenarios": self.adjusted_scenarios,
             "conflicts": list(self.conflicts),
             "applied_profile_ids": list(self.applied_profile_ids),
+            "candidate_records": self.candidate_records,
+            "rejected_candidates": self.rejected_candidates,
+            "adjustments": list(self.adjustments),
             "engine_version": self.engine_version,
             "calibration_version": self.calibration_version,
             "schema_version": self.schema_version,
@@ -222,6 +245,9 @@ class PackagingProposal:
             adjusted_scenarios=dict(data.get("adjusted_scenarios") or {}),
             conflicts=list(data.get("conflicts") or []),
             applied_profile_ids=list(data.get("applied_profile_ids") or []),
+            candidate_records=dict(data.get("candidate_records") or {}),
+            rejected_candidates={str(key): list(value or []) for key, value in dict(data.get("rejected_candidates") or {}).items()},
+            adjustments=list(data.get("adjustments") or []),
             engine_version=str(data.get("engine_version") or "packaging-estimation-v1"),
             calibration_version=str(data.get("calibration_version") or "local-calibration-v3"),
             schema_version=str(data.get("schema_version") or "2.6.1"),

@@ -1,0 +1,10 @@
+{
+  "hosiery": {
+    "family_code": "hosiery",
+    "aliases": ["袜子", "女袜", "丝袜", "短袜", "长袜", "分趾袜", "二趾袜", "socks", "stockings", "hosiery", "split toe socks", "tabi socks"]
+  },
+  "soft_textile": {
+    "family_code": "soft_textile",
+    "aliases": ["针织", "纺织", "布艺", "textile", "knit", "fabric"]
+  }
+}

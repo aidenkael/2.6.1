@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QObject, QThread, Qt, Signal, Slot
-from PySide6.QtGui import QKeyEvent, QKeySequence
+from PySide6.QtGui import QCursor, QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -25,6 +25,9 @@ from PySide6.QtWidgets import (
 )
 
 from profit_accounting_26.application import AppContext, CalculationService, ImageSession
+from profit_accounting_26.application.calculation_session import CalculationSession
+from profit_accounting_26.application.category_normalizer import normalize_observation
+from profit_accounting_26.application.packaging_presentation import normal_reminder, packaging_summary, product_summary
 from profit_accounting_26.application.recognition_service import (
     RecognitionCancellation,
     RecognitionCancelledError,
@@ -46,17 +49,20 @@ from profit_accounting_26.ui.widgets import (
     QuoteCard,
     SectionHeader,
 )
+from profit_accounting_26.ui.input_editing import install_blank_click_focus_filter
 
 
 class RecognitionWorker(QObject):
     completed = Signal(object, object)
     failed = Signal(str, str)
 
-    def __init__(self, service, image_items: list[dict[str, str]], cancellation: RecognitionCancellation) -> None:
+    def __init__(self, service, image_items: list[dict[str, str]], cancellation: RecognitionCancellation, diagnostic_operation=None, user_context=None) -> None:
         super().__init__()
         self._service = service
         self._image_items = image_items
         self._cancellation = cancellation
+        self._diagnostic_operation = diagnostic_operation
+        self._user_context = user_context or {}
 
     @Slot()
     def run(self) -> None:
@@ -64,6 +70,8 @@ class RecognitionWorker(QObject):
             observation, proposal = self._service.recognize(
                 self._image_items,
                 cancellation=self._cancellation,
+                diagnostic_operation=self._diagnostic_operation,
+                user_context=self._user_context,
             )
         except RecognitionCancelledError as exc:
             self.failed.emit("cancelled", str(exc))
@@ -77,6 +85,27 @@ class RecognitionWorker(QObject):
             self.completed.emit(observation, proposal)
 
 
+class LocalReestimateWorker(QObject):
+    completed = Signal(object)
+    failed = Signal(str, str)
+
+    def __init__(self, service, context: dict[str, Any]) -> None:
+        super().__init__()
+        self._service = service
+        self._context = context
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.completed.emit(self._service.reestimate(**self._context))
+        except RecognitionUnavailableError as exc:
+            self.failed.emit("unavailable", str(exc))
+        except RecognitionResponseError as exc:
+            self.failed.emit("response", str(exc))
+        except Exception as exc:
+            self.failed.emit("failed", str(exc))
+
+
 class CalculationPage(QWidget):
     dirtyChanged = Signal(bool)
     saved = Signal(str)
@@ -88,6 +117,7 @@ class CalculationPage(QWidget):
         self.settings = context.settings_service.load()
         self.observation = AIObservation()
         self.proposal: PackagingProposal | None = None
+        self.session = CalculationSession()
         self.record_id: str | None = None
         self.dirty = False
         self.packaging_stale = False
@@ -106,6 +136,13 @@ class CalculationPage(QWidget):
         self._recognition_worker: RecognitionWorker | None = None
         self._recognition_cancellation: RecognitionCancellation | None = None
         self._recognition_dialog: QDialog | None = None
+        self._local_thread: QThread | None = None
+        self._local_worker: LocalReestimateWorker | None = None
+        self._local_dialog: QDialog | None = None
+        self._ai_baseline: dict[str, Any] | None = None
+        self._recognized_image_fingerprint: tuple[tuple[str, str], ...] = ()
+        self._accepted_bare_fields: set[str] = set()
+        self._pending_confirmed_normal: dict[str, Any] = {}
 
         self.content_layout = QVBoxLayout(self)
         self.content_layout.setContentsMargins(12, 10, 12, 12)
@@ -120,11 +157,20 @@ class CalculationPage(QWidget):
         self.rebuild_image_slots(int(self.settings.get("image_slot_count", 5)))
         self.rebuild_profit_rules()
         self.recalculate()
+        self._blank_focus_guard = install_blank_click_focus_filter(self)
 
     def _mark_dirty(self) -> None:
         if not self.dirty:
             self.dirty = True
             self.dirtyChanged.emit(True)
+
+    def _adopt_packaging(self, proposal: PackagingProposal) -> None:
+        """Keep one packaging authority for page, calculation, persistence and logs."""
+        self.proposal = proposal  # legacy UI alias; never independently calculated
+        self.session.adopt(proposal)
+
+    def _adopted_packaging(self) -> PackagingProposal | None:
+        return self.session.adopted_packaging or self.proposal
 
     def mark_saved(self) -> None:
         self.dirty = False
@@ -171,20 +217,21 @@ class CalculationPage(QWidget):
         self.review_badge.setProperty("warning", True)
         first.addWidget(self.review_badge)
         self.product_summary = QuickLineEdit()
-        self.product_summary.setPlaceholderText("商品类型/名称")
+        self.product_summary.setPlaceholderText("商品结构摘要")
         self.material_summary = QuickLineEdit()
-        self.material_summary.setPlaceholderText("主要材质")
-        self.packaging_summary = QuickLineEdit()
-        self.packaging_summary.setPlaceholderText("包装状态")
-        self.packaging_summary.setReadOnly(True)
-        reestimate = QPushButton("重新估算规格")
+        self.material_summary.setVisible(False)
+        self.structure_summary = QuickLineEdit()
+        self.structure_summary.setPlaceholderText("包装意见")
+        reestimate = QPushButton("局部重估")
         reestimate.clicked.connect(self.reestimate_packaging)
         first.addWidget(self.product_summary, 3)
-        first.addWidget(self.material_summary, 2)
-        first.addWidget(self.packaging_summary, 2)
+        first.addWidget(self.structure_summary, 4)
         first.addWidget(reestimate)
         layout.addLayout(first)
 
+        # Structured values stay internal for deterministic packaging rules.
+        # Users edit the two natural-language summaries instead of a row of
+        # specialist switches; text AI normalizes their edit on local reestimate.
         second = QHBoxLayout()
         second.setSpacing(7)
         self.rigidity_combo = QComboBox()
@@ -220,10 +267,13 @@ class CalculationPage(QWidget):
             self.structure_checks[key] = box
             second.addWidget(box)
         second.addStretch(1)
-        layout.addLayout(second)
+        for index in range(second.count()):
+            item = second.itemAt(index)
+            if item.widget():
+                item.widget().hide()
         self.content_layout.addWidget(card)
 
-    def _package_card(self, title: str, *, selected: bool = False) -> tuple[Card, dict[str, Any]]:
+    def _package_card(self, title: str, *, selected: bool = False, frozen_reminder: bool = False) -> tuple[Card, dict[str, Any]]:
         card = Card(soft=True)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(8, 7, 8, 8)
@@ -237,9 +287,18 @@ class CalculationPage(QWidget):
         changed.setProperty("primary", True)
         title_row.addWidget(changed)
         layout.addLayout(title_row)
-        method = QuickLineEdit()
-        method.setPlaceholderText("包装方式")
-        layout.addWidget(method)
+        reason = QLabel("待估算")
+        reason.setWordWrap(True)
+        reason.setProperty("muted", True)
+        reason.setMaximumHeight(34)
+        if frozen_reminder:
+            reason.setProperty("frozen", True)
+            layout.addWidget(reason)
+        method = None
+        if not frozen_reminder:
+            method = QuickLineEdit()
+            method.setPlaceholderText("包装方式")
+            layout.addWidget(method)
         dims = QHBoxLayout()
         dims.setSpacing(3)
         length = LabeledSpin("长", suffix="cm", decimals=1, maximum=500, input_width=62, special_text="—")
@@ -250,23 +309,22 @@ class CalculationPage(QWidget):
         layout.addLayout(dims)
         weight = LabeledSpin("包装后重量", suffix="g", decimals=1, maximum=100000, input_width=84, special_text="—")
         layout.addWidget(weight)
-        reason = QLabel("待估算")
-        reason.setWordWrap(True)
-        reason.setProperty("muted", True)
-        reason.setMaximumHeight(34)
-        layout.addWidget(reason)
-        return card, {
+        if not frozen_reminder:
+            layout.addWidget(reason)
+        fields = {
             "name": title,
             "card": card,
             "radio": radio,
             "changed": changed,
-            "method": method,
             "length": length,
             "width": width,
             "height": height,
             "weight": weight,
             "reason": reason,
         }
+        if method is not None:
+            fields["method"] = method
+        return card, fields
 
     def _build_cost_section(self) -> None:
         container = Card()
@@ -304,7 +362,7 @@ class CalculationPage(QWidget):
         bare_layout.addWidget(self.bare_weight)
         bare_layout.addStretch(1)
 
-        normal_card, self.normal_fields = self._package_card("正常档", selected=True)
+        normal_card, self.normal_fields = self._package_card("正常档", selected=True, frozen_reminder=True)
         conservative_card, self.conservative_fields = self._package_card("保守档")
         self.package_group = QButtonGroup(self)
         self.package_group.setExclusive(True)
@@ -389,6 +447,10 @@ class CalculationPage(QWidget):
         self.profit_explanation.setWordWrap(True)
         self.profit_explanation.setProperty("muted", True)
         layout.addWidget(self.profit_explanation)
+        self.profit_currency_detail = QLabel("总成本 — RMB / — USD\n预计利润 — RMB / — USD")
+        self.profit_currency_detail.setProperty("muted", True)
+        self.profit_currency_detail.setStyleSheet("background:#F4F7FB;border:1px solid #E1E8F1;border-radius:5px;padding:4px 7px;")
+        layout.addWidget(self.profit_currency_detail)
         self.content_layout.addWidget(card)
 
     def _build_bottom_actions(self) -> None:
@@ -427,16 +489,20 @@ class CalculationPage(QWidget):
         self.product_link.textChanged.connect(lambda _text: self._mark_dirty())
 
         for name, fields in (("正常档", self.normal_fields), ("保守档", self.conservative_fields)):
-            fields["method"].textEdited.connect(lambda _text, n=name: self._scenario_manually_changed(n))
+            if "method" in fields:
+                fields["method"].textEdited.connect(lambda _text, n=name: self._scenario_manually_changed(n))
             for key in ("length", "width", "height", "weight"):
                 fields[key].valueChanged.connect(lambda _value, n=name: self._scenario_manually_changed(n))
 
-        self.product_cost.editingFinished.connect(self.recalculate)
-        self.domestic_shipping.editingFinished.connect(self.recalculate)
+        self.product_cost.editingFinished.connect(lambda: self._accept_numeric_field("product_cost_rmb", self.product_cost))
+        self.domestic_shipping.editingFinished.connect(lambda: self._accept_numeric_field("domestic_shipping_rmb", self.domestic_shipping))
         for widget in (self.bare_length, self.bare_width, self.bare_height, self.bare_weight):
             widget.editingFinished.connect(self._upstream_changed)
+        for key, widget in (("length_cm", self.bare_length), ("width_cm", self.bare_width), ("height_cm", self.bare_height), ("weight_g", self.bare_weight)):
+            widget.editingFinished.connect(lambda k=key: self._accept_bare_field(k))
         self.product_summary.textChanged.connect(lambda _text: self._upstream_changed())
         self.material_summary.textChanged.connect(lambda _text: self._upstream_changed())
+        self.structure_summary.textChanged.connect(lambda _text: self._upstream_changed())
         for combo in (self.rigidity_combo, self.foldability_combo, self.compressibility_combo):
             combo.currentIndexChanged.connect(lambda _index: self._upstream_changed())
         for key, box in self.structure_checks.items():
@@ -477,15 +543,9 @@ class CalculationPage(QWidget):
                 item.widget().deleteLater()
         existing = [(slot.path, slot.image_type()) for slot in self.image_slots]
         self.image_slots = []
-        types = list(self.settings.get("image_slot_types", []))
-        defaults = [ImageType.MAIN, ImageType.PRODUCT_INFO, ImageType.DIMENSION_WEIGHT]
         for index in range(count):
-            try:
-                image_type = ImageType(types[index])
-            except (IndexError, ValueError):
-                image_type = defaults[index % len(defaults)]
-            slot = ImageSlotWidget(index, image_type)
-            slot.changed.connect(self._mark_dirty)
+            slot = ImageSlotWidget(index, ImageType.MAIN)
+            slot.changed.connect(self._image_changed)
             slot.removeRequested.connect(self.remove_image)
             if index < len(existing) and existing[index][0] is not None:
                 slot.load_path(existing[index][0])
@@ -506,7 +566,7 @@ class CalculationPage(QWidget):
 
     def save_image_config(self) -> None:
         self.settings["image_slot_count"] = len(self.image_slots)
-        self.settings["image_slot_types"] = [slot.image_type().value for slot in self.image_slots]
+        self.settings.pop("image_slot_types", None)
         self.context.settings_service.save(self.settings)
         QMessageBox.information(self, "已保存", "图片框数量、顺序和默认类型已保存。")
 
@@ -514,13 +574,35 @@ class CalculationPage(QWidget):
         if 0 <= index < len(self.image_slots):
             self.image_slots[index].clear_image()
 
+    def _image_fingerprint(self) -> tuple[tuple[str, str], ...]:
+        result: list[tuple[str, str]] = []
+        for slot in self.image_slots:
+            if slot.path and slot.path.is_file():
+                try:
+                    digest = hashlib.sha256(slot.path.read_bytes()).hexdigest()
+                except OSError:
+                    digest = "unreadable"
+                result.append((slot.image_type().value, digest))
+        return tuple(result)
+
+    def _image_changed(self) -> None:
+        self._mark_dirty()
+        if self._ai_baseline is not None and self._image_fingerprint() != self._recognized_image_fingerprint:
+            self.ai_button.setText("AI整体重估")
+            self.ai_button.setEnabled(self._recognition_thread is None)
+        elif self._ai_baseline is None:
+            self.ai_button.setText("AI识图")
+            self.ai_button.setEnabled(self._recognition_thread is None)
+
     def paste_from_clipboard(self) -> bool:
         clipboard = QApplication.clipboard()
         mime = clipboard.mimeData()
+        target = self._slot_under_cursor()
+        if target is None:
+            return False
         if mime.hasUrls():
             for url in mime.urls():
                 if url.isLocalFile():
-                    target = next((slot for slot in self.image_slots if slot.path is None), self.image_slots[0])
                     target.load_path(Path(url.toLocalFile()))
                     return True
         image = clipboard.image()
@@ -536,10 +618,17 @@ class CalculationPage(QWidget):
             temp = temp_dir / f"clipboard_{digest[:20]}.png"
             if not temp.exists():
                 temp.write_bytes(data)
-            target = next((slot for slot in self.image_slots if slot.path is None), self.image_slots[0])
             target.load_path(temp)
             return True
         return False
+
+    def _slot_under_cursor(self) -> ImageSlotWidget | None:
+        widget = QApplication.widgetAt(QCursor.pos())
+        while widget is not None:
+            if isinstance(widget, ImageSlotWidget) and widget in self.image_slots:
+                return widget
+            widget = widget.parentWidget()
+        return None
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         if event.matches(QKeySequence.StandardKey.Paste) and self.paste_from_clipboard():
@@ -552,27 +641,87 @@ class CalculationPage(QWidget):
         index = combo.findData(value)
         combo.setCurrentIndex(index if index >= 0 else 0)
 
+    @staticmethod
+    def _observation_structure_summary(observation: AIObservation) -> str:
+        parts = [observation.material] if observation.material else []
+        labels = {
+            "soft": "柔软", "semi_rigid": "半硬", "hard": "硬质",
+            "good": "可折叠", "limited": "有限折叠", "none": "不可折叠",
+        }
+        for value in (observation.rigidity, observation.foldability, observation.compressibility):
+            if label := labels.get(value):
+                parts.append(label)
+        for enabled, label in (
+            (observation.has_hard_bottom, "硬底"), (observation.has_hard_backboard, "硬背板"),
+            (observation.has_frame, "框架"), (observation.has_rigid_insert, "硬内衬"),
+            (observation.requires_shape_retention, "保形"), (observation.retail_box_visible, "原盒"),
+        ):
+            if enabled is True:
+                parts.append(label)
+        return "；".join(dict.fromkeys(parts))
+
+    def _accept_bare_field(self, key: str) -> None:
+        if not self._updating:
+            self._accepted_bare_fields.add(key)
+            widgets = {
+                "length_cm": self.bare_length, "width_cm": self.bare_width,
+                "height_cm": self.bare_height, "weight_g": self.bare_weight,
+            }
+            self._accept_numeric_field(key, widgets[key])
+
+    def _accept_numeric_field(self, key: str, widget: Any) -> None:
+        if self._updating:
+            return
+        value = widget.value()
+        self.session.confirm_value(key, value if value > 0 or key == "domestic_shipping_rmb" else None)
+        self.recalculate()
+
+    def _confirmed_facts(self) -> dict[str, dict[str, Any]]:
+        facts = self.session.confirmed_facts()
+        if "正常档" in self.manual_scenarios:
+            normal = self._scenario_data(self.normal_fields)
+            if all(normal.get(key) for key in ("length_cm", "width_cm", "height_cm", "weight_g")):
+                facts["normal_packaging"] = {
+                    "value": normal, "source": "user_confirmed", "meaning": "confirmed normal packaged dimensions and weight",
+                }
+        return facts
+
+    def _restore_confirmed_normal(self, proposal: PackagingProposal) -> None:
+        normal = self._pending_confirmed_normal
+        if not normal:
+            return
+        for field in ("length_cm", "width_cm", "height_cm", "weight_g"):
+            value = normal.get(field)
+            if value:
+                setattr(proposal.normal, field, float(value))
+                if float(getattr(proposal.conservative, field) or 0) < float(value):
+                    setattr(proposal.conservative, field, float(value))
+        proposal.normal.confidence = "high"
+        proposal.normal.needs_review = False
+        proposal.review_reasons.append("user confirmed normal packaging retained")
+
     def _apply_observation(self, observation: AIObservation) -> None:
         previous_updating = self._updating
         self._updating = True
         if observation.product_name or observation.product_type:
-            self.product_summary.setText(observation.product_name or observation.product_type)
+            self.product_summary.setText(product_summary(observation))
         if observation.material:
             self.material_summary.setText(observation.material)
+        self.structure_summary.setText(observation.display_packaging_summary or self._observation_structure_summary(observation))
         self._set_combo_data(self.rigidity_combo, observation.rigidity)
         self._set_combo_data(self.foldability_combo, observation.foldability)
         self._set_combo_data(self.compressibility_combo, observation.compressibility)
-        if observation.product_cost_rmb is not None:
+        if observation.product_cost_rmb is not None and "product_cost_rmb" not in self.session.user_overrides:
             self.product_cost.setValue(observation.product_cost_rmb)
-        if observation.domestic_shipping_rmb is not None:
+        if observation.domestic_shipping_rmb is not None and "domestic_shipping_rmb" not in self.session.user_overrides:
             self.domestic_shipping.setValue(observation.domestic_shipping_rmb)
-        if observation.length_cm is not None:
+        if observation.length_cm is not None and "length_cm" not in self.session.user_overrides:
             self.bare_length.setValue(observation.length_cm)
-        if observation.width_cm is not None:
+        if observation.width_cm is not None and "width_cm" not in self.session.user_overrides:
             self.bare_width.setValue(observation.width_cm)
-        if observation.height_cm is not None:
+        if observation.height_cm is not None and "height_cm" not in self.session.user_overrides:
             self.bare_height.setValue(observation.height_cm)
-        if observation.weight_g is not None:
+        if observation.weight_g is not None and "weight_g" not in self.session.user_overrides:
             self.bare_weight.setValue(observation.weight_g)
         flags = {
             "has_hard_bottom": observation.has_hard_bottom,
@@ -589,25 +738,41 @@ class CalculationPage(QWidget):
         self.structure_checks["no_hard_structure"].setChecked(known_false)
         self._updating = previous_updating
 
+    def _refresh_display_summaries(self, observation: AIObservation, proposal: PackagingProposal) -> None:
+        previous_updating = self._updating
+        self._updating = True
+        self.product_summary.setText(product_summary(observation))
+        self.structure_summary.setText(packaging_summary(observation, proposal))
+        self._updating = previous_updating
+
     def run_recognition(self) -> None:
         if self._recognition_thread is not None:
             return
         image_items = [
-            {"path": str(slot.path), "type": slot.image_type().value}
+            {"path": str(slot.path)}
             for slot in self.image_slots
             if slot.path
         ]
         if not image_items:
             QMessageBox.information(self, "没有图片", "请先导入至少一张图片。")
             return
+        self._diagnostic_operation = self.context.diagnostic_logger.begin_operation("ai-recognition")
+        images = [self.context.diagnostic_logger.image_metadata(item["path"]) for item in image_items]
+        self._diagnostic_operation.event("image_attached", images=images)
+        confirmed_facts = self._confirmed_facts()
+        self._diagnostic_operation.event("user_confirmed_facts", confirmed_facts=confirmed_facts)
+        self._diagnostic_operation.event("ai_request_started")
         self._show_recognition_dialog()
         self.ai_button.setEnabled(False)
         self._recognition_cancellation = RecognitionCancellation()
+        self._pending_confirmed_normal = self._scenario_data(self.normal_fields) if "正常档" in self.manual_scenarios else {}
         self._recognition_thread = QThread(self)
         self._recognition_worker = RecognitionWorker(
             self.context.recognition_service,
             image_items,
             self._recognition_cancellation,
+            self._diagnostic_operation,
+            {"confirmed_facts": confirmed_facts},
         )
         self._recognition_worker.moveToThread(self._recognition_thread)
         self._recognition_thread.started.connect(self._recognition_worker.run)
@@ -655,17 +820,62 @@ class CalculationPage(QWidget):
 
     @Slot(object, object)
     def _recognition_completed(self, observation: AIObservation, external_proposal: PackagingProposal | None) -> None:
-        self.observation = observation
+        conflicts = self.session.protect_confirmed_values(observation)
+        self.session.ai_raw_response = observation.raw_payload
+        self.session.ai_raw_observation = dict(observation.raw_payload.get("observation") or {})
+        self.session.normalized_observation = observation
+        self.session.money_candidates = list(observation.raw_payload.get("money_candidates") or [])
+        self.session.ai_packaging_proposal = external_proposal
+        self.session.observation = observation
+        self.observation = self.session.observation
+        self._adopt_packaging(self.context.packaging_service.estimate(observation, external_proposal=external_proposal))
+        self._restore_confirmed_normal(self._adopted_packaging())
+        if conflicts:
+            self._adopted_packaging().review_reasons.append("user confirmed facts conflict with image evidence")
         self._apply_observation(observation)
-        self.proposal = self.context.packaging_service.estimate(observation, external_proposal=external_proposal)
-        self.apply_proposal(self.proposal)
+        self._refresh_display_summaries(observation, self._adopted_packaging())
+        self.apply_proposal(self._adopted_packaging())
+        self._ai_baseline = {
+            "summary": self._current_summary(),
+            "product_summary": self.product_summary.text(),
+            "packaging_summary": self.structure_summary.text(),
+            "bare_spec": {
+                "length_cm": observation.length_cm, "width_cm": observation.width_cm,
+                "height_cm": observation.height_cm, "weight_g": observation.weight_g,
+            },
+            "normal_packaging": self._scenario_data(self.normal_fields),
+        }
+        self._accepted_bare_fields.clear()
+        self._pending_confirmed_normal = {}
+        self._recognized_image_fingerprint = self._image_fingerprint()
+        self.ai_button.setText("AI识图")
+        self.ai_button.setEnabled(False)
         self.packaging_stale = False
         self.manual_scenarios.clear()
         self._mark_dirty()
         self.recalculate()
+        payload = observation.to_dict()
+        missing = [key for key in ("product_cost_rmb", "domestic_shipping_rmb", "length_cm", "width_cm", "height_cm", "weight_g") if payload.get(key) in (None, "", "unknown")]
+        op = self._diagnostic_operation
+        adopted = self._adopted_packaging()
+        if observation.raw_payload.get("vision_packaging_completion"):
+            op.event("vision_packaging_estimate_missing", completion=observation.raw_payload["vision_packaging_completion"])
+        salvage = adopted.candidate_records.get("candidate_field_salvage", {})
+        if salvage:
+            op.event("candidate_field_salvage", **dict(salvage.get("diagnostic") or {}),
+                     final_source=adopted.proposal_source, adjustments=salvage.get("adjustments", []))
+        op.event("ai_request_completed"); op.event("ai_response_parsed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing); op.event("calibration_completed", matched_rule_ids=adopted.applied_profile_ids)
+        generated=adopted.normal.is_complete() and adopted.conservative.is_complete()
+        op.event("packaging_generated" if generated else "packaging_skipped", skip_reason=None if generated else "AI未返回尺寸/重量，且本地CAL未生成可用回退值")
+        op.event("logistics_calculated" if self.current_quote else "logistics_skipped", reason=None if self.current_quote else "无可用包装尺寸和重量")
+        op.event("page_updated", filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)])
+        op.event("operation_completed")
+        op.summary(status="completed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing, field_evidence=observation.raw_payload.get("field_evidence",{}), raw_observation=observation.raw_payload.get("observation", {}), normalized_codes={"product_type_code": observation.product_type_code, "product_family_code": observation.product_family_code, "material_family_code": observation.material_family_code}, value_types={"product_cost": observation.product_cost_value_type, "domestic_shipping": observation.domestic_shipping_value_type}, value_sources={"dimensions": observation.dimension_value_source, "weight": observation.weight_value_source}, ai_packaging_proposal=external_proposal.to_dict() if external_proposal else None, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=adopted.applied_profile_ids, cal_rejected_rules=[], cal_rejection_reasons=[], generic_fallback=adopted.proposal_source == "generic_candidate", packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["AI未返回尺寸/重量，且本地CAL未生成可用回退值"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "无可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)], page_empty_fields=missing, warnings=adopted.review_reasons)
 
     @Slot(str, str)
     def _recognition_failed(self, category: str, message: str) -> None:
+        if hasattr(self, "_diagnostic_operation"):
+            self._diagnostic_operation.event("ai_response_parse_failed" if category == "response" else "ai_request_failed", category=category, message=message); self._diagnostic_operation.event("operation_completed", status="failed"); self._diagnostic_operation.summary(status="failed", returned_fields=[], missing_fields=[], field_evidence={}, parse_error=message, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=False, normal_packaging=None, conservative_packaging=None, not_generated_reason=[message], entered_logistics=False, logistics_skip_reason="AI请求失败", logistics_inputs=None, logistics_outputs=None, page_filled_fields=[], page_empty_fields=[], warnings=[])
         if category == "cancelled":
             return
         title = {
@@ -683,14 +893,17 @@ class CalculationPage(QWidget):
         self._recognition_worker = None
         self._recognition_cancellation = None
         self._recognition_thread = None
-        self.ai_button.setEnabled(True)
+        if self._ai_baseline is None or self._image_fingerprint() != self._recognized_image_fingerprint:
+            self.ai_button.setEnabled(True)
         if thread is not None:
             thread.deleteLater()
 
     def collect_observation(self) -> AIObservation:
         observation = AIObservation.from_dict(self.observation.to_dict())
         observation.product_name = self.product_summary.text().strip()
-        observation.product_type = self.product_summary.text().strip()
+        observation.display_product_summary = self.product_summary.text().strip()
+        observation.display_packaging_summary = self.structure_summary.text().strip()
+        # Product name is display text; keep the AI-normalized product_type for CAL routing.
         observation.material = self.material_summary.text().strip()
         observation.rigidity = str(self.rigidity_combo.currentData())
         observation.foldability = str(self.foldability_combo.currentData())
@@ -724,28 +937,176 @@ class CalculationPage(QWidget):
         return observation
 
     def reestimate_packaging(self) -> None:
+        if self._local_thread is not None:
+            return
+        if self._ai_baseline is None:
+            QMessageBox.information(self, "需要先识图", "请先完成一次 AI识图，再根据摘要进行局部重估。")
+            return
+        if self._image_fingerprint() != self._recognized_image_fingerprint:
+            answer = QMessageBox.question(
+                self,
+                "图片已修改",
+                "图片已修改，是否使用新图片重新识图？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                # Overall recognition is explicit; never start another visual
+                # request as a side effect of clicking local reestimate.
+                return
+        current = self.collect_observation()
+        adopted_bare = {
+            key: getattr(current, key)
+            for key in self._accepted_bare_fields
+            if getattr(current, key) is not None
+        }
+        adopted_normal: dict[str, Any] = {}
+        if "正常档" in self.manual_scenarios:
+            adopted_normal = self._scenario_data(self.normal_fields)
+        original = self._ai_baseline
+        context = {
+            "original_summary": str(original["summary"]),
+            "current_summary": self._current_summary(),
+            "original_observation": dict(self.session.ai_raw_observation or self.observation.to_dict()),
+            "user_overrides": self._confirmed_facts(),
+            "adopted_normal": adopted_normal or (self._adopted_packaging().normal.to_dict() if self._adopted_packaging() else {}),
+            "original_product_summary": str(original.get("product_summary") or ""),
+            "current_product_summary": self.product_summary.text().strip(),
+            "original_packaging_summary": str(original.get("packaging_summary") or ""),
+            "current_packaging_summary": self.structure_summary.text().strip(),
+            "cal_summary": list(self.session.matched_cal_rules),
+            "rejected_candidates": dict(self._adopted_packaging().rejected_candidates) if self._adopted_packaging() else {},
+            "visual_evidence": dict(self.session.ai_raw_response.get("field_evidence") or {}),
+        }
+        self._local_diagnostic_operation = self.context.diagnostic_logger.begin_operation("local-reestimate")
+        self._local_diagnostic_operation.event("local_reestimate_requested", observation_patch=adopted_bare)
+        self._local_diagnostic_operation.request(request_type="local-reestimate", original_summary=context["original_summary"], current_summary=context["current_summary"], original_observation=context["original_observation"], user_overrides=context["user_overrides"], adopted_normal=context["adopted_normal"])
+        self._show_local_dialog()
+        self._local_thread = QThread(self)
+        self._local_worker = LocalReestimateWorker(self.context.local_reestimate_service, context)
+        self._local_worker.moveToThread(self._local_thread)
+        self._local_thread.started.connect(self._local_worker.run)
+        self._local_worker.completed.connect(self._local_reestimate_completed)
+        self._local_worker.failed.connect(self._local_reestimate_failed)
+        self._local_worker.completed.connect(self._local_thread.quit)
+        self._local_worker.failed.connect(self._local_thread.quit)
+        self._local_thread.finished.connect(self._local_thread_finished)
+        self._local_thread.finished.connect(self._local_worker.deleteLater)
+        self._local_thread.start()
+
+    def _scenario_data(self, fields: dict[str, Any]) -> dict[str, Any]:
+        proposal = self._adopted_packaging()
+        scenario = proposal.normal if proposal and fields is self.normal_fields else (proposal.conservative if proposal else None)
+        return {
+            "packaging_method": fields.get("method").text().strip() if fields.get("method") else (scenario.packaging_method if scenario else ""),
+            "length_cm": fields["length"].value() or None,
+            "width_cm": fields["width"].value() or None,
+            "height_cm": fields["height"].value() or None,
+            "weight_g": fields["weight"].value() or None,
+        }
+
+    def _current_summary(self) -> str:
+        return "；".join(value for value in (self.product_summary.text().strip(), self.structure_summary.text().strip()) if value)
+
+    def _show_local_dialog(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("局部重估")
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.setFixedSize(300, 92)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 16, 18, 14)
+        label = QLabel("局部重估中，请稍候")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setProperty("sectionTitle", True)
+        layout.addWidget(label)
+        self._local_dialog = dialog
+        dialog.show()
+
+    @Slot(object)
+    def _local_reestimate_completed(self, result: Any) -> None:
+        confirmed_normal = self._scenario_data(self.normal_fields) if "正常档" in self.manual_scenarios else None
+        previous_updating = self._updating
+        self._updating = True
+        current_product_summary = self.product_summary.text().strip()
+        current_packaging_summary = self.structure_summary.text().strip()
+        changed = self.session.apply_observation_patch(result.observation_patch)
+        self.observation = self.session.observation
+        self.observation.display_product_summary = result.product_summary or current_product_summary
+        self.observation.display_packaging_summary = result.packaging_summary or current_packaging_summary
+        self._updating = previous_updating
+        self._apply_observation(self.observation)
         self.observation = self.collect_observation()
-        self.proposal = self.context.packaging_service.estimate(self.observation)
-        self.apply_proposal(self.proposal)
+        self.session.observation = self.observation
+        self.session.observation = normalize_observation(self.observation)
+        self.observation = self.session.observation
+        self._adopt_packaging(self.context.packaging_service.estimate(self.observation, external_proposal=result.packaging_proposal))
+        self.apply_proposal(self._adopted_packaging())
+        if confirmed_normal:
+            self._updating = True
+            for key, field in (("length_cm", self.normal_fields["length"]),
+                               ("width_cm", self.normal_fields["width"]), ("height_cm", self.normal_fields["height"]),
+                               ("weight_g", self.normal_fields["weight"])):
+                value = confirmed_normal.get(key)
+                field.setValue(float(value or 0))
+            self.normal_fields["reason"].setText(normal_reminder(self.observation, self._adopted_packaging(), user_modified=True))
+            self._updating = False
+        self._refresh_display_summaries(self.observation, self._adopted_packaging())
+        if not changed:
+            self.review_badge.setText("结构条件未变化")
         self.packaging_stale = False
-        self.manual_scenarios.clear()
         self._mark_dirty()
         self.recalculate()
+        op = self._local_diagnostic_operation
+        op.event("local_reestimate_completed", observation_patch=result.observation_patch, changed_fields=result.changed_fields, elapsed_ms=result.elapsed_ms)
+        adopted = self._adopted_packaging()
+        salvage = adopted.candidate_records.get("candidate_field_salvage", {})
+        if salvage:
+            op.event("candidate_field_salvage", **dict(salvage.get("diagnostic") or {}),
+                     final_source=adopted.proposal_source, adjustments=salvage.get("adjustments", []))
+        op.event("calibration_completed", matched_rule_ids=adopted.applied_profile_ids)
+        generated = adopted.normal.is_complete() and adopted.conservative.is_complete()
+        op.event("packaging_generated" if generated else "packaging_skipped")
+        op.event("operation_completed")
+        op.response(provider_raw_response=None, normalized_result={"observation_patch": result.observation_patch, "changed_fields": result.changed_fields}, parse_error=None, elapsed_ms=result.elapsed_ms)
+        op.summary(status="completed", returned_fields=list(result.observation_patch), missing_fields=[], field_evidence={}, observation_patch=result.observation_patch, normalized_codes={"product_type_code": self.observation.product_type_code, "product_family_code": self.observation.product_family_code, "material_family_code": self.observation.material_family_code}, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=adopted.applied_profile_ids, cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["重估后没有完整包装数据"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "没有可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=result.changed_fields, page_empty_fields=[], warnings=adopted.review_reasons)
+
+    @Slot(str, str)
+    def _local_reestimate_failed(self, category: str, message: str) -> None:
+        if hasattr(self, "_local_diagnostic_operation"):
+            self._local_diagnostic_operation.event("local_reestimate_failed", category=category, message=message)
+            self._local_diagnostic_operation.event("operation_completed", status="failed")
+            self._local_diagnostic_operation.response(provider_raw_response=None, normalized_result=None, parse_error=message)
+            self._local_diagnostic_operation.summary(status="failed", returned_fields=[], missing_fields=[], field_evidence={}, parse_error=message, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=False, normal_packaging=None, conservative_packaging=None, not_generated_reason=[message], entered_logistics=False, logistics_skip_reason="局部重估失败", logistics_inputs=None, logistics_outputs=None, page_filled_fields=[], page_empty_fields=[], warnings=[])
+        title = "局部重估不可用" if category == "unavailable" else "局部重估失败"
+        QMessageBox.warning(self, title, message)
+
+    def _local_thread_finished(self) -> None:
+        if self._local_dialog is not None:
+            self._local_dialog.close()
+            self._local_dialog.deleteLater()
+        thread = self._local_thread
+        self._local_dialog = None
+        self._local_worker = None
+        self._local_thread = None
+        if thread is not None:
+            thread.deleteLater()
 
     def apply_proposal(self, proposal: PackagingProposal) -> None:
         previous_updating = self._updating
         self._updating = True
         for scenario, fields in ((proposal.normal, self.normal_fields), (proposal.conservative, self.conservative_fields)):
-            fields["method"].setText(scenario.packaging_method)
+            if "method" in fields:
+                fields["method"].setText(scenario.packaging_method)
             fields["length"].setValue(scenario.length_cm or 0)
             fields["width"].setValue(scenario.width_cm or 0)
             fields["height"].setValue(scenario.height_cm or 0)
             fields["weight"].setValue(scenario.weight_g or 0)
-            fields["reason"].setText(scenario.reasoning_summary or "待人工补充")
+            if fields is self.normal_fields:
+                fields["reason"].setText(normal_reminder(self.observation, proposal))
+            else:
+                fields["reason"].setText(scenario.reasoning_summary or "待人工补充")
             fields["changed"].setText("")
         self._updating = previous_updating
-        summary = proposal.normal.packaging_method or "包装信息待补充"
-        self.packaging_summary.setText(summary)
         if proposal.needs_review:
             self.review_badge.setText("需要复核")
             self.review_badge.setProperty("warning", True)
@@ -766,7 +1127,6 @@ class CalculationPage(QWidget):
         self._mark_dirty()
         if self.proposal is not None:
             self.packaging_stale = True
-            self.packaging_summary.setText("包装估算已过期")
             self.review_badge.setText("估算已过期 · 禁止保存")
             self.review_badge.setProperty("warning", True)
             self.review_badge.setProperty("success", False)
@@ -778,7 +1138,10 @@ class CalculationPage(QWidget):
             return
         self.manual_scenarios.add(name)
         fields = self.normal_fields if name == "正常档" else self.conservative_fields
-        fields["reason"].setText("人工修改 · 需要复核")
+        if name == "正常档" and self._adopted_packaging():
+            fields["reason"].setText(normal_reminder(self.observation, self._adopted_packaging(), user_modified=True))
+        else:
+            fields["reason"].setText("人工修改 · 需要复核")
         fields["changed"].setText("✓")
         self.review_badge.setText("人工修改 · 需要复核")
         self.review_badge.setProperty("warning", True)
@@ -796,9 +1159,13 @@ class CalculationPage(QWidget):
             self._mark_dirty()
         for fields, selected in ((self.normal_fields, normal_selected), (self.conservative_fields, not normal_selected)):
             fields["card"].set_choice_state(selected=selected, frozen=not selected)
-            fields["method"].setEnabled(selected)
+            # Normal packaging is the editable adopted proposal.  Conservative
+            # packaging is generated by the local rule and is selectable only.
+            editable = fields is self.normal_fields
+            if "method" in fields:
+                fields["method"].setEnabled(editable)
             for key in ("length", "width", "height", "weight"):
-                fields[key].setEnabled(selected)
+                fields[key].setEnabled(editable)
             fields["changed"].setText("✓" if selected and self.package_selection_changed else "")
         if hasattr(self, "profit_explanation"):
             self.recalculate()
@@ -807,13 +1174,13 @@ class CalculationPage(QWidget):
         fields = self.normal_fields if self.normal_fields["radio"].isChecked() else self.conservative_fields
         label = str(fields["name"])
         source = None
-        if self.proposal:
-            source = self.proposal.normal if label == "正常档" else self.proposal.conservative
+        if self._adopted_packaging():
+            source = self._adopted_packaging().normal if label == "正常档" else self._adopted_packaging().conservative
         manual = label in self.manual_scenarios
         return PackagingScenario(
             label=label,
             packaging_state=source.packaging_state if source else self.observation_to_state(),
-            packaging_method=fields["method"].text().strip(),
+            packaging_method=source.packaging_method if source else "",
             length_cm=fields["length"].value() or None,
             width_cm=fields["width"].value() or None,
             height_cm=fields["height"].value() or None,
@@ -901,6 +1268,8 @@ class CalculationPage(QWidget):
         self.profit_state.setProperty("danger", False)
         self._refresh_profit_style()
         self.profit_explanation.setText(message)
+        if hasattr(self, "profit_currency_detail"):
+            self.profit_currency_detail.setText("总成本 — RMB / — USD\n预计利润 — RMB / — USD")
 
     def recalculate(self) -> None:
         if self._updating:
@@ -950,6 +1319,7 @@ class CalculationPage(QWidget):
         self.system_rows["logistics"].setText(f"¥{selected_quote.total_logistics_rmb:.2f}")
         self.system_total.setText(f"¥{system_cost:.2f}")
         self._forward_profit()
+        self.context.diagnostic_logger.event("forwarder_calculated", package=scenario.to_dict(), forwarder_id=selected_forwarder.id, quote=asdict(selected_quote), system_cost=system_cost)
 
     def rebuild_profit_rules(self) -> None:
         self.rule_combo.blockSignals(True)
@@ -1055,13 +1425,17 @@ class CalculationPage(QWidget):
             f"售价 ${result.sale_price_usd:.2f}，预留后 ${reduced_price:.2f}；"
             f"采用成本 ¥{result.total_cost_rmb:.2f}，预测利润 ¥{result.profit_rmb:.2f}。"
         )
+        self.profit_currency_detail.setText(
+            f"总成本 ¥{result.total_cost_rmb:.2f} / ${result.total_cost_rmb / rate:.2f}\n"
+            f"预计利润 ¥{result.profit_rmb:.2f} / ${result.profit_rmb / rate:.2f}"
+        )
 
     def build_record_payload(self) -> dict[str, Any]:
         scenario = self.current_scenario()
         normal = PackagingScenario(
             label="正常档",
-            packaging_state=self.proposal.normal.packaging_state if self.proposal else scenario.packaging_state,
-            packaging_method=self.normal_fields["method"].text(),
+            packaging_state=self._adopted_packaging().normal.packaging_state if self._adopted_packaging() else scenario.packaging_state,
+            packaging_method=self._adopted_packaging().normal.packaging_method if self._adopted_packaging() else "",
             length_cm=self.normal_fields["length"].value() or None,
             width_cm=self.normal_fields["width"].value() or None,
             height_cm=self.normal_fields["height"].value() or None,
@@ -1072,7 +1446,7 @@ class CalculationPage(QWidget):
         )
         conservative = PackagingScenario(
             label="保守档",
-            packaging_state=self.proposal.conservative.packaging_state if self.proposal else scenario.packaging_state,
+            packaging_state=self._adopted_packaging().conservative.packaging_state if self._adopted_packaging() else scenario.packaging_state,
             packaging_method=self.conservative_fields["method"].text(),
             length_cm=self.conservative_fields["length"].value() or None,
             width_cm=self.conservative_fields["width"].value() or None,
@@ -1089,7 +1463,7 @@ class CalculationPage(QWidget):
             "layers": {
                 "ai_raw": {
                     "observation": self.collect_observation().to_dict(),
-                    "packaging_proposal": self.proposal.to_dict() if self.proposal else {},
+                    "packaging_proposal": self._adopted_packaging().to_dict() if self._adopted_packaging() else {},
                 },
                 "adopted": {
                     "bare": {
@@ -1148,6 +1522,14 @@ class CalculationPage(QWidget):
             QMessageBox.critical(self, "保存失败", str(exc))
             return
         self.mark_saved()
+        self.context.diagnostic_logger.event("record_saved", record_id=self.record_id)
+        # The local reestimate baseline belongs to one unsaved measurement
+        # session only.  Saving ends that session; the record itself keeps its
+        # existing auditable AI/adopted layers.
+        self._ai_baseline = None
+        self._recognized_image_fingerprint = ()
+        self.ai_button.setText("AI识图")
+        self.ai_button.setEnabled(True)
         self.saved.emit(self.record_id)
         QMessageBox.information(self, "保存成功", f"记录已保存：{self.record_id}")
 
@@ -1166,11 +1548,16 @@ class CalculationPage(QWidget):
         self.record_id = None
         self.observation = AIObservation()
         self.proposal = None
+        self.session = CalculationSession()
+        self._ai_baseline = None
+        self._recognized_image_fingerprint = ()
+        self._accepted_bare_fields.clear()
+        self._pending_confirmed_normal = {}
         self.packaging_stale = False
         self.manual_scenarios.clear()
         self.product_summary.clear()
         self.material_summary.clear()
-        self.packaging_summary.clear()
+        self.structure_summary.clear()
         self.product_link.clear()
         for combo in (self.rigidity_combo, self.foldability_combo, self.compressibility_combo):
             combo.setCurrentIndex(0)
@@ -1192,7 +1579,8 @@ class CalculationPage(QWidget):
         ):
             widget.setValue(0)
         for fields in (self.normal_fields, self.conservative_fields):
-            fields["method"].clear()
+            if "method" in fields:
+                fields["method"].clear()
             for key in ("length", "width", "height", "weight"):
                 fields[key].setValue(0)
             fields["reason"].setText("待估算")
@@ -1209,6 +1597,7 @@ class CalculationPage(QWidget):
         self.recalculate()
 
     def load_record_payload(self, record_id: str) -> None:
+        self.context.diagnostic_logger.event("record_restore_requested", record_id=record_id)
         try:
             record = self.context.record_service.load(record_id)
         except Exception as exc:
@@ -1231,9 +1620,10 @@ class CalculationPage(QWidget):
         proposal_raw = ai_raw.get("packaging_proposal") or {}
         if proposal_raw:
             try:
-                self.proposal = PackagingProposal.from_dict(proposal_raw)
+                self._adopt_packaging(PackagingProposal.from_dict(proposal_raw))
             except Exception:
                 self.proposal = None
+                self.session.adopted_packaging = None
         adopted = layers.get("adopted", {})
         self.packaging_stale = bool(adopted.get("packaging_estimate_stale", False))
         bare = adopted.get("bare", {})
@@ -1243,7 +1633,8 @@ class CalculationPage(QWidget):
         self.bare_weight.setValue(float(bare.get("weight_g") or 0))
         for key, fields in (("normal", self.normal_fields), ("conservative", self.conservative_fields)):
             raw = adopted.get(key, {})
-            fields["method"].setText(str(raw.get("packaging_method") or ""))
+            if "method" in fields:
+                fields["method"].setText(str(raw.get("packaging_method") or ""))
             fields["length"].setValue(float(raw.get("length_cm") or 0))
             fields["width"].setValue(float(raw.get("width_cm") or 0))
             fields["height"].setValue(float(raw.get("height_cm") or 0))
@@ -1251,6 +1642,11 @@ class CalculationPage(QWidget):
             fields["reason"].setText(str(raw.get("reasoning_summary") or ""))
             if raw.get("needs_review"):
                 self.manual_scenarios.add("正常档" if key == "normal" else "保守档")
+            if key == "normal" and raw.get("needs_review") and not self.observation.display_packaging_summary:
+                legacy_instruction = str(raw.get("packaging_method") or "").strip()
+                if legacy_instruction:
+                    self.observation.display_packaging_summary = legacy_instruction
+                    self.structure_summary.setText(legacy_instruction)
         selected_package = str(adopted.get("selected_packaging") or "正常档")
         self.selected_forwarder_id = str(adopted.get("selected_forwarder_id") or self.selected_forwarder_id)
         calculated = layers.get("calculated", {})
@@ -1274,12 +1670,10 @@ class CalculationPage(QWidget):
         self.rebuild_profit_rules()
         self._select_package(selected_package, user=False)
         if self.packaging_stale:
-            self.packaging_summary.setText("包装估算已过期")
             self.review_badge.setText("估算已过期 · 禁止保存")
             self.review_badge.setProperty("warning", True)
             self.review_badge.setProperty("success", False)
         elif self.proposal is not None:
-            self.packaging_summary.setText(self.proposal.normal.packaging_method or "包装方案已载入")
             if self.proposal.needs_review or self.manual_scenarios:
                 self.review_badge.setText("需要复核")
                 self.review_badge.setProperty("warning", True)
@@ -1289,7 +1683,6 @@ class CalculationPage(QWidget):
                 self.review_badge.setProperty("success", True)
                 self.review_badge.setProperty("warning", False)
         else:
-            self.packaging_summary.setText("人工包装方案")
             self.review_badge.setText("人工方案 · 需要复核")
             self.review_badge.setProperty("warning", True)
             self.review_badge.setProperty("success", False)
