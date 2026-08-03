@@ -167,6 +167,38 @@ def test_numeric_strings_and_simple_units_are_normalized():
     assert (observation.length_cm, observation.width_cm, observation.height_cm, observation.weight_g) == (55, 20, 5, 100)
 
 
+def test_adjustable_or_component_dimensions_stay_as_evidence_not_outer_dimensions():
+    content = {
+        "observation": {
+            "product_name": "flexible item", "length_cm": 55, "width_cm": 70, "height_cm": 2.5,
+            "weight_g": 110, "dimension_scope": "unknown",
+        },
+        "field_evidence": {"dimensions": {"raw_text": "45-65*65-75*2.5cm", "meaning": ""}},
+        "packaging_proposal": None,
+    }
+    observation, _ = RecognitionService.parse_payload(
+        {"choices": [{"message": {"content": json.dumps(content)}}]}, model="vision-test"
+    )
+    assert (observation.length_cm, observation.width_cm, observation.height_cm) == (None, None, None)
+    assert observation.raw_payload["field_evidence"]["dimensions"]["raw_text"] == "45-65*65-75*2.5cm"
+    assert observation.raw_payload["dimension_semantic_issue"] == "dimension_evidence_not_outer_dimensions"
+
+
+def test_explicit_single_item_three_dimensions_remain_available():
+    content = {
+        "observation": {
+            "product_name": "structured item", "length_cm": 17, "width_cm": 8.8, "height_cm": 4.7,
+            "dimension_scope": "product_size",
+        },
+        "field_evidence": {"dimensions": {"raw_text": "17×8.8×4.7cm", "meaning": "single item outer dimensions"}},
+        "packaging_proposal": None,
+    }
+    observation, _ = RecognitionService.parse_payload(
+        {"choices": [{"message": {"content": json.dumps(content)}}]}, model="vision-test"
+    )
+    assert (observation.length_cm, observation.width_cm, observation.height_cm) == (17, 8.8, 4.7)
+
+
 def test_parse_failure_retains_sanitized_raw_response_and_traceback(tmp_path, monkeypatch):
     class Settings:
         def load(self):

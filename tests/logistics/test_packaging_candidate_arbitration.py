@@ -80,3 +80,51 @@ def test_nonfoldable_item_keeps_outline_and_ai_cannot_drop_confirmed_net_weight(
         observation, external_proposal=_ai(_scenario("normal", dims=(56, 3, 2), weight=100)),
     )
     assert "packaged_weight_below_confirmed_net_weight" in proposal.rejected_candidates["ai_candidate"]
+
+
+def test_ai_fold_claim_without_smaller_outline_is_rejected_and_fallback_continues():
+    observation = AIObservation(
+        product_name="generic flexible item", length_cm=60, width_cm=10, height_cm=2, weight_g=110,
+        dimension_scope="product_size", foldability="good", packing_actions=["flat_fold"],
+    )
+    proposal = PackagingEstimationService().estimate(
+        observation, external_proposal=_ai(_scenario("normal", state=PackagingState.FULL_FLAT_FOLD, dims=(60, 10, 2), weight=130)),
+    )
+    assert "packing_action_not_reflected_in_outline" in proposal.rejected_candidates["ai_candidate"]
+    assert proposal.proposal_source == "generic_candidate"
+
+
+def test_unsupported_box_with_no_weight_increment_is_rejected():
+    observation = AIObservation(product_name="generic flexible item", weight_g=110, weight_scope="net_weight")
+    boxed = _scenario("normal", dims=(20, 15, 6), weight=110)
+    boxed.packaging_method = "paper box"
+    proposal = PackagingEstimationService().estimate(
+        observation, external_proposal=_ai(boxed, _scenario("conservative", dims=(22, 17, 8), weight=130)),
+    )
+    reasons = proposal.rejected_candidates["ai_candidate"]
+    assert "unsupported_individual_package_type" in reasons
+    assert "packaged_weight_has_no_material_increment" in reasons
+
+
+def test_recognizable_item_with_confirmed_weight_and_no_outer_dimensions_gets_candidate():
+    proposal = PackagingEstimationService().estimate(
+        AIObservation(product_name="generic flexible item", overall_form="flexible_chain", packing_actions=["coil"],
+                      weight_g=110, weight_scope="net_weight"),
+    )
+    assert proposal.proposal_source == "generic_candidate"
+    assert proposal.normal.is_complete()
+    assert proposal.normal.weight_g > 110
+
+
+def test_semantically_rejected_ai_outline_is_not_reused_by_fallback():
+    observation = AIObservation(
+        product_name="generic flexible item", overall_form="flexible_chain", packing_actions=["coil"],
+        weight_g=110, weight_scope="net_weight",
+        raw_payload={"dimension_semantic_issue": "dimension_evidence_not_outer_dimensions"},
+    )
+    proposal = PackagingEstimationService().estimate(
+        observation, external_proposal=_ai(_scenario("normal", dims=(55, 70, 2.5), weight=130)),
+    )
+    assert "dimension_evidence_not_outer_dimensions" in proposal.rejected_candidates["ai_candidate"]
+    assert proposal.proposal_source == "generic_candidate"
+    assert proposal.normal.length_cm < 55

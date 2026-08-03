@@ -254,11 +254,57 @@ class PackagingEstimationService:
             if float(normal.weight_g) < float(observation.weight_g):
                 reasons.append("packaged_weight_below_confirmed_net_weight")
         raw_dims = (observation.length_cm, observation.width_cm, observation.height_cm)
-        if self._complete(raw_dims):
+        if observation.dimension_scope == "product_size" and self._complete(raw_dims):
             transport_dims = self._transport_outline(tuple(float(value) for value in raw_dims), observation)
-            if transport_dims != tuple(float(value) for value in raw_dims):
+            declared_reduction = normal.packaging_state in {
+                PackagingState.FULL_FLAT_FOLD, PackagingState.STRONG_COMPRESSION,
+            }
+            if transport_dims != tuple(float(value) for value in raw_dims) or declared_reduction:
                 if max(float(normal.length_cm or 0), float(normal.width_cm or 0), float(normal.height_cm or 0)) >= max(raw_dims):
-                    reasons.append("uses_unfolded_outline_despite_packing_action")
+                    reasons.append("packing_action_not_reflected_in_outline")
+        return reasons
+
+    @staticmethod
+    def _evidence_text(observation: AIObservation) -> str:
+        evidence = observation.raw_payload.get("field_evidence", {}) if observation.raw_payload else {}
+        try:
+            return json.dumps(evidence, ensure_ascii=False).lower()
+        except (TypeError, ValueError):
+            return ""
+
+    def _validate_ai_semantics(self, normal: PackagingScenario, conservative: PackagingScenario,
+                               observation: AIObservation) -> list[str]:
+        """Reject only semantically impossible AI proposals before arbitration."""
+        reasons: list[str] = []
+        if observation.raw_payload.get("dimension_semantic_issue") == "dimension_evidence_not_outer_dimensions":
+            reasons.append("dimension_evidence_not_outer_dimensions")
+
+        evidence_text = self._evidence_text(observation)
+        box_words = ("纸盒", "纸箱", "礼盒", "carton", "box")
+        method = " ".join((normal.packaging_method, conservative.packaging_method)).lower()
+        individual_evidence = (
+            observation.retail_box_visible is True
+            or any(token in evidence_text for token in ("单件", "每件", "独立", "原盒", "包装盒", "individual package", "each item"))
+        )
+        if any(word in method for word in box_words) and not individual_evidence:
+            reasons.append("unsupported_individual_package_type")
+
+        bare_weight = observation.weight_g
+        if (observation.weight_scope != "packaged_weight" and bare_weight and normal.weight_g
+                and any(word in method for word in box_words)
+                and float(normal.weight_g) <= float(bare_weight)):
+            reasons.append("packaged_weight_has_no_material_increment")
+
+        hard_structure, _ = self._hard_state(observation)
+        unsupported_shape = (
+            normal.packaging_state == PackagingState.SHAPE_RETAINED
+            and observation.requires_shape_retention is not True
+            and "retain_shape" not in self._actions(observation)
+            and not hard_structure
+            and (observation.overall_form in {"soft_flat", "flexible_chain"} or observation.foldability == "good")
+        )
+        if unsupported_shape:
+            reasons.append("unsupported_shape_retention")
         return reasons
 
     @staticmethod
@@ -314,6 +360,8 @@ class PackagingEstimationService:
 
         if ai_normal and ai_conservative:
             ai_reasons = self._validate_candidate(ai_normal, ai_conservative, observation)
+            ai_reasons.extend(reason for reason in self._validate_ai_semantics(ai_normal, ai_conservative, observation)
+                              if reason not in ai_reasons)
             if shipping_dims and ai_normal.is_complete() and tuple(round(float(value), 1) for value in (ai_normal.length_cm, ai_normal.width_cm, ai_normal.height_cm)) != tuple(round(float(value), 1) for value in obs_dims):
                 ai_reasons.append("conflicts_with_merchant_shipping_dimensions")
             records["ai_candidate"] = self._record("ai_candidate", ai_normal, ai_conservative,
@@ -326,11 +374,12 @@ class PackagingEstimationService:
         matched = [rule for rule in sorted(self.registry.get("aggregate_rules", []), key=lambda item: int(item.get("priority", 0)), reverse=True)
                    if rule.get("enabled", True) and self._match_rule(rule, observation)]
         selected = matched[0] if matched else None
+        valid_ai_candidate = ai_normal and ai_conservative and "ai_candidate" not in rejected
         base_dims = self._transport_outline(tuple(float(value) for value in obs_dims), observation) if dims_complete else None
         base_weight = float(observation.weight_g) if observation.weight_g and observation.weight_g > 0 else None
-        if not base_dims and ai_normal and ai_normal.is_complete():
+        if not base_dims and valid_ai_candidate and ai_normal.is_complete():
             base_dims = (float(ai_normal.length_cm), float(ai_normal.width_cm), float(ai_normal.height_cm))
-        if base_weight is None and ai_normal and ai_normal.weight_g:
+        if base_weight is None and valid_ai_candidate and ai_normal.weight_g:
             base_weight = float(ai_normal.weight_g)
         if base_weight is not None and not shipping_weight and observation.weight_g and observation.weight_scope != "packaged_weight":
             base_weight += max(20.0, min(300.0, base_weight * 0.08))
@@ -367,6 +416,9 @@ class PackagingEstimationService:
                     observation, source="generic", dims=base_dims, weight=base_weight,
                     method="generic structural protection", confidence="low", ids=["GENERIC-OBSERVED-STRUCTURE"])
             else:
+                if observation.weight_scope != "packaged_weight" and observation.weight_g and observation.weight_g > 0:
+                    normal_weight = max(normal_weight, float(observation.weight_g) + max(20.0, float(observation.weight_g) * 0.08))
+                    conservative_weight = max(conservative_weight, normal_weight)
                 generic_normal = self._scenario("正常档", state, f"generic fallback: {fallback_id}", normal_dims, normal_weight,
                                                 "no valid AI or CAL candidate", "low", True, [f"GENERIC-{fallback_id.upper()}"])
                 generic_conservative = self._scenario("保守档", state, f"generic fallback: {fallback_id} (conservative)", conservative_dims,

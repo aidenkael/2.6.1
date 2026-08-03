@@ -75,7 +75,7 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-vision-numeric-safe-v6"
+    PROMPT_VERSION = "2.6.1-vision-semantic-packaging-v7"
 
     def __init__(self, settings_service: SettingsService, profile_store: ApiProfileStore | None = None) -> None:
         self.settings_service = settings_service
@@ -118,8 +118,14 @@ class RecognitionService:
 4. 清晰文字优先于视觉猜测；无法确认时返回 null，并说明证据不足。
 5. 不得输出物流费用、利润、售价建议或货代选择。
 
-必须识别：商品名称与规范化类型、材质、软硬、折叠/压缩能力、保形和硬结构、
-商品成本、国内运费、数量、尺寸、重量、尺寸/重量语义，以及正常档和保守档包装候选。
+必须先根据主图、实拍图和结构图识别商品主体与各部件，再判断整体物理结构、折叠/盘绕/压缩/套叠/拆分能力，最后结合文字证据和 confirmed_facts 推算单件运输包装。
+必须识别：商品名称与规范化类型、材质、包装相关摘要、整体形态、包装动作和约束、软硬、折叠/压缩能力、保形和硬结构、商品成本、国内运费、数量、尺寸、重量、尺寸/重量语义，以及正常档和保守档包装候选。
+
+尺寸语义规则：
+- 只有明确的单件三维外廓、单件运输包装或原盒三维尺寸才能填写 length_cm、width_cm、height_cm。
+- 可调长度范围、不同部件长度、尺码范围、展开长度、周长、拉伸前后长度、多 SKU 规格、批量外箱和件/箱信息都不是单件三维外廓；这些数字必须写入 field_evidence.dimensions.raw_text，并将三维字段设为 null。
+- 不得取范围中点、平均值或把多个部件长度拼成三维尺寸。若没有明确外廓但商品可识别，仍应依据视觉结构生成低置信包装候选。
+- 包装动作必须与包装外廓一致：声明平折、盘绕、压缩、套叠或拆分时，候选外廓必须体现相应变化；没有单件盒装证据时，不得猜测纸箱、纸盒或礼盒。
 
 价格与运费要求：
 - 区分当前单价、划线价、区间价、优惠券、订单总额；优先返回当前规格可用单价。
@@ -130,10 +136,19 @@ class RecognitionService:
 {{
   "observation": {{
     "product_name": "",
-    "product_type": "",
-    "product_family": "",
-    "material": "",
-    "material_family": "",
+     "product_type": "",
+     "product_family": "",
+     "product_type_raw": "",
+     "product_type_code": "unknown",
+     "product_family_code": "unknown",
+     "material": "",
+     "material_family": "",
+     "material_family_code": "unknown",
+     "display_product_summary": "",
+     "display_packaging_summary": "",
+     "overall_form": "soft_flat|soft_bulky|flexible_chain|articulated|hard_flat|hard_long|hard_3d|hollow_crushable|fragile_protruding|mixed|unknown",
+     "packing_actions": [],
+     "packing_constraints": [],
     "rigidity": "unknown|soft|semi_rigid|hard",
     "foldability": "unknown|none|limited|good",
     "compressibility": "unknown|none|limited|good",
@@ -157,7 +172,7 @@ class RecognitionService:
     "weight_g": null,
     "dimension_value_source": "image_text|ai_visual_estimate|unknown",
     "weight_value_source": "image_text|ai_visual_estimate|unknown",
-    "dimension_scope": "unknown|product_size|shipping_package_size|display_size",
+     "dimension_scope": "unknown|product_size|shipping_package_size|original_box_size|display_size|adjustable_range|component_length|sku_range|circumference|extended_length|bulk_carton",
     "weight_scope": "unknown|net_weight|packaged_weight|original_box_weight",
     "quantity": 1,
     "confidence": "low|medium|high"
@@ -165,7 +180,7 @@ class RecognitionService:
   "field_evidence": {{
     "product_cost_rmb": {{"source_image_index": null, "raw_text": "", "confidence": "low"}},
     "domestic_shipping_rmb": {{"source_image_index": null, "raw_text": "", "confidence": "low"}},
-    "dimensions": {{"source_image_index": null, "raw_text": "", "confidence": "low"}},
+     "dimensions": {{"source_image_index": null, "raw_text": "", "meaning": "", "semantic_note": "", "confidence": "low"}},
     "weight": {{"source_image_index": null, "raw_text": "", "confidence": "low"}}
   }},
   "packaging_proposal": {{
@@ -254,6 +269,25 @@ Additional required behavior: scan every image and Merge product, price, dimensi
                 cleaned[field] = cls._parse_optional_number(cleaned[field], field_name=f"{prefix}.{field}", parse_issues=parse_issues)
         return cleaned
 
+    @staticmethod
+    def _dimension_evidence_is_not_outer_dimensions(payload: dict[str, Any], observation: AIObservation) -> bool:
+        """Keep range and component measurements as evidence, never transport input."""
+        invalid_scopes = {
+            "adjustable_range", "component_length", "sku_range", "circumference",
+            "extended_length", "bulk_carton", "display_size",
+        }
+        if observation.dimension_scope in invalid_scopes:
+            return True
+        evidence = payload.get("field_evidence", {}).get("dimensions", {})
+        if not isinstance(evidence, dict):
+            return False
+        text = " ".join(str(evidence.get(key) or "") for key in ("raw_text", "meaning", "semantic_note")).lower()
+        semantic_markers = (
+            "adjustable", "range", "component", "sku", "circumference", "extended", "stretched", "bulk carton",
+            "可调", "范围", "区间", "部件", "尺码", "周长", "展开", "拉伸", "外箱", "件/箱",
+        )
+        return any(marker in text for marker in semantic_markers) or bool(re.search(r"\d+\s*[-/~]\s*\d+", text))
+
     @classmethod
     def parse_payload(cls, response: dict[str, Any], *, model: str) -> tuple[AIObservation, PackagingProposal | None]:
         try:
@@ -269,6 +303,10 @@ Additional required behavior: scan every image and Merge product, price, dimensi
         observation = normalize_observation(AIObservation.from_dict(
             cls._clean_numeric_fields(raw, prefix="observation", parse_issues=parse_issues)
         ))
+        if cls._dimension_evidence_is_not_outer_dimensions(payload, observation):
+            observation.length_cm = observation.width_cm = observation.height_cm = None
+            observation.dimension_scope = "unknown"
+            payload["dimension_semantic_issue"] = "dimension_evidence_not_outer_dimensions"
         for field, type_field in (("product_cost_rmb", "product_cost_value_type"), ("domestic_shipping_rmb", "domestic_shipping_value_type")):
             if getattr(observation, field) is not None and getattr(observation, type_field) == "unknown":
                 evidence = payload.get("field_evidence", {}).get(field, {})
