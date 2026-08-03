@@ -97,6 +97,65 @@ class PackagingEstimationService:
         return {str(value) for value in (observation.packing_constraints or []) if str(value)}
 
     @staticmethod
+    def _has_explicit_rigid_evidence(observation: AIObservation) -> bool:
+        """Return only observed facts that can support a retained transport shape."""
+        if any(value is True for value in (
+            observation.has_hard_bottom, observation.has_hard_backboard,
+            observation.has_frame, observation.has_rigid_insert,
+            observation.has_rigid_parts, observation.retail_box_visible,
+            observation.hard_card_visible,
+        )):
+            return True
+        constraints = PackagingEstimationService._constraints(observation)
+        return bool({"rigid_outline", "longest_nonfoldable_axis", "fragile_protrusion"} & constraints) or (
+            observation.protrusion_flattenable is False
+        )
+
+    def _unproven_full_shape_retention(self, observation: AIObservation) -> bool:
+        """Keep an AI conclusion from becoming its own evidence of rigidity."""
+        return (
+            observation.overall_form == "hard_3d"
+            and observation.requires_shape_retention is True
+            and observation.foldability == "none"
+            and observation.compressibility == "none"
+            and not self._has_explicit_rigid_evidence(observation)
+        )
+
+    @staticmethod
+    def _has_individual_package_evidence(observation: AIObservation) -> bool:
+        """Accept only packaging-specific evidence, never generic single-item wording."""
+        if observation.retail_box_visible is True:
+            return True
+        evidence = observation.raw_payload.get("field_evidence", {}) if observation.raw_payload else {}
+        try:
+            text = json.dumps(evidence, ensure_ascii=False).lower().replace(" ", "")
+        except (TypeError, ValueError):
+            return False
+        packaging_markers = (
+            "原盒", "包装盒", "独立盒装", "单个/盒", "单件包装", "单件装",
+            "零售盒", "纸箱包装", "individualpackage", "retailbox",
+        )
+        return any(marker in text for marker in packaging_markers)
+
+    @staticmethod
+    def _transport_change_is_explained(normal: PackagingScenario, observation: AIObservation) -> bool:
+        """Recognise an explicit storage/flattening action without imposing a ratio."""
+        actions = PackagingEstimationService._actions(observation)
+        if actions & {"flat_fold", "roll", "coil", "compress", "nest", "disassemble"}:
+            return True
+        method = " ".join((normal.packaging_method, normal.reasoning_summary)).lower()
+        if any(marker in method for marker in ("收纳", "平放", "平折", "折叠", "盘绕", "卷", "压缩", "flatten", "fold", "coil", "roll", "compress", "nest")):
+            return True
+        raw_dims = (observation.length_cm, observation.width_cm, observation.height_cm)
+        package_dims = (normal.length_cm, normal.width_cm, normal.height_cm)
+        return (
+            observation.dimension_scope == "product_size"
+            and PackagingEstimationService._complete(raw_dims)
+            and PackagingEstimationService._complete(package_dims)
+            and any(float(packaged) < float(raw) for packaged, raw in zip(package_dims, raw_dims))
+        )
+
+    @staticmethod
     def _scenario(label: str, state: PackagingState, method: str,
                   dims: tuple[float, float, float] | None, weight: float | None,
                   reason: str, confidence: str, needs_review: bool,
@@ -373,20 +432,17 @@ class PackagingEstimationService:
             return ""
 
     def _validate_ai_semantics(self, normal: PackagingScenario, conservative: PackagingScenario,
-                               observation: AIObservation) -> list[str]:
+                               observation: AIObservation,
+                               *, semantic_observation: AIObservation | None = None) -> list[str]:
         """Reject only semantically impossible AI proposals before arbitration."""
+        semantic_observation = semantic_observation or observation
         reasons: list[str] = []
         if observation.raw_payload.get("dimension_semantic_issue") == "dimension_evidence_not_outer_dimensions":
             reasons.append("dimension_evidence_not_outer_dimensions")
 
-        evidence_text = self._evidence_text(observation)
         box_words = ("纸盒", "纸箱", "礼盒", "carton", "box")
         method = " ".join((normal.packaging_method, conservative.packaging_method)).lower()
-        individual_evidence = (
-            observation.retail_box_visible is True
-            or any(token in evidence_text for token in ("单件", "每件", "独立", "原盒", "包装盒", "individual package", "each item"))
-        )
-        if any(word in method for word in box_words) and not individual_evidence:
+        if any(word in method for word in box_words) and not self._has_individual_package_evidence(semantic_observation):
             reasons.append("unsupported_individual_package_type")
 
         bare_weight = observation.weight_g
@@ -405,31 +461,73 @@ class PackagingEstimationService:
         )
         if unsupported_shape:
             reasons.append("unsupported_shape_retention")
+        if self._unproven_full_shape_retention(semantic_observation):
+            reasons.append("shape_retention_requires_rigid_evidence")
+        if (
+            semantic_observation.protrusion_flattenable is True
+            or semantic_observation.compressibility == "limited"
+        ) and not self._transport_change_is_explained(normal, semantic_observation):
+            reasons.append("declared_transport_adjustment_not_reflected")
         return reasons
 
     def _remove_unsupported_shape_retention(self, observation: AIObservation) -> tuple[AIObservation, list[str]]:
         """Remove only a conflicting shape-retention conclusion, not usable structure facts."""
         actions = self._actions(observation)
-        constraints = self._constraints(observation)
-        rigid_evidence = any(value is True for value in (
-            observation.has_hard_bottom, observation.has_hard_backboard, observation.has_frame,
-            observation.has_rigid_insert, observation.has_rigid_parts, observation.retail_box_visible,
-            observation.hard_card_visible,
-        )) or bool({"rigid_outline", "longest_nonfoldable_axis", "fragile_protrusion"} & constraints)
+        rigid_evidence = self._has_explicit_rigid_evidence(observation)
         flexible = observation.overall_form in {"flexible_chain", "soft_flat"} and (
             observation.foldability == "good" or bool({"coil", "flat_fold"} & actions)
         )
-        if not flexible or rigid_evidence or observation.requires_shape_retention is not True:
+        unproven_full_shape = self._unproven_full_shape_retention(observation)
+        if (not flexible and not unproven_full_shape) or rigid_evidence or observation.requires_shape_retention is not True:
             return observation, []
         raw_payload = dict(observation.raw_payload)
-        raw_payload.setdefault("structural_conflict_adjustments", []).append("unsupported_shape_retention_removed")
+        adjustment = "shape_retention_requires_rigid_evidence" if unproven_full_shape else "unsupported_shape_retention_removed"
+        raw_payload.setdefault("structural_conflict_adjustments", []).append(adjustment)
         return replace(
             observation,
             requires_shape_retention=None,
             packaging_state_hint="unknown" if observation.packaging_state_hint == PackagingState.SHAPE_RETAINED.value else observation.packaging_state_hint,
             packing_actions=[action for action in observation.packing_actions if action != "retain_shape"],
             raw_payload=raw_payload,
-        ), ["unsupported_shape_retention_removed"]
+        ), [adjustment]
+
+    def _cal_structure_risk_rule_ids(self, observation: AIObservation) -> list[str]:
+        """Find related CAL lessons that challenge an unsupported rigid conclusion.
+
+        This intentionally does not participate in CAL matching or alter a value.
+        It only makes an unsupported AI claim require actual rigid evidence.
+        """
+        if not self._unproven_full_shape_retention(observation):
+            return []
+        observation_text = self._text(observation)
+        families = {
+            str(value).lower() for value in (observation.product_family, observation.product_family_code)
+            if value and value != "unknown"
+        }
+        risk_markers = (
+            "compress", "compression", "compressible", "flatten", "fold", "protrusion", "display",
+            "overestimate", "压缩", "折叠", "收纳", "平放", "突出", "展示", "高估",
+        )
+        risk_ids: list[str] = []
+        for rule in self.registry.get("aggregate_rules", []):
+            if not rule.get("enabled", True):
+                continue
+            terms = [str(value).lower() for value in (rule.get("match") or {}).get("any_terms") or []]
+            text = json.dumps(rule, ensure_ascii=False).lower()
+            if terms and any(term in observation_text for term in terms) and any(marker in text for marker in risk_markers):
+                risk_ids.extend(str(value) for value in rule.get("source_cal_ids") or [])
+                risk_ids.append(str(rule.get("rule_id")))
+        for rule in self.registry.get("sample_rules", []):
+            if not rule.get("enabled", True):
+                continue
+            category = str(rule.get("category_type") or "").lower()
+            if not category or category == "general" or category not in families:
+                continue
+            sample = self.sample_by_id.get(str(rule.get("rule_id")))
+            text = json.dumps({"rule": rule, "sample": sample}, ensure_ascii=False).lower()
+            if any(marker in text for marker in risk_markers):
+                risk_ids.append(str(rule.get("rule_id")))
+        return list(dict.fromkeys(rule_id for rule_id in risk_ids if rule_id and rule_id != "None"))
 
     def _local_completion_candidate(self, observation: AIObservation,
                                     base_dims: tuple[float, float, float] | None,
@@ -464,10 +562,14 @@ class PackagingEstimationService:
         if not local_normal or not local_conservative:
             return None, None, diagnostic
         rejected = set(reasons)
-        dimension_rejected = bool(rejected & {"dimension_evidence_not_outer_dimensions", "packing_action_not_reflected_in_outline", "unsupported_shape_retention"})
+        dimension_rejected = bool(rejected & {
+            "dimension_evidence_not_outer_dimensions", "packing_action_not_reflected_in_outline",
+            "unsupported_shape_retention", "shape_retention_requires_rigid_evidence",
+            "declared_transport_adjustment_not_reflected", "cal_structure_conflict_requires_evidence",
+        })
         weight_rejected = bool(rejected & {"packaged_weight_below_confirmed_net_weight", "packaged_weight_has_no_material_increment", "unsupported_individual_package_type"})
         method_rejected = "unsupported_individual_package_type" in rejected
-        state_rejected = "unsupported_shape_retention" in rejected
+        state_rejected = bool(rejected & {"unsupported_shape_retention", "shape_retention_requires_rigid_evidence"})
 
         def merge(source: PackagingScenario, local: PackagingScenario) -> PackagingScenario:
             dims_valid = self._complete((source.length_cm, source.width_cm, source.height_cm)) and not dimension_rejected
@@ -504,6 +606,7 @@ class PackagingEstimationService:
                 width_cm=source.width_cm if dims_valid else local.width_cm,
                 height_cm=source.height_cm if dims_valid else local.height_cm,
                 weight_g=source.weight_g if weight_valid else local.weight_g,
+                reasoning_summary=source.reasoning_summary if state_valid else local.reasoning_summary,
                 confidence=source.confidence if source.confidence in {"low", "medium", "high"} else local.confidence,
                 needs_review=True,
             )
@@ -577,6 +680,8 @@ class PackagingEstimationService:
         rejected: dict[str, list[str]] = {}
         review: list[str] = []
         applied_ids: list[str] = []
+        semantic_observation = observation
+        cal_structure_risk_ids = self._cal_structure_risk_rule_ids(semantic_observation)
         observation, structural_adjustments = self._remove_unsupported_shape_retention(observation)
         obs_dims = (observation.length_cm, observation.width_cm, observation.height_cm)
         dims_complete = self._complete(obs_dims)
@@ -600,8 +705,12 @@ class PackagingEstimationService:
 
         if ai_normal and ai_conservative:
             ai_reasons = self._validate_candidate(ai_normal, ai_conservative, observation)
-            ai_reasons.extend(reason for reason in self._validate_ai_semantics(ai_normal, ai_conservative, observation)
+            ai_reasons.extend(reason for reason in self._validate_ai_semantics(
+                ai_normal, ai_conservative, observation, semantic_observation=semantic_observation,
+            )
                               if reason not in ai_reasons)
+            if cal_structure_risk_ids and "cal_structure_conflict_requires_evidence" not in ai_reasons:
+                ai_reasons.append("cal_structure_conflict_requires_evidence")
             if shipping_dims and ai_normal.is_complete() and tuple(round(float(value), 1) for value in (ai_normal.length_cm, ai_normal.width_cm, ai_normal.height_cm)) != tuple(round(float(value), 1) for value in obs_dims):
                 ai_reasons.append("conflicts_with_merchant_shipping_dimensions")
             records["ai_candidate"] = self._record("ai_candidate", ai_normal, ai_conservative,
@@ -663,9 +772,21 @@ class PackagingEstimationService:
             "source": "cal_compatibility_adapter",
             "aggregate_rule_ids": [str(rule.get("rule_id")) for rule in matched],
             "sample_matches": [{"rule_id": str(rule.get("rule_id")), "match_strength": strength,
-                                "matched_fields": fields, "missing_fields": missing, "conflicting_fields": conflicts,
-                                "role": rule.get("role")} for rule, strength, fields, missing, conflicts in sample_matches],
+                                 "matched_fields": fields, "missing_fields": missing, "conflicting_fields": conflicts,
+                                 "role": rule.get("role")} for rule, strength, fields, missing, conflicts in sample_matches],
+            "structure_risk_rule_ids": cal_structure_risk_ids,
         }
+        if cal_structure_risk_ids:
+            records["cal_structure_risk"] = {
+                "source": "cal_structure_risk",
+                "normal": None,
+                "conservative": None,
+                "confidence": "low",
+                "evidence": ["related_cal_structure_lessons"],
+                "matched_rule_ids": cal_structure_risk_ids,
+                "rejection_reasons": ["cal_structure_conflict_requires_evidence"],
+                "adjustments": [],
+            }
         valid_ai_candidate = ai_normal and ai_conservative and "ai_candidate" not in rejected
         usable_ai_normal = ai_normal if valid_ai_candidate else salvaged_normal
         usable_ai_conservative = ai_conservative if valid_ai_candidate else salvaged_conservative

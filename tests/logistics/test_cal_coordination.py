@@ -95,3 +95,21 @@ def test_no_cal_match_preserves_complete_ai_candidate():
     result = service().estimate(observation, external_proposal=proposal())
     assert result.proposal_source == "ai_candidate"
     assert result.candidate_records["cal_match_audit"]["sample_matches"] == []
+
+
+def test_cal_structure_risk_challenges_unsupported_shape_without_overriding_confirmed_weight():
+    observation = AIObservation(
+        product_type="handbag", product_family="bag", material_family="leather",
+        overall_form="hard_3d", rigidity="hard", foldability="none", compressibility="none",
+        requires_shape_retention=True, length_cm=28.5, width_cm=12, height_cm=21,
+        weight_g=700, weight_scope="net_weight", dimension_scope="product_size",
+    )
+    ai = PackagingProposal(
+        PackagingScenario("normal", PackagingState.SHAPE_RETAINED, "AI estimate", 30.5, 14, 23, 750),
+        PackagingScenario("conservative", PackagingState.SHAPE_RETAINED, "AI estimate", 32.5, 16, 25, 800),
+        proposal_source="vision_api",
+    )
+    result = service().estimate(observation, external_proposal=ai)
+    assert "cal_structure_conflict_requires_evidence" in result.rejected_candidates["ai_candidate"]
+    assert "CAL-065" in result.candidate_records["cal_structure_risk"]["matched_rule_ids"]
+    assert result.normal.weight_g >= 700

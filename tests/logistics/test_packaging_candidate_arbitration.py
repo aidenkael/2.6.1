@@ -106,6 +106,84 @@ def test_unsupported_box_with_no_weight_increment_is_rejected():
     assert "packaged_weight_has_no_material_increment" in reasons
 
 
+def test_single_item_outline_text_is_not_individual_box_evidence():
+    observation = AIObservation(
+        product_name="generic item",
+        raw_payload={"field_evidence": {"dimensions": {"raw_text": "单件三维外廓尺寸 20×10×5cm"}}},
+    )
+    boxed = _scenario("normal", dims=(22, 12, 7), weight=130)
+    boxed.packaging_method = "paper box"
+    proposal = PackagingEstimationService().estimate(
+        observation, external_proposal=_ai(boxed, _scenario("conservative", dims=(24, 14, 9), weight=150)),
+    )
+    assert "unsupported_individual_package_type" in proposal.rejected_candidates["ai_candidate"]
+
+
+def test_single_per_box_text_is_individual_box_evidence():
+    observation = AIObservation(
+        product_name="generic item",
+        raw_payload={"field_evidence": {"packaging": {"raw_text": "单个/盒"}}},
+    )
+    boxed = _scenario("normal", dims=(22, 12, 7), weight=130)
+    boxed.packaging_method = "paper box"
+    proposal = PackagingEstimationService().estimate(
+        observation, external_proposal=_ai(boxed, _scenario("conservative", dims=(24, 14, 9), weight=150)),
+    )
+    assert proposal.proposal_source == "ai_candidate"
+
+
+def test_flattenable_protrusion_without_rigid_evidence_cannot_directly_win():
+    observation = AIObservation(
+        product_name="generic structured item", overall_form="hard_3d", rigidity="hard",
+        foldability="none", compressibility="none", requires_shape_retention=True,
+        protrusion_flattenable=True, length_cm=28.5, width_cm=12, height_cm=21,
+        weight_g=700, weight_scope="net_weight", dimension_scope="product_size",
+    )
+    proposal = PackagingEstimationService().estimate(
+        observation,
+        external_proposal=_ai(
+            _scenario("normal", state=PackagingState.SHAPE_RETAINED, dims=(30.5, 14, 23), weight=750),
+            _scenario("conservative", state=PackagingState.SHAPE_RETAINED, dims=(32.5, 16, 25), weight=800),
+        ),
+    )
+    reasons = proposal.rejected_candidates["ai_candidate"]
+    assert "shape_retention_requires_rigid_evidence" in reasons
+    assert "declared_transport_adjustment_not_reflected" in reasons
+    assert proposal.proposal_source != "ai_candidate"
+    assert proposal.normal.packaging_state is not PackagingState.SHAPE_RETAINED
+
+
+def test_limited_compressibility_requires_an_explained_transport_change():
+    observation = AIObservation(
+        product_name="generic limited item", compressibility="limited", length_cm=20, width_cm=15, height_cm=6,
+        weight_g=100, weight_scope="net_weight", dimension_scope="product_size",
+    )
+    proposal = PackagingEstimationService().estimate(
+        observation,
+        external_proposal=_ai(
+            _scenario("normal", dims=(22, 17, 8), weight=130),
+            _scenario("conservative", dims=(24, 19, 10), weight=150),
+        ),
+    )
+    assert "declared_transport_adjustment_not_reflected" in proposal.rejected_candidates["ai_candidate"]
+    assert proposal.normal.needs_review is True
+
+
+def test_explicit_rigid_frame_allows_shape_retained_candidate():
+    observation = AIObservation(
+        product_name="generic framed item", overall_form="hard_3d", rigidity="hard",
+        foldability="none", compressibility="none", requires_shape_retention=True, has_frame=True,
+    )
+    proposal = PackagingEstimationService().estimate(
+        observation,
+        external_proposal=_ai(
+            _scenario("normal", state=PackagingState.SHAPE_RETAINED, dims=(30, 20, 10), weight=500),
+            _scenario("conservative", state=PackagingState.SHAPE_RETAINED, dims=(32, 22, 12), weight=550),
+        ),
+    )
+    assert proposal.proposal_source == "ai_candidate"
+
+
 def test_recognizable_item_with_confirmed_weight_and_no_outer_dimensions_gets_candidate():
     proposal = PackagingEstimationService().estimate(
         AIObservation(product_name="generic flexible item", overall_form="flexible_chain", packing_actions=["coil"],
