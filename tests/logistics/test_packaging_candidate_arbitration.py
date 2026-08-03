@@ -97,7 +97,7 @@ def test_ai_fold_claim_without_smaller_outline_is_rejected_and_fallback_continue
 def test_unsupported_box_with_no_weight_increment_is_rejected():
     observation = AIObservation(product_name="generic flexible item", weight_g=110, weight_scope="net_weight")
     boxed = _scenario("normal", dims=(20, 15, 6), weight=110)
-    boxed.packaging_method = "paper box"
+    boxed.packaging_method = "硬质包装盒"
     proposal = PackagingEstimationService().estimate(
         observation, external_proposal=_ai(boxed, _scenario("conservative", dims=(22, 17, 8), weight=130)),
     )
@@ -119,10 +119,12 @@ def test_single_item_outline_text_is_not_individual_box_evidence():
     assert "unsupported_individual_package_type" in proposal.rejected_candidates["ai_candidate"]
 
 
-def test_single_per_box_text_is_individual_box_evidence():
+def test_merchant_original_box_evidence_allows_box_claim():
     observation = AIObservation(
         product_name="generic item",
-        raw_payload={"field_evidence": {"packaging": {"raw_text": "单个/盒"}}},
+        raw_payload={"field_evidence": {"packaging": {
+            "source_image_index": 1, "raw_text": "商家明确原盒，单个/盒",
+        }}},
     )
     boxed = _scenario("normal", dims=(22, 12, 7), weight=130)
     boxed.packaging_method = "paper box"
@@ -132,11 +134,11 @@ def test_single_per_box_text_is_individual_box_evidence():
     assert proposal.proposal_source == "ai_candidate"
 
 
-def test_flattenable_protrusion_without_rigid_evidence_cannot_directly_win():
+def test_display_outline_with_unknown_protrusion_cannot_directly_win_without_rigid_evidence():
     observation = AIObservation(
         product_name="generic structured item", overall_form="hard_3d", rigidity="hard",
         foldability="none", compressibility="none", requires_shape_retention=True,
-        protrusion_flattenable=True, length_cm=28.5, width_cm=12, height_cm=21,
+        protrusion_flattenable=None, length_cm=28.5, width_cm=12, height_cm=21,
         weight_g=700, weight_scope="net_weight", dimension_scope="product_size",
     )
     proposal = PackagingEstimationService().estimate(
@@ -148,7 +150,7 @@ def test_flattenable_protrusion_without_rigid_evidence_cannot_directly_win():
     )
     reasons = proposal.rejected_candidates["ai_candidate"]
     assert "shape_retention_requires_rigid_evidence" in reasons
-    assert "declared_transport_adjustment_not_reflected" in reasons
+    assert "display_outline_requires_transport_evidence" in reasons
     assert proposal.proposal_source != "ai_candidate"
     assert proposal.normal.packaging_state is not PackagingState.SHAPE_RETAINED
 
@@ -173,6 +175,9 @@ def test_explicit_rigid_frame_allows_shape_retained_candidate():
     observation = AIObservation(
         product_name="generic framed item", overall_form="hard_3d", rigidity="hard",
         foldability="none", compressibility="none", requires_shape_retention=True, has_frame=True,
+        raw_payload={"field_evidence": {"structure": {"has_frame": {
+            "source_image_index": 1, "region_description": "商品中部可见刚性框架", "confidence": "high",
+        }}}},
     )
     proposal = PackagingEstimationService().estimate(
         observation,
@@ -182,6 +187,25 @@ def test_explicit_rigid_frame_allows_shape_retained_candidate():
         ),
     )
     assert proposal.proposal_source == "ai_candidate"
+
+
+def test_unverified_ai_rigid_boolean_cannot_make_shape_retention_win():
+    observation = AIObservation(
+        product_name="generic structured item", overall_form="hard_3d", rigidity="hard",
+        foldability="none", compressibility="none", requires_shape_retention=True, has_frame=True,
+        length_cm=28.5, width_cm=12, height_cm=21, weight_g=700,
+        weight_scope="net_weight", dimension_scope="product_size",
+    )
+    proposal = PackagingEstimationService().estimate(
+        observation,
+        external_proposal=_ai(
+            _scenario("normal", state=PackagingState.SHAPE_RETAINED, dims=(28.5, 12, 21), weight=750),
+            _scenario("conservative", state=PackagingState.SHAPE_RETAINED, dims=(30.5, 14, 23), weight=800),
+        ),
+    )
+    assert "shape_retention_requires_rigid_evidence" in proposal.rejected_candidates["ai_candidate"]
+    assert "display_outline_requires_transport_evidence" in proposal.rejected_candidates["ai_candidate"]
+    assert proposal.proposal_source != "ai_candidate"
 
 
 def test_recognizable_item_with_confirmed_weight_and_no_outer_dimensions_gets_candidate():
@@ -234,7 +258,7 @@ def test_unsupported_shape_retention_is_removed_without_losing_coil_structure():
     )
     assert proposal.proposal_source == "ai_candidate_salvaged"
     assert proposal.normal.packaging_state is not PackagingState.SHAPE_RETAINED
-    assert "unsupported_shape_retention_removed" in proposal.adjustments
+    assert "shape_retention_requires_rigid_evidence" in proposal.adjustments
 
 
 def test_salvage_completes_only_missing_dimensions_and_keeps_valid_weight():

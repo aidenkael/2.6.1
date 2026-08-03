@@ -18,6 +18,19 @@ class PackagingEstimationService:
 
     ENGINE_VERSION = "packaging-estimation-v2-candidate-arbitration"
     CALIBRATION_VERSION = "local-calibration-v3-77-samples-rules-v1"
+    _BOX_CONTAINER_MARKERS = (
+        "包装盒", "硬质包装盒", "盒装", "纸盒", "纸箱", "礼盒", "外包装箱",
+        "carton", "box", "retail box",
+    )
+    _STRUCTURE_EVIDENCE_MARKERS = {
+        "has_hard_bottom": ("has_hard_bottom", "硬底", "硬质底", "硬底板", "hard bottom"),
+        "has_hard_backboard": ("has_hard_backboard", "硬背板", "硬质背板", "hard backboard"),
+        "has_frame": ("has_frame", "框架", "硬框架", "支撑架", "frame"),
+        "has_rigid_insert": ("has_rigid_insert", "硬内衬", "刚性内衬", "rigid insert"),
+        "has_rigid_parts": ("has_rigid_parts", "刚性部件", "硬质部件", "rigid parts"),
+        "retail_box_visible": ("retail_box_visible", "原盒", "零售盒", "独立盒装", "包装盒", "retail box"),
+        "hard_card_visible": ("hard_card_visible", "硬卡", "硬纸板", "硬质卡板", "hard card"),
+    }
 
     def __init__(self, calibration_path: str | Path | None = None, *,
                  calibration_version: str | None = None,
@@ -78,15 +91,14 @@ class PackagingEstimationService:
     def _complete(values: tuple[float | None, ...]) -> bool:
         return all(value is not None and float(value) > 0 for value in values)
 
-    @staticmethod
-    def _hard_state(observation: AIObservation) -> tuple[bool, bool]:
+    def _hard_state(self, observation: AIObservation) -> tuple[bool, bool]:
         values = (
             observation.has_hard_bottom, observation.has_hard_backboard,
             observation.has_frame, observation.has_rigid_insert,
             observation.has_rigid_parts, observation.retail_box_visible,
             observation.hard_card_visible, observation.requires_shape_retention,
         )
-        return any(value is True for value in values), any(value is None for value in values)
+        return self._has_explicit_rigid_evidence(observation), any(value is None for value in values)
 
     @staticmethod
     def _actions(observation: AIObservation) -> set[str]:
@@ -97,45 +109,94 @@ class PackagingEstimationService:
         return {str(value) for value in (observation.packing_constraints or []) if str(value)}
 
     @staticmethod
-    def _has_explicit_rigid_evidence(observation: AIObservation) -> bool:
-        """Return only observed facts that can support a retained transport shape."""
-        if any(value is True for value in (
-            observation.has_hard_bottom, observation.has_hard_backboard,
-            observation.has_frame, observation.has_rigid_insert,
-            observation.has_rigid_parts, observation.retail_box_visible,
-            observation.hard_card_visible,
-        )):
-            return True
-        constraints = PackagingEstimationService._constraints(observation)
-        return bool({"rigid_outline", "longest_nonfoldable_axis", "fragile_protrusion"} & constraints) or (
-            observation.protrusion_flattenable is False
+    def _iter_evidence_entries(value: Any, path: tuple[str, ...] = ()):
+        if isinstance(value, dict):
+            evidence_keys = {"source_image_index", "image_index", "source_image", "raw_text", "region", "region_description", "bbox", "source"}
+            if evidence_keys & set(value):
+                yield path, value
+            for key, child in value.items():
+                yield from PackagingEstimationService._iter_evidence_entries(child, (*path, str(key)))
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                yield from PackagingEstimationService._iter_evidence_entries(child, (*path, str(index)))
+
+    @staticmethod
+    def _evidence_is_located(entry: dict[str, Any]) -> bool:
+        """Require a source or image-region locator; an AI boolean alone is not evidence."""
+        source = str(entry.get("source") or entry.get("source_type") or "").lower()
+        details = " ".join(str(entry.get(key) or "") for key in (
+            "raw_text", "meaning", "semantic_note", "region", "region_description", "bbox", "position",
+        )).strip()
+        if source in {"user_confirmed", "merchant", "merchant_description", "merchant_text"}:
+            return bool(details or entry.get("value") is True)
+        image_locator = any(entry.get(key) is not None for key in ("source_image_index", "image_index", "source_image"))
+        region_locator = any(entry.get(key) not in (None, "", [], {}) for key in ("region", "region_description", "bbox", "position"))
+        return bool((image_locator and details) or (image_locator and region_locator))
+
+    def _has_field_evidence(self, observation: AIObservation, field: str) -> bool:
+        evidence = observation.raw_payload.get("field_evidence", {}) if observation.raw_payload else {}
+        markers = tuple(marker.lower() for marker in self._STRUCTURE_EVIDENCE_MARKERS.get(field, (field,)))
+        for path, entry in self._iter_evidence_entries(evidence):
+            if not self._evidence_is_located(entry):
+                continue
+            path_text = " ".join(path).lower()
+            try:
+                entry_text = json.dumps(entry, ensure_ascii=False).lower()
+            except (TypeError, ValueError):
+                entry_text = ""
+            if any(marker in path_text or marker in entry_text for marker in markers):
+                return True
+        confirmed = observation.raw_payload.get("confirmed_facts", {}) if observation.raw_payload else {}
+        fact = confirmed.get(field) if isinstance(confirmed, dict) else None
+        return isinstance(fact, dict) and str(fact.get("source") or "") == "user_confirmed" and fact.get("value") is True
+
+    def _has_explicit_rigid_evidence(self, observation: AIObservation) -> bool:
+        """Return only structure facts that have an auditable source, not AI self-claims."""
+        return any(
+            getattr(observation, field) is True and self._has_field_evidence(observation, field)
+            for field in self._STRUCTURE_EVIDENCE_MARKERS
         )
 
     def _unproven_full_shape_retention(self, observation: AIObservation) -> bool:
         """Keep an AI conclusion from becoming its own evidence of rigidity."""
         return (
-            observation.overall_form == "hard_3d"
-            and observation.requires_shape_retention is True
-            and observation.foldability == "none"
-            and observation.compressibility == "none"
+            observation.requires_shape_retention is True
             and not self._has_explicit_rigid_evidence(observation)
         )
 
-    @staticmethod
-    def _has_individual_package_evidence(observation: AIObservation) -> bool:
+    def _has_individual_package_evidence(self, observation: AIObservation) -> bool:
         """Accept only packaging-specific evidence, never generic single-item wording."""
-        if observation.retail_box_visible is True:
+        if observation.retail_box_visible is True and self._has_field_evidence(observation, "retail_box_visible"):
             return True
         evidence = observation.raw_payload.get("field_evidence", {}) if observation.raw_payload else {}
-        try:
-            text = json.dumps(evidence, ensure_ascii=False).lower().replace(" ", "")
-        except (TypeError, ValueError):
-            return False
         packaging_markers = (
             "原盒", "包装盒", "独立盒装", "单个/盒", "单件包装", "单件装",
             "零售盒", "纸箱包装", "individualpackage", "retailbox",
         )
-        return any(marker in text for marker in packaging_markers)
+        for path, entry in self._iter_evidence_entries(evidence):
+            if not self._evidence_is_located(entry):
+                continue
+            path_text = " ".join(path).lower()
+            try:
+                entry_text = json.dumps(entry, ensure_ascii=False).lower().replace(" ", "")
+            except (TypeError, ValueError):
+                entry_text = ""
+            if "packag" in path_text or "包装" in path_text or any(marker in entry_text for marker in packaging_markers):
+                if any(marker in entry_text for marker in packaging_markers):
+                    return True
+        confirmed = observation.raw_payload.get("confirmed_facts", {}) if observation.raw_payload else {}
+        fact = confirmed.get("retail_box_visible") if isinstance(confirmed, dict) else None
+        return isinstance(fact, dict) and str(fact.get("source") or "") == "user_confirmed" and fact.get("value") is True
+
+    def _display_outline_requires_transport_evidence(self, observation: AIObservation) -> bool:
+        """Do not promote a product-display outline to transport truth without facts or an action."""
+        dims = (observation.length_cm, observation.width_cm, observation.height_cm)
+        return (
+            observation.dimension_scope == "product_size"
+            and self._complete(dims)
+            and self._unproven_full_shape_retention(observation)
+            and not bool(self._actions(observation) & {"flat_fold", "roll", "coil", "compress", "nest", "disassemble"})
+        )
 
     @staticmethod
     def _transport_change_is_explained(normal: PackagingScenario, observation: AIObservation) -> bool:
@@ -337,9 +398,10 @@ class PackagingEstimationService:
     def _state(self, observation: AIObservation) -> PackagingState:
         hint = observation.packaging_state_hint
         if hint != PackagingState.UNKNOWN.value and hint in {item.value for item in PackagingState}:
-            return PackagingState(hint)
-        actions, constraints = self._actions(observation), self._constraints(observation)
-        if observation.requires_shape_retention is True or "retain_shape" in actions or "rigid_outline" in constraints:
+            if hint != PackagingState.SHAPE_RETAINED.value or self._has_explicit_rigid_evidence(observation):
+                return PackagingState(hint)
+        actions = self._actions(observation)
+        if self._has_explicit_rigid_evidence(observation):
             return PackagingState.SHAPE_RETAINED
         if "flat_fold" in actions or observation.overall_form in {"soft_flat", "hard_flat"}:
             return PackagingState.FULL_FLAT_FOLD
@@ -349,9 +411,8 @@ class PackagingEstimationService:
 
     def _transport_outline(self, dims: tuple[float, float, float], observation: AIObservation) -> tuple[float, float, float]:
         """Apply a declared packing action before deriving a transport envelope."""
-        actions, constraints = self._actions(observation), self._constraints(observation)
-        if ("longest_nonfoldable_axis" in constraints or "rigid_outline" in constraints
-                or observation.requires_shape_retention is True or "retain_shape" in actions):
+        actions = self._actions(observation)
+        if self._has_explicit_rigid_evidence(observation):
             return dims
         longest, middle, shortest = sorted((float(value) for value in dims), reverse=True)
         if "coil" in actions:
@@ -375,7 +436,7 @@ class PackagingEstimationService:
             return None
         form = observation.overall_form
         actions, constraints = self._actions(observation), self._constraints(observation)
-        if observation.requires_shape_retention is True or "retain_shape" in actions or "rigid_outline" in constraints:
+        if self._has_explicit_rigid_evidence(observation):
             return (20.0, 15.0, 8.0), (23.0, 18.0, 11.0), 250.0, 320.0, PackagingState.SHAPE_RETAINED, "explicit_shape_retained"
         if form in {"soft_flat", "hard_flat"} or "flat_fold" in actions:
             return (25.0, 15.0, 2.0), (27.0, 17.0, 4.0), 60.0, 90.0, PackagingState.FULL_FLAT_FOLD, "flat_form"
@@ -440,7 +501,7 @@ class PackagingEstimationService:
         if observation.raw_payload.get("dimension_semantic_issue") == "dimension_evidence_not_outer_dimensions":
             reasons.append("dimension_evidence_not_outer_dimensions")
 
-        box_words = ("纸盒", "纸箱", "礼盒", "carton", "box")
+        box_words = self._BOX_CONTAINER_MARKERS
         method = " ".join((normal.packaging_method, conservative.packaging_method)).lower()
         if any(word in method for word in box_words) and not self._has_individual_package_evidence(semantic_observation):
             reasons.append("unsupported_individual_package_type")
@@ -463,6 +524,8 @@ class PackagingEstimationService:
             reasons.append("unsupported_shape_retention")
         if self._unproven_full_shape_retention(semantic_observation):
             reasons.append("shape_retention_requires_rigid_evidence")
+        if self._display_outline_requires_transport_evidence(semantic_observation):
+            reasons.append("display_outline_requires_transport_evidence")
         if (
             semantic_observation.protrusion_flattenable is True
             or semantic_observation.compressibility == "limited"
@@ -565,7 +628,8 @@ class PackagingEstimationService:
         dimension_rejected = bool(rejected & {
             "dimension_evidence_not_outer_dimensions", "packing_action_not_reflected_in_outline",
             "unsupported_shape_retention", "shape_retention_requires_rigid_evidence",
-            "declared_transport_adjustment_not_reflected", "cal_structure_conflict_requires_evidence",
+            "declared_transport_adjustment_not_reflected", "display_outline_requires_transport_evidence",
+            "cal_structure_conflict_requires_evidence",
         })
         weight_rejected = bool(rejected & {"packaged_weight_below_confirmed_net_weight", "packaged_weight_has_no_material_increment", "unsupported_individual_package_type"})
         method_rejected = "unsupported_individual_package_type" in rejected
@@ -720,7 +784,11 @@ class PackagingEstimationService:
             if ai_reasons:
                 rejected["ai_candidate"] = ai_reasons
 
-        observed_base_dims = self._transport_outline(tuple(float(value) for value in obs_dims), observation) if dims_complete else None
+        observed_base_dims = (
+            self._transport_outline(tuple(float(value) for value in obs_dims), observation)
+            if dims_complete and not self._display_outline_requires_transport_evidence(semantic_observation)
+            else None
+        )
         observed_base_weight = float(observation.weight_g) if observation.weight_g and observation.weight_g > 0 else None
         if observed_base_weight is not None and not shipping_weight and observation.weight_scope != "packaged_weight":
             observed_base_weight += max(20.0, min(300.0, observed_base_weight * 0.08))

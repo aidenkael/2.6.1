@@ -75,7 +75,7 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-vision-semantic-packaging-v7"
+    PROMPT_VERSION = "2.6.1-vision-semantic-packaging-v8"
 
     def __init__(self, settings_service: SettingsService, profile_store: ApiProfileStore | None = None) -> None:
         self.settings_service = settings_service
@@ -125,7 +125,9 @@ class RecognitionService:
 - 只有明确的单件三维外廓、单件运输包装或原盒三维尺寸才能填写 length_cm、width_cm、height_cm。
 - 可调长度范围、不同部件长度、尺码范围、展开长度、周长、拉伸前后长度、多 SKU 规格、批量外箱和件/箱信息都不是单件三维外廓；这些数字必须写入 field_evidence.dimensions.raw_text，并将三维字段设为 null。
 - 不得取范围中点、平均值或把多个部件长度拼成三维尺寸。若没有明确外廓但商品可识别，仍应依据视觉结构生成低置信包装候选。
-- 包装动作必须与包装外廓一致：声明平折、盘绕、压缩、套叠或拆分时，候选外廓必须体现相应变化；没有单件盒装证据时，不得猜测纸箱、纸盒或礼盒。
+- 包装动作必须与包装外廓一致：声明平折、盘绕、压缩、套叠或拆分时，候选外廓必须体现相应变化；没有单件盒装证据时，不得猜测包装盒、硬质包装盒、纸箱、纸盒或礼盒。
+- 对 `has_hard_bottom`、`has_hard_backboard`、`has_frame`、`has_rigid_insert`、`has_rigid_parts`、`retail_box_visible`、`hard_card_visible` 返回 true 时，必须在 field_evidence.structure 中给出对应 source_image_index 和可见文字或区域定位；没有可定位证据时返回 null，不得把推断当作事实。
+- 当展示尺寸可能包含把手、肩带、挂环、带子、软突出部、自然撑开厚度或展开状态时，必须在 field_evidence.transport_outline 中说明可见部位及 source_image_index；没有明确刚性/原盒事实，也没有收纳、折叠、盘绕或压缩动作时，不得把展示尺寸直接作为完整运输外廓。
 
 价格与运费要求：
 - 区分当前单价、划线价、区间价、优惠券、订单总额；优先返回当前规格可用单价。
@@ -181,8 +183,18 @@ class RecognitionService:
     "product_cost_rmb": {{"source_image_index": null, "raw_text": "", "confidence": "low"}},
     "domestic_shipping_rmb": {{"source_image_index": null, "raw_text": "", "confidence": "low"}},
      "dimensions": {{"source_image_index": null, "raw_text": "", "meaning": "", "semantic_note": "", "confidence": "low"}},
-    "weight": {{"source_image_index": null, "raw_text": "", "confidence": "low"}}
-  }},
+     "weight": {{"source_image_index": null, "raw_text": "", "confidence": "low"}},
+     "structure": {{
+       "has_hard_bottom": {{"source_image_index": null, "raw_text": "", "region_description": "", "confidence": "low"}},
+       "has_hard_backboard": {{"source_image_index": null, "raw_text": "", "region_description": "", "confidence": "low"}},
+       "has_frame": {{"source_image_index": null, "raw_text": "", "region_description": "", "confidence": "low"}},
+       "has_rigid_insert": {{"source_image_index": null, "raw_text": "", "region_description": "", "confidence": "low"}},
+       "has_rigid_parts": {{"source_image_index": null, "raw_text": "", "region_description": "", "confidence": "low"}},
+       "retail_box_visible": {{"source_image_index": null, "raw_text": "", "region_description": "", "confidence": "low"}},
+       "hard_card_visible": {{"source_image_index": null, "raw_text": "", "region_description": "", "confidence": "low"}}
+     }},
+     "transport_outline": {{"source_image_index": null, "raw_text": "", "visible_features": [], "region_description": "", "confidence": "low"}}
+   }},
   "packaging_proposal": {{
     "normal": {{
       "label": "正常档",

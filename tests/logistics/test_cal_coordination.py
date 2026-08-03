@@ -101,7 +101,7 @@ def test_cal_structure_risk_challenges_unsupported_shape_without_overriding_conf
     observation = AIObservation(
         product_type="handbag", product_family="bag", material_family="leather",
         overall_form="hard_3d", rigidity="hard", foldability="none", compressibility="none",
-        requires_shape_retention=True, length_cm=28.5, width_cm=12, height_cm=21,
+        requires_shape_retention=True, has_frame=True, length_cm=28.5, width_cm=12, height_cm=21,
         weight_g=700, weight_scope="net_weight", dimension_scope="product_size",
     )
     ai = PackagingProposal(
