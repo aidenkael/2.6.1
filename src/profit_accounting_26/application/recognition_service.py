@@ -4,8 +4,10 @@ import base64
 import hashlib
 import json
 import mimetypes
+import re
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -73,7 +75,7 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-vision-evidence-merge-v5"
+    PROMPT_VERSION = "2.6.1-vision-numeric-safe-v6"
 
     def __init__(self, settings_service: SettingsService, profile_store: ApiProfileStore | None = None) -> None:
         self.settings_service = settings_service
@@ -106,9 +108,6 @@ class RecognitionService:
 
     @classmethod
     def _prompt(cls, image_count: int) -> str:
-        return f"""You inspect {image_count} ecommerce images in one request. Return JSON only.
-Rules: (1) scan every image; do not restrict by image slot. First classify each image as product, SKU/price, dimensions, weight, individual packaging, bulk carton, or supporting evidence. Treat all images as evidence for the same SKU unless their content clearly proves otherwise. Merge product, price, dimensions, weight, structure, and packaging evidence by evidence quality before deciding overall_form or a packaging candidate; image sequence and image slot have no semantic meaning. (2) Price and domestic shipping need visible text evidence only. (3) extract selected SKU price before range, coupon, struck-through, or starting price. (4) retain estimated and starting shipping values with their type. (5) if product is recognizable but measurements are absent, estimate bare dimensions, bare weight, and both packaging candidates at low confidence. (6) any missing packaging method, normal/conservative dimensions, or normal/conservative weight must be completed as a low-confidence estimate when the product is recognizable; only leave the entire packaging proposal empty when the product itself is unrecognizable. (7) do not interpret packaging not shown as a bare item without packaging. (8) every-box, every-bag, quantity-per-carton, total-carton, or “500 pcs/carton” evidence is bulk purchasing/outer-carton information only, never proof of an individual box or bag. Individual packaging is factual only with explicit “1 piece/box”, “each item OPP bag”, or equivalent evidence. (9) do not calculate freight, profit, or select a forwarder. (10) keep foldability, compressibility, state hint and hard-structure fields consistent. (11) output short evidence and no reasoning prose. (12) confirmed_facts supplied in context are authoritative facts: never estimate, change, or overwrite them. Use them as the starting point for missing packaging inference; if image evidence conflicts, report a risk only. A confirmed net weight still requires you to infer packaging material and packaged weight, while a confirmed packaged weight must not receive packaging material weight again. (13) display_product_summary is a concise Chinese product subject plus packaging-relevant structure and folding/compression trait, not a copied title, max 30 Chinese characters. (14) display_packaging_summary is Chinese “handling；final individual package type”, max 26 characters; do not include dimensions, weight, source, confidence, CAL IDs, risks, or internal codes. If individual packaging is not shown, use 预计 or 待确认 rather than bare item/no packaging.
-Schema: {{"observation":{{"product_name":"","product_type_raw":"","product_family_raw":"","material_raw":"","display_product_summary":"","display_packaging_summary":"","overall_form":"soft_flat|soft_bulky|flexible_chain|articulated|hard_flat|hard_long|hard_3d|hollow_crushable|fragile_protruding|mixed|unknown","packing_actions":[],"packing_constraints":[],"rigidity":"unknown|soft|semi_rigid|hard","foldability":"unknown|none|limited|good","compressibility":"unknown|none|limited|good","packaging_state_hint":"unknown|full_flat_fold|strong_compression|moderate_compression|shape_retained|bare_item","requires_shape_retention":null,"has_hard_bottom":null,"has_hard_backboard":null,"has_frame":null,"has_rigid_insert":null,"has_rigid_parts":null,"retail_box_visible":null,"hard_card_visible":null,"quantity":1,"product_cost_rmb":null,"product_cost_value_type":"exact|estimated|starting_from|range_min|unknown","domestic_shipping_rmb":null,"domestic_shipping_value_type":"exact|estimated|starting_from|range_min|unknown","length_cm":null,"width_cm":null,"height_cm":null,"weight_g":null,"dimension_value_source":"image_text|ai_visual_estimate|unknown","weight_value_source":"image_text|ai_visual_estimate|unknown","confidence":"low|medium|high"}},"money_candidates":[],"field_evidence":{{}},"packaging_proposal":{{}}}}"""
         return f"""
 你是跨境电商商品图片识别助手。本次共有 {image_count} 张图片。
 
@@ -189,7 +188,7 @@ Schema: {{"observation":{{"product_name":"","product_type_raw":"","product_famil
     "review_reasons": []
   }}
 }}
-Additional required behavior: `product_cost_rmb` and `domestic_shipping_rmb` must only come from visible text, but visible approximate, starting-from, or range text still must be extracted. Return `product_cost_value_type` and `domestic_shipping_value_type` as exact, estimated, starting_from, range_min, or unknown. If the product is recognizable but dimensions or weight are not printed, return low-confidence visual estimates and complete non-empty normal and conservative packaging candidates. Only leave dimensions, weight, and packaging empty when the product itself is not recognizable. Return `dimension_value_source` and `weight_value_source` as image_text, ai_visual_estimate, or unknown. Include product_type_raw, product_type_code, product_family_code and material_family_code if known.
+Additional required behavior: scan every image and Merge product, price, dimensions, weight, structure, and packaging evidence before deciding structure or packaging; do not restrict by image slot. The image sequence and image slot have no semantic meaning. confirmed_facts supplied in context are authoritative facts: do not overwrite them, use them as the starting point for packaging inference, and report only a risk if they conflict with images. `product_cost_rmb` and `domestic_shipping_rmb` (domestic shipping) must only come from visible text, but visible approximate, starting-from, or range text still must be extracted. Return `product_cost_value_type` and `domestic_shipping_value_type` as exact, estimated, starting_from, range_min, or unknown. If the product is recognizable but dimensions or weight are not printed, return low-confidence visual estimates and complete non-empty normal and conservative packaging candidates. Only leave dimensions, weight, and packaging empty when the product itself is not recognizable. Return `dimension_value_source` and `weight_value_source` as image_text, ai_visual_estimate, or unknown. Every price, shipping, dimension, and weight field must be a JSON number or null. Never put ranges, multiple values, size labels, or units in numeric fields; preserve those original strings only in `field_evidence.raw_text`. Include product_type_raw, product_type_code, product_family_code and material_family_code if known.
 """.strip()
 
     @staticmethod
@@ -213,6 +212,48 @@ Additional required behavior: `product_cost_rmb` and `domestic_shipping_rmb` mus
                 text = text[:-3].strip()
         return text
 
+    @staticmethod
+    def _parse_optional_number(value: Any, *, field_name: str,
+                               parse_issues: dict[str, dict[str, Any]]) -> float | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            parse_issues[field_name] = {"raw_value": value, "reason": "boolean_not_numeric"}
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        text = str(value).strip()
+        match = re.fullmatch(r"(?:约\s*)?([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*(cm|mm|g|kg|rmb|cny|usd)?", text, re.I)
+        if not match:
+            parse_issues[field_name] = {"raw_value": value, "reason": "ambiguous_or_non_numeric"}
+            return None
+        number, unit = float(match.group(1)), (match.group(2) or "").lower()
+        if field_name.endswith(("length_cm", "width_cm", "height_cm")):
+            if unit == "mm":
+                return number / 10.0
+            if unit not in {"", "cm"}:
+                parse_issues[field_name] = {"raw_value": value, "reason": "unexpected_unit"}
+                return None
+        if field_name.endswith("weight_g"):
+            if unit == "kg":
+                return number * 1000.0
+            if unit not in {"", "g"}:
+                parse_issues[field_name] = {"raw_value": value, "reason": "unexpected_unit"}
+                return None
+        if field_name.endswith(("product_cost_rmb", "domestic_shipping_rmb")) and unit not in {"", "rmb", "cny"}:
+            parse_issues[field_name] = {"raw_value": value, "reason": "unexpected_unit"}
+            return None
+        return number
+
+    @classmethod
+    def _clean_numeric_fields(cls, raw: dict[str, Any], *, prefix: str,
+                              parse_issues: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        cleaned = dict(raw)
+        for field in ("product_cost_rmb", "domestic_shipping_rmb", "length_cm", "width_cm", "height_cm", "weight_g", "quantity"):
+            if field in cleaned:
+                cleaned[field] = cls._parse_optional_number(cleaned[field], field_name=f"{prefix}.{field}", parse_issues=parse_issues)
+        return cleaned
+
     @classmethod
     def parse_payload(cls, response: dict[str, Any], *, model: str) -> tuple[AIObservation, PackagingProposal | None]:
         try:
@@ -224,7 +265,10 @@ Additional required behavior: `product_cost_rmb` and `domestic_shipping_rmb` mus
         raw = payload.get("observation")
         if not isinstance(raw, dict):
             raw = payload
-        observation = normalize_observation(AIObservation.from_dict(raw))
+        parse_issues: dict[str, dict[str, Any]] = {}
+        observation = normalize_observation(AIObservation.from_dict(
+            cls._clean_numeric_fields(raw, prefix="observation", parse_issues=parse_issues)
+        ))
         for field, type_field in (("product_cost_rmb", "product_cost_value_type"), ("domestic_shipping_rmb", "domestic_shipping_value_type")):
             if getattr(observation, field) is not None and getattr(observation, type_field) == "unknown":
                 evidence = payload.get("field_evidence", {}).get(field, {})
@@ -241,9 +285,19 @@ Additional required behavior: `product_cost_rmb` and `domestic_shipping_rmb` mus
         observation.source = "vision_api"
         observation.model = model
         observation.prompt_version = cls.PROMPT_VERSION
+        proposal_raw = payload.get("packaging_proposal")
+        if isinstance(proposal_raw, dict):
+            proposal_raw = dict(proposal_raw)
+            for scenario_name in ("normal", "conservative"):
+                scenario = proposal_raw.get(scenario_name)
+                if isinstance(scenario, dict):
+                    proposal_raw[scenario_name] = cls._clean_numeric_fields(
+                        scenario, prefix=f"packaging_proposal.{scenario_name}", parse_issues=parse_issues,
+                    )
+        if parse_issues:
+            payload["numeric_parse_issues"] = parse_issues
         observation.raw_payload = payload
         proposal = None
-        proposal_raw = payload.get("packaging_proposal")
         if isinstance(proposal_raw, dict) and proposal_raw.get("normal") and proposal_raw.get("conservative"):
             try:
                 proposal = PackagingProposal.from_dict(proposal_raw)
@@ -371,15 +425,33 @@ Additional required behavior: `product_cost_rmb` and `domestic_shipping_rmb` mus
                 images=[DiagnosticLogger.image_metadata(path) for path in paths],
             )
         started = time.perf_counter()
+        payload: dict[str, Any] | None = None
         try:
             payload = self._request_payload(
                 endpoint=endpoint, api_key=api_key, model=model,
                 content=content, timeout=timeout, cancellation=cancellation,
             )
+            if diagnostic_operation:
+                # Persist the sanitized provider payload before parsing so parser
+                # failures retain the actual API response for diagnosis.
+                diagnostic_operation.response(
+                    provider_raw_response=payload,
+                    normalized_result=None,
+                    parse_error=None,
+                    elapsed_ms=round((time.perf_counter() - started) * 1000),
+                    usage=payload.get("usage", {}),
+                )
             observation, proposal = self.parse_payload(payload, model=model)
         except Exception as exc:
             if diagnostic_operation:
-                diagnostic_operation.response(provider_raw_response=None, normalized_result=None, parse_error=str(exc))
+                diagnostic_operation.response(
+                    provider_raw_response=payload,
+                    normalized_result=None,
+                    parse_error=str(exc),
+                    traceback=traceback.format_exc(),
+                    elapsed_ms=round((time.perf_counter() - started) * 1000),
+                    usage=payload.get("usage", {}) if payload else {},
+                )
             raise
         if diagnostic_operation:
             diagnostic_operation.response(
