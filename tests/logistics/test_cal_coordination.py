@@ -32,7 +32,8 @@ def calibrated_observation(**overrides) -> AIObservation:
 
 def test_frozen_cal_assets_keep_expected_hashes_and_counts():
     registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
-    assert hashlib.sha256(CALIBRATION.read_bytes()).hexdigest() == "f1aed64481903102fc573bb109c9968141d47fbb6911b0ad37d84b9b55d5320e"
+    # CAL asset hashes are computed from the Git-canonical LF file bytes.
+    assert hashlib.sha256(CALIBRATION.read_bytes()).hexdigest() == "ae10226731d006a4ad540e6c6d9fc5224067823140cfbc34e408984529d6ad0d"
     assert hashlib.sha256(REGISTRY.read_bytes()).hexdigest() == "a304a05989ffe9cbb4847fa541f20cec195c78aee5a7b9b91eb9b52d041d5e5b"
     assert len(json.loads(CALIBRATION.read_text(encoding="utf-8"))) == 77
     assert len(registry["aggregate_rules"]) == 9
