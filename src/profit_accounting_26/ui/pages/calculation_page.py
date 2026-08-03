@@ -860,6 +860,10 @@ class CalculationPage(QWidget):
         adopted = self._adopted_packaging()
         if observation.raw_payload.get("vision_packaging_completion"):
             op.event("vision_packaging_estimate_missing", completion=observation.raw_payload["vision_packaging_completion"])
+        salvage = adopted.candidate_records.get("candidate_field_salvage", {})
+        if salvage:
+            op.event("candidate_field_salvage", **dict(salvage.get("diagnostic") or {}),
+                     final_source=adopted.proposal_source, adjustments=salvage.get("adjustments", []))
         op.event("ai_request_completed"); op.event("ai_response_parsed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing); op.event("calibration_completed", matched_rule_ids=adopted.applied_profile_ids)
         generated=adopted.normal.is_complete() and adopted.conservative.is_complete()
         op.event("packaging_generated" if generated else "packaging_skipped", skip_reason=None if generated else "AI未返回尺寸/重量，且本地CAL未生成可用回退值")
@@ -1055,6 +1059,10 @@ class CalculationPage(QWidget):
         op = self._local_diagnostic_operation
         op.event("local_reestimate_completed", observation_patch=result.observation_patch, changed_fields=result.changed_fields, elapsed_ms=result.elapsed_ms)
         adopted = self._adopted_packaging()
+        salvage = adopted.candidate_records.get("candidate_field_salvage", {})
+        if salvage:
+            op.event("candidate_field_salvage", **dict(salvage.get("diagnostic") or {}),
+                     final_source=adopted.proposal_source, adjustments=salvage.get("adjustments", []))
         op.event("calibration_completed", matched_rule_ids=adopted.applied_profile_ids)
         generated = adopted.normal.is_complete() and adopted.conservative.is_complete()
         op.event("packaging_generated" if generated else "packaging_skipped")

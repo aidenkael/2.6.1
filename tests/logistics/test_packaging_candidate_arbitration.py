@@ -91,7 +91,7 @@ def test_ai_fold_claim_without_smaller_outline_is_rejected_and_fallback_continue
         observation, external_proposal=_ai(_scenario("normal", state=PackagingState.FULL_FLAT_FOLD, dims=(60, 10, 2), weight=130)),
     )
     assert "packing_action_not_reflected_in_outline" in proposal.rejected_candidates["ai_candidate"]
-    assert proposal.proposal_source == "generic_candidate"
+    assert proposal.proposal_source == "ai_candidate_salvaged"
 
 
 def test_unsupported_box_with_no_weight_increment_is_rejected():
@@ -126,5 +126,64 @@ def test_semantically_rejected_ai_outline_is_not_reused_by_fallback():
         observation, external_proposal=_ai(_scenario("normal", dims=(55, 70, 2.5), weight=130)),
     )
     assert "dimension_evidence_not_outer_dimensions" in proposal.rejected_candidates["ai_candidate"]
-    assert proposal.proposal_source == "generic_candidate"
+    assert proposal.proposal_source == "ai_candidate_salvaged"
     assert proposal.normal.length_cm < 55
+
+
+def test_invalid_ai_dimensions_keep_confirmed_weight_as_packaged_weight_start():
+    observation = AIObservation(
+        product_name="generic flexible item", overall_form="flexible_chain", foldability="good",
+        packing_actions=["coil"], requires_shape_retention=True, weight_g=110, weight_scope="net_weight",
+    )
+    partial = _scenario("normal", dims=(20, 15, 2), weight=130)
+    partial.length_cm = None
+    proposal = PackagingEstimationService().estimate(
+        observation, external_proposal=_ai(partial, _scenario("conservative", dims=(22, 17, 4), weight=145)),
+    )
+    assert proposal.proposal_source == "ai_candidate_salvaged"
+    assert proposal.normal.weight_g == 130
+    assert proposal.normal.weight_g >= 110
+    assert proposal.candidate_records["candidate_field_salvage"]["diagnostic"]["user_confirmed"] == ["weight_g"]
+
+
+def test_unsupported_shape_retention_is_removed_without_losing_coil_structure():
+    observation = AIObservation(
+        product_name="generic flexible item", overall_form="flexible_chain", foldability="good",
+        packing_actions=["coil", "retain_shape"], requires_shape_retention=True, weight_g=110, weight_scope="net_weight",
+    )
+    proposal = PackagingEstimationService().estimate(
+        observation, external_proposal=_ai(_scenario("normal", state=PackagingState.SHAPE_RETAINED, dims=(30, 20, 8), weight=140)),
+    )
+    assert proposal.proposal_source == "ai_candidate_salvaged"
+    assert proposal.normal.packaging_state is not PackagingState.SHAPE_RETAINED
+    assert "unsupported_shape_retention_removed" in proposal.adjustments
+
+
+def test_salvage_completes_only_missing_dimensions_and_keeps_valid_weight():
+    observation = AIObservation(product_name="generic flexible item", overall_form="flexible_chain", packing_actions=["coil"],
+                                weight_g=110, weight_scope="net_weight")
+    partial = _scenario("normal", dims=(20, 15, 2), weight=150)
+    partial.height_cm = None
+    proposal = PackagingEstimationService().estimate(
+        observation, external_proposal=_ai(partial, _scenario("conservative", dims=(23, 18, 4), weight=170)),
+    )
+    assert proposal.normal.weight_g == 150
+    assert proposal.normal.height_cm is not None
+
+
+def test_salvage_completes_only_missing_weight_and_keeps_valid_dimensions():
+    observation = AIObservation(product_name="generic flexible item", overall_form="flexible_chain", packing_actions=["coil"],
+                                weight_g=110, weight_scope="net_weight")
+    missing_weight = _scenario("normal", dims=(18, 12, 3), weight=1)
+    missing_weight.weight_g = None
+    proposal = PackagingEstimationService().estimate(
+        observation, external_proposal=_ai(missing_weight, _scenario("conservative", dims=(20, 14, 4), weight=150)),
+    )
+    assert (proposal.normal.length_cm, proposal.normal.width_cm, proposal.normal.height_cm) == (18, 12, 3)
+    assert proposal.normal.weight_g > 110
+
+
+def test_full_generic_fallback_is_marked_when_only_identity_is_known():
+    proposal = PackagingEstimationService().estimate(AIObservation(product_name="generic item"))
+    assert proposal.proposal_source == "generic_candidate"
+    assert "full_generic_fallback_no_reliable_fields" in proposal.candidate_records["generic_candidate"]["adjustments"]

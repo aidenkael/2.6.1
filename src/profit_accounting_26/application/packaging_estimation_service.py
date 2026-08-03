@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -307,6 +308,114 @@ class PackagingEstimationService:
             reasons.append("unsupported_shape_retention")
         return reasons
 
+    def _remove_unsupported_shape_retention(self, observation: AIObservation) -> tuple[AIObservation, list[str]]:
+        """Remove only a conflicting shape-retention conclusion, not usable structure facts."""
+        actions = self._actions(observation)
+        constraints = self._constraints(observation)
+        rigid_evidence = any(value is True for value in (
+            observation.has_hard_bottom, observation.has_hard_backboard, observation.has_frame,
+            observation.has_rigid_insert, observation.has_rigid_parts, observation.retail_box_visible,
+            observation.hard_card_visible,
+        )) or bool({"rigid_outline", "longest_nonfoldable_axis", "fragile_protrusion"} & constraints)
+        flexible = observation.overall_form in {"flexible_chain", "soft_flat"} and (
+            observation.foldability == "good" or bool({"coil", "flat_fold"} & actions)
+        )
+        if not flexible or rigid_evidence or observation.requires_shape_retention is not True:
+            return observation, []
+        raw_payload = dict(observation.raw_payload)
+        raw_payload.setdefault("structural_conflict_adjustments", []).append("unsupported_shape_retention_removed")
+        return replace(
+            observation,
+            requires_shape_retention=None,
+            packaging_state_hint="unknown" if observation.packaging_state_hint == PackagingState.SHAPE_RETAINED.value else observation.packaging_state_hint,
+            packing_actions=[action for action in observation.packing_actions if action != "retain_shape"],
+            raw_payload=raw_payload,
+        ), ["unsupported_shape_retention_removed"]
+
+    def _local_completion_candidate(self, observation: AIObservation,
+                                    base_dims: tuple[float, float, float] | None,
+                                    base_weight: float | None) -> tuple[PackagingScenario | None, PackagingScenario | None, str | None]:
+        fallback = self._generic_fallback(observation)
+        if not fallback:
+            return None, None, None
+        normal_dims, conservative_dims, normal_weight, conservative_weight, state, fallback_id = fallback
+        if base_dims and base_weight is not None:
+            normal, conservative = self._proposal_from_dims(
+                observation, source="local", dims=base_dims, weight=base_weight,
+                method="local structural completion", confidence="low", ids=["GENERIC-OBSERVED-STRUCTURE"],
+            )
+            return normal, conservative, "observed_structure"
+        if observation.weight_scope != "packaged_weight" and observation.weight_g and observation.weight_g > 0:
+            normal_weight = max(normal_weight, float(observation.weight_g) + max(20.0, float(observation.weight_g) * 0.08))
+            conservative_weight = max(conservative_weight, normal_weight)
+        normal = self._scenario("正常档", state, f"generic fallback: {fallback_id}", normal_dims, normal_weight,
+                                "missing fields completed from observed structure", "low", True, [f"GENERIC-{fallback_id.upper()}"])
+        conservative = self._scenario("保守档", state, f"generic fallback: {fallback_id} (conservative)", conservative_dims,
+                                      conservative_weight, "missing fields completed from observed structure", "low", True,
+                                      [f"GENERIC-{fallback_id.upper()}"])
+        return normal, conservative, fallback_id
+
+    def _salvage_ai_candidate(self, normal: PackagingScenario, conservative: PackagingScenario,
+                              observation: AIObservation, reasons: list[str],
+                              local_normal: PackagingScenario | None,
+                              local_conservative: PackagingScenario | None) -> tuple[PackagingScenario | None, PackagingScenario | None, dict[str, list[str]]]:
+        """Preserve reliable AI fields and complete only rejected or missing fields locally."""
+        diagnostic = {"user_confirmed": ["weight_g"] if observation.weight_scope == "net_weight" else [],
+                      "ai_preserved": [], "ai_rejected": [], "local_completed": [], "cal_adjusted": []}
+        if not local_normal or not local_conservative:
+            return None, None, diagnostic
+        rejected = set(reasons)
+        dimension_rejected = bool(rejected & {"dimension_evidence_not_outer_dimensions", "packing_action_not_reflected_in_outline", "unsupported_shape_retention"})
+        weight_rejected = bool(rejected & {"packaged_weight_below_confirmed_net_weight", "packaged_weight_has_no_material_increment", "unsupported_individual_package_type"})
+        method_rejected = "unsupported_individual_package_type" in rejected
+        state_rejected = "unsupported_shape_retention" in rejected
+
+        def merge(source: PackagingScenario, local: PackagingScenario) -> PackagingScenario:
+            dims_valid = self._complete((source.length_cm, source.width_cm, source.height_cm)) and not dimension_rejected
+            weight_valid = source.weight_g is not None and float(source.weight_g) > 0 and not weight_rejected
+            if weight_valid and observation.weight_scope != "packaged_weight" and observation.weight_g:
+                weight_valid = float(source.weight_g) >= float(observation.weight_g)
+            method_valid = bool(source.packaging_method) and not method_rejected
+            state_valid = not state_rejected
+            if dims_valid:
+                diagnostic["ai_preserved"].extend(["length_cm", "width_cm", "height_cm"])
+            else:
+                diagnostic["ai_rejected"].append("package_dimensions")
+                diagnostic["local_completed"].extend(["length_cm", "width_cm", "height_cm"])
+            if weight_valid:
+                diagnostic["ai_preserved"].append("packaged_weight_g")
+            else:
+                diagnostic["ai_rejected"].append("packaged_weight_g")
+                diagnostic["local_completed"].append("packaging_increment_g")
+            if method_valid:
+                diagnostic["ai_preserved"].append("packaging_method")
+            else:
+                diagnostic["ai_rejected"].append("packaging_method")
+                diagnostic["local_completed"].append("packaging_method")
+            if state_valid:
+                diagnostic["ai_preserved"].append("packaging_state")
+            else:
+                diagnostic["ai_rejected"].append("packaging_state")
+                diagnostic["local_completed"].append("packaging_state")
+            return replace(
+                source,
+                packaging_state=source.packaging_state if state_valid else local.packaging_state,
+                packaging_method=source.packaging_method if method_valid else local.packaging_method,
+                length_cm=source.length_cm if dims_valid else local.length_cm,
+                width_cm=source.width_cm if dims_valid else local.width_cm,
+                height_cm=source.height_cm if dims_valid else local.height_cm,
+                weight_g=source.weight_g if weight_valid else local.weight_g,
+                confidence=source.confidence if source.confidence in {"low", "medium", "high"} else local.confidence,
+                needs_review=True,
+            )
+
+        merged_normal, merged_conservative = merge(normal, local_normal), merge(conservative, local_conservative)
+        for field in ("length_cm", "width_cm", "height_cm", "weight_g"):
+            if float(getattr(merged_conservative, field) or 0) < float(getattr(merged_normal, field) or 0):
+                setattr(merged_conservative, field, getattr(merged_normal, field))
+                diagnostic["local_completed"].append(field)
+        return merged_normal, merged_conservative, {key: list(dict.fromkeys(value)) for key, value in diagnostic.items()}
+
     @staticmethod
     def _record(source: str, normal: PackagingScenario | None, conservative: PackagingScenario | None,
                 *, confidence: str, evidence: list[str], matched_rule_ids: list[str] | None = None,
@@ -338,6 +447,7 @@ class PackagingEstimationService:
         rejected: dict[str, list[str]] = {}
         review: list[str] = []
         applied_ids: list[str] = []
+        observation, structural_adjustments = self._remove_unsupported_shape_retention(observation)
         obs_dims = (observation.length_cm, observation.width_cm, observation.height_cm)
         dims_complete = self._complete(obs_dims)
         shipping_dims = observation.dimension_scope == "shipping_package_size" and dims_complete
@@ -371,18 +481,52 @@ class PackagingEstimationService:
             if ai_reasons:
                 rejected["ai_candidate"] = ai_reasons
 
+        observed_base_dims = self._transport_outline(tuple(float(value) for value in obs_dims), observation) if dims_complete else None
+        observed_base_weight = float(observation.weight_g) if observation.weight_g and observation.weight_g > 0 else None
+        if observed_base_weight is not None and not shipping_weight and observation.weight_scope != "packaged_weight":
+            observed_base_weight += max(20.0, min(300.0, observed_base_weight * 0.08))
+        local_normal, local_conservative, local_fallback_id = self._local_completion_candidate(
+            observation, observed_base_dims, observed_base_weight,
+        )
+        salvaged_normal = salvaged_conservative = None
+        salvage_diagnostic: dict[str, list[str]] | None = None
+        if ai_normal and ai_conservative and rejected.get("ai_candidate"):
+            salvaged_normal, salvaged_conservative, salvage_diagnostic = self._salvage_ai_candidate(
+                ai_normal, ai_conservative, observation, rejected["ai_candidate"], local_normal, local_conservative,
+            )
+            salvaged_reasons = (self._validate_candidate(salvaged_normal, salvaged_conservative, observation)
+                                if salvaged_normal and salvaged_conservative else ["no_local_completion_candidate"])
+            if salvaged_reasons:
+                rejected["salvaged_ai_candidate"] = salvaged_reasons
+            records["candidate_field_salvage"] = {
+                "source": "candidate_field_salvage", "normal": salvaged_normal.to_dict() if salvaged_normal else None,
+                "conservative": salvaged_conservative.to_dict() if salvaged_conservative else None,
+                "confidence": salvaged_normal.confidence if salvaged_normal else "low",
+                "evidence": ["field_level_candidate_merge"], "matched_rule_ids": [],
+                "rejection_reasons": [*rejected["ai_candidate"], *salvaged_reasons],
+                "adjustments": [*structural_adjustments], "diagnostic": salvage_diagnostic,
+            }
+        elif structural_adjustments:
+            records["candidate_field_salvage"] = {
+                "source": "candidate_field_salvage", "normal": None, "conservative": None, "confidence": "low",
+                "evidence": ["structural_conflict_correction"], "matched_rule_ids": [],
+                "rejection_reasons": [], "adjustments": structural_adjustments,
+                "diagnostic": {"user_confirmed": [], "ai_preserved": ["overall_form", "foldability", "packing_actions"],
+                               "ai_rejected": ["requires_shape_retention"], "local_completed": [], "cal_adjusted": []},
+            }
+
         matched = [rule for rule in sorted(self.registry.get("aggregate_rules", []), key=lambda item: int(item.get("priority", 0)), reverse=True)
                    if rule.get("enabled", True) and self._match_rule(rule, observation)]
         selected = matched[0] if matched else None
         valid_ai_candidate = ai_normal and ai_conservative and "ai_candidate" not in rejected
-        base_dims = self._transport_outline(tuple(float(value) for value in obs_dims), observation) if dims_complete else None
-        base_weight = float(observation.weight_g) if observation.weight_g and observation.weight_g > 0 else None
-        if not base_dims and valid_ai_candidate and ai_normal.is_complete():
-            base_dims = (float(ai_normal.length_cm), float(ai_normal.width_cm), float(ai_normal.height_cm))
-        if base_weight is None and valid_ai_candidate and ai_normal.weight_g:
-            base_weight = float(ai_normal.weight_g)
-        if base_weight is not None and not shipping_weight and observation.weight_g and observation.weight_scope != "packaged_weight":
-            base_weight += max(20.0, min(300.0, base_weight * 0.08))
+        usable_ai_normal = ai_normal if valid_ai_candidate else salvaged_normal
+        usable_ai_conservative = ai_conservative if valid_ai_candidate else salvaged_conservative
+        base_dims = observed_base_dims
+        base_weight = observed_base_weight
+        if not base_dims and usable_ai_normal and usable_ai_normal.is_complete():
+            base_dims = (float(usable_ai_normal.length_cm), float(usable_ai_normal.width_cm), float(usable_ai_normal.height_cm))
+        if base_weight is None and usable_ai_normal and usable_ai_normal.weight_g:
+            base_weight = float(usable_ai_normal.weight_g)
 
         cal_normal = cal_conservative = None
         if selected and base_dims and base_weight is not None:
@@ -407,27 +551,16 @@ class PackagingEstimationService:
                                                      rejection_reasons=["missing_base_dimensions_or_weight"])
             rejected["cal_candidate"] = ["missing_base_dimensions_or_weight"]
 
-        fallback = self._generic_fallback(observation)
-        generic_normal = generic_conservative = None
-        if fallback:
-            normal_dims, conservative_dims, normal_weight, conservative_weight, state, fallback_id = fallback
-            if base_dims and base_weight is not None:
-                generic_normal, generic_conservative = self._proposal_from_dims(
-                    observation, source="generic", dims=base_dims, weight=base_weight,
-                    method="generic structural protection", confidence="low", ids=["GENERIC-OBSERVED-STRUCTURE"])
-            else:
-                if observation.weight_scope != "packaged_weight" and observation.weight_g and observation.weight_g > 0:
-                    normal_weight = max(normal_weight, float(observation.weight_g) + max(20.0, float(observation.weight_g) * 0.08))
-                    conservative_weight = max(conservative_weight, normal_weight)
-                generic_normal = self._scenario("正常档", state, f"generic fallback: {fallback_id}", normal_dims, normal_weight,
-                                                "no valid AI or CAL candidate", "low", True, [f"GENERIC-{fallback_id.upper()}"])
-                generic_conservative = self._scenario("保守档", state, f"generic fallback: {fallback_id} (conservative)", conservative_dims,
-                                                      conservative_weight, "no valid AI or CAL candidate", "low", True,
-                                                      [f"GENERIC-{fallback_id.upper()}"])
+        generic_normal, generic_conservative, generic_fallback_id = self._local_completion_candidate(
+            observation, base_dims, base_weight,
+        )
+        if generic_normal and generic_conservative:
             generic_reasons = self._validate_candidate(generic_normal, generic_conservative, observation)
+            reliable_fields = bool(observation.weight_g or self._complete(obs_dims) or observation.overall_form != "unknown" or self._actions(observation))
+            generic_adjustments = [] if reliable_fields else ["full_generic_fallback_no_reliable_fields"]
             records["generic_candidate"] = self._record("generic_candidate", generic_normal, generic_conservative,
                                                          confidence="low", evidence=["physical_form_fallback"],
-                                                         rejection_reasons=generic_reasons)
+                                                         rejection_reasons=generic_reasons, adjustments=generic_adjustments)
             if generic_reasons:
                 rejected["generic_candidate"] = generic_reasons
 
@@ -438,12 +571,17 @@ class PackagingEstimationService:
         elif ai_normal and ai_conservative and "ai_candidate" not in rejected:
             source, normal, conservative = "ai_candidate", ai_normal, ai_conservative
             review.append("complete AI packaging candidate adopted after local validation")
+        elif salvaged_normal and salvaged_conservative and "salvaged_ai_candidate" not in rejected:
+            source, normal, conservative = "ai_candidate_salvaged", salvaged_normal, salvaged_conservative
+            review.append("reliable AI candidate fields preserved; missing fields completed locally")
         elif cal_normal and cal_conservative and "cal_candidate" not in rejected:
             source, normal, conservative = "cal_candidate", cal_normal, cal_conservative
             review.append("AI candidate unavailable or invalid; compatible CAL candidate adopted")
         elif generic_normal and generic_conservative and "generic_candidate" not in rejected:
             source, normal, conservative = "generic_candidate", generic_normal, generic_conservative
             review.append("AI and CAL could not form a valid candidate; generic physical-form fallback adopted")
+            if records.get("generic_candidate", {}).get("adjustments"):
+                review.append("full generic fallback used because no reliable fields were available")
             applied_ids.append("GENERIC")
         else:
             source = "no_valid_candidate"
@@ -461,6 +599,6 @@ class PackagingEstimationService:
             local_proposed_scenarios=local, adjusted_scenarios=local,
             conflicts=[reason for reasons in rejected.values() for reason in reasons],
             applied_profile_ids=list(dict.fromkeys(applied_ids)), candidate_records=records,
-            rejected_candidates=rejected, adjustments=[], engine_version=self.ENGINE_VERSION,
+            rejected_candidates=rejected, adjustments=structural_adjustments, engine_version=self.ENGINE_VERSION,
             calibration_version=self.calibration_version,
         )
