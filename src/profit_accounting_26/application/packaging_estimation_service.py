@@ -29,6 +29,7 @@ class PackagingEstimationService:
             self.calibration_path.with_name("packaging_rule_registry_v1.json") if self.calibration_path else None
         )
         self.registry = self._load_registry(self.rule_registry_path)
+        self.sample_by_id = {str(item.get("sample_id")): item for item in self.samples if item.get("sample_id")}
 
     def activate(self, calibration_path: str | Path, *, version: str) -> None:
         path = Path(calibration_path)
@@ -42,6 +43,7 @@ class PackagingEstimationService:
         if sibling.is_file():
             self.rule_registry_path = sibling
             self.registry = self._load_registry(sibling)
+        self.sample_by_id = {str(item.get("sample_id")): item for item in self.samples if item.get("sample_id")}
 
     @staticmethod
     def _load_list(path: Path | None) -> list[dict[str, Any]]:
@@ -139,6 +141,103 @@ class PackagingEstimationService:
             if not guard_hit and hard is False and observation.foldability == "good":
                 return False
         return True
+
+    @staticmethod
+    def _cal_compatibility_observation(observation: AIObservation) -> AIObservation:
+        """Map only already-recognised aliases to the legacy CAL vocabulary."""
+        product_type = observation.product_type
+        if product_type in {"", "unknown"} and observation.product_type_code not in {"", "unknown"}:
+            product_type = observation.product_type_code
+        product_family = observation.product_family
+        if product_family in {"", "unknown"} and observation.product_family_code not in {"", "unknown"}:
+            product_family = observation.product_family_code
+        material = observation.material
+        if material in {"", "unknown"} and observation.material_family not in {"", "unknown"}:
+            material = observation.material_family
+        return replace(observation, product_type=product_type, product_family=product_family, material=material)
+
+    @staticmethod
+    def _sample_reference_dimensions(rule: dict[str, Any], sample: dict[str, Any] | None) -> tuple[float, float, float] | None:
+        values = rule.get("reference_estimated_package_size_cm")
+        if not values and sample:
+            values = sample.get("actual_package_size_cm") or sample.get("estimated_package_size_cm")
+        if not isinstance(values, (list, tuple)) or len(values) != 3:
+            return None
+        try:
+            dims = tuple(float(value) for value in values)
+        except (TypeError, ValueError):
+            return None
+        return dims if all(value > 0 for value in dims) else None
+
+    @staticmethod
+    def _sample_reference_weight_g(sample: dict[str, Any] | None) -> float | None:
+        if not sample:
+            return None
+        for key, multiplier in (("actual_weight_with_pkg_g", 1.0), ("estimated_weight_kg", 1000.0),
+                                ("estimated_package_weight_kg", 1000.0)):
+            try:
+                value = float(sample.get(key))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                return value * multiplier
+        return None
+
+    def _sample_rule_match(self, rule: dict[str, Any], observation: AIObservation) -> tuple[str | None, list[str], list[str], list[str]]:
+        """Use legacy sample vocabulary without inventing a category from a title."""
+        type_values = {str(value).lower() for value in (observation.product_type, observation.product_type_code,
+                                                         observation.product_family, observation.product_family_code) if value and value != "unknown"}
+        material_values = {str(value).lower() for value in (observation.material, observation.material_family,
+                                                             observation.material_family_code) if value and value != "unknown"}
+        rule_type = str(rule.get("product_type") or "").lower()
+        if not rule_type or rule_type not in type_values:
+            return None, [], [], ["product_type"]
+        matched, missing, conflicting = ["product_type"], [], []
+        rule_material = str(rule.get("material") or "").lower()
+        if rule_material:
+            if material_values and rule_material not in material_values:
+                conflicting.append("material")
+            elif rule_material in material_values:
+                matched.append("material")
+            else:
+                missing.append("material")
+        rule_rigidity = str(rule.get("rigidity") or "").lower()
+        if rule_rigidity and rule_rigidity != "unknown":
+            if observation.rigidity not in {"", "unknown", rule_rigidity}:
+                conflicting.append("rigidity")
+            elif observation.rigidity == rule_rigidity:
+                matched.append("rigidity")
+            else:
+                missing.append("rigidity")
+        required_shape = rule.get("requires_shape_retention")
+        if required_shape is not None:
+            if observation.requires_shape_retention is not None and observation.requires_shape_retention is not required_shape:
+                conflicting.append("requires_shape_retention")
+            elif observation.requires_shape_retention is required_shape:
+                matched.append("requires_shape_retention")
+            else:
+                missing.append("requires_shape_retention")
+        if conflicting:
+            return None, matched, missing, conflicting
+        strength = "strong" if len(matched) >= 2 and not missing else "medium"
+        return strength, matched, missing, conflicting
+
+    def _sample_cal_candidate(self, rule: dict[str, Any], observation: AIObservation) -> tuple[PackagingScenario | None, PackagingScenario | None]:
+        sample = self.sample_by_id.get(str(rule.get("rule_id")))
+        dims = self._sample_reference_dimensions(rule, sample)
+        weight = self._sample_reference_weight_g(sample)
+        if observation.weight_scope != "packaged_weight" and observation.weight_g and weight is not None:
+            weight = max(weight, float(observation.weight_g) + max(20.0, float(observation.weight_g) * 0.08))
+        if not dims and weight is None:
+            return None, None
+        state = self._state(observation)
+        normal = self._scenario("正常档", state, f"CAL {rule.get('rule_id')}", dims, weight,
+                                "legacy calibration reference", "low", True, [str(rule.get("rule_id"))])
+        conservative_dims = tuple(value * 1.08 for value in dims) if dims else None
+        conservative_weight = max(weight, weight * 1.12) if weight else None
+        conservative = self._scenario("保守档", state, f"CAL {rule.get('rule_id')} (conservative)", conservative_dims,
+                                      conservative_weight, "legacy calibration reference", "low", True, [str(rule.get("rule_id"))])
+        return normal, conservative
 
     @staticmethod
     def _scale_smallest(dims: tuple[float, float, float], scale: float, minimum: float) -> tuple[float, float, float]:
@@ -416,6 +515,37 @@ class PackagingEstimationService:
                 diagnostic["local_completed"].append(field)
         return merged_normal, merged_conservative, {key: list(dict.fromkeys(value)) for key, value in diagnostic.items()}
 
+    def _coordinate_ai_cal_fields(self, ai_normal: PackagingScenario | None, ai_conservative: PackagingScenario | None,
+                                  cal_normal: PackagingScenario | None, cal_conservative: PackagingScenario | None,
+                                  *, match_strength: str, observation: AIObservation) -> tuple[PackagingScenario | None, PackagingScenario | None, dict[str, Any]]:
+        """Apply CAL at field level while preserving explicit facts and reliable AI evidence."""
+        trace: dict[str, Any] = {"match_strength": match_strength, "adjusted_fields": {}, "risk_only": False}
+        if not ai_normal or not ai_conservative or not cal_normal or not cal_conservative:
+            return ai_normal, ai_conservative, trace
+        ai_high_confidence = ai_normal.confidence == "high" or observation.confidence == "high"
+        if match_strength == "weak" and ai_high_confidence:
+            trace["risk_only"] = True
+            return ai_normal, ai_conservative, trace
+
+        normal, conservative = replace(ai_normal), replace(ai_conservative)
+        for target, cal_target, name in ((normal, cal_normal, "normal"), (conservative, cal_conservative, "conservative")):
+            for field in ("length_cm", "width_cm", "height_cm", "weight_g"):
+                before, candidate = getattr(target, field), getattr(cal_target, field)
+                if candidate is None or float(candidate) <= 0:
+                    continue
+                missing = before is None or float(before) <= 0
+                may_override = match_strength == "strong" and not ai_high_confidence
+                if field == "weight_g" and observation.weight_scope != "packaged_weight" and observation.weight_g:
+                    if float(candidate) < float(observation.weight_g):
+                        continue
+                if missing or may_override:
+                    if before != candidate:
+                        setattr(target, field, candidate)
+                        trace["adjusted_fields"][f"{name}.{field}"] = {"before": before, "after": candidate}
+        if trace["adjusted_fields"]:
+            normal.needs_review = conservative.needs_review = True
+        return normal, conservative, trace
+
     @staticmethod
     def _record(source: str, normal: PackagingScenario | None, conservative: PackagingScenario | None,
                 *, confidence: str, evidence: list[str], matched_rule_ids: list[str] | None = None,
@@ -515,9 +645,27 @@ class PackagingEstimationService:
                                "ai_rejected": ["requires_shape_retention"], "local_completed": [], "cal_adjusted": []},
             }
 
+        cal_observation = self._cal_compatibility_observation(observation)
         matched = [rule for rule in sorted(self.registry.get("aggregate_rules", []), key=lambda item: int(item.get("priority", 0)), reverse=True)
-                   if rule.get("enabled", True) and self._match_rule(rule, observation)]
+                   if rule.get("enabled", True) and self._match_rule(rule, cal_observation)]
         selected = matched[0] if matched else None
+        sample_matches: list[tuple[dict[str, Any], str, list[str], list[str], list[str]]] = []
+        for rule in self.registry.get("sample_rules", []):
+            if not rule.get("enabled", True):
+                continue
+            strength, matched_fields, missing_fields, conflicting_fields = self._sample_rule_match(rule, cal_observation)
+            if strength:
+                sample_matches.append((rule, strength, matched_fields, missing_fields, conflicting_fields))
+        selected_sample = next((item for item in sample_matches if item[1] == "strong" and item[0].get("role") != "guard_only"), None)
+        if selected_sample is None and selected is None:
+            selected_sample = next((item for item in sample_matches if item[0].get("role") != "guard_only"), None)
+        records["cal_match_audit"] = {
+            "source": "cal_compatibility_adapter",
+            "aggregate_rule_ids": [str(rule.get("rule_id")) for rule in matched],
+            "sample_matches": [{"rule_id": str(rule.get("rule_id")), "match_strength": strength,
+                                "matched_fields": fields, "missing_fields": missing, "conflicting_fields": conflicts,
+                                "role": rule.get("role")} for rule, strength, fields, missing, conflicts in sample_matches],
+        }
         valid_ai_candidate = ai_normal and ai_conservative and "ai_candidate" not in rejected
         usable_ai_normal = ai_normal if valid_ai_candidate else salvaged_normal
         usable_ai_conservative = ai_conservative if valid_ai_candidate else salvaged_conservative
@@ -529,8 +677,25 @@ class PackagingEstimationService:
             base_weight = float(usable_ai_normal.weight_g)
 
         cal_normal = cal_conservative = None
-        if selected and base_dims and base_weight is not None:
+        cal_strength = "weak"
+        cal_rule_ids: list[str] = []
+        cal_matched_fields: list[str] = []
+        cal_missing_fields: list[str] = []
+        cal_conflicting_fields: list[str] = []
+        if selected_sample:
+            sample_rule, cal_strength, matched_fields, missing_fields, conflicting_fields = selected_sample
+            cal_rule_ids = [str(sample_rule.get("rule_id"))]
+            cal_matched_fields, cal_missing_fields, cal_conflicting_fields = matched_fields, missing_fields, conflicting_fields
+            cal_normal, cal_conservative = self._sample_cal_candidate(sample_rule, observation)
+            records["cal_candidate"] = self._record("cal_candidate", cal_normal, cal_conservative,
+                                                     confidence="medium" if cal_strength == "strong" else "low",
+                                                     evidence=["legacy_sample_calibration", *matched_fields],
+                                                     matched_rule_ids=cal_rule_ids,
+                                                     rejection_reasons=[] if cal_normal or cal_conservative else ["no_executable_cal_fields"])
+        elif selected and base_dims and base_weight is not None:
             ids = list(dict.fromkeys([*selected.get("source_cal_ids", []), str(selected["rule_id"])]))
+            cal_rule_ids, cal_strength = ids, "strong" if len((selected.get("match") or {})) > 1 else "medium"
+            cal_matched_fields = list((selected.get("match") or {}).keys())
             normal_dims = self._apply_action(base_dims, selected.get("action") or {}, conservative=False)
             conservative_dims = self._apply_action(base_dims, selected.get("action") or {}, conservative=True)
             cal_normal, cal_conservative = self._proposal_from_dims(
@@ -543,13 +708,28 @@ class PackagingEstimationService:
                                                      matched_rule_ids=ids, rejection_reasons=cal_reasons)
             if cal_reasons:
                 rejected["cal_candidate"] = cal_reasons
-            else:
-                applied_ids.extend(ids)
         elif selected:
+            cal_rule_ids, cal_strength = [str(selected["rule_id"])], "medium"
+            cal_matched_fields = list((selected.get("match") or {}).keys())
             records["cal_candidate"] = self._record("cal_candidate", None, None, confidence="low",
                                                      evidence=["compatible_cal_rule"], matched_rule_ids=[str(selected["rule_id"])],
                                                      rejection_reasons=["missing_base_dimensions_or_weight"])
             rejected["cal_candidate"] = ["missing_base_dimensions_or_weight"]
+
+        coordinated_normal, coordinated_conservative, cal_trace = self._coordinate_ai_cal_fields(
+            usable_ai_normal, usable_ai_conservative, cal_normal, cal_conservative,
+            match_strength=cal_strength, observation=observation,
+        )
+        if cal_normal or cal_conservative:
+            records["cal_coordination"] = {
+                "source": "cal_field_arbitration", "rule_id": cal_rule_ids,
+                "match_strength": cal_strength, "matched_fields": cal_matched_fields,
+                "missing_fields": cal_missing_fields, "conflicting_fields": cal_conflicting_fields,
+                "adjusted_fields": cal_trace["adjusted_fields"],
+                "risk_only": cal_trace["risk_only"],
+            }
+        if cal_trace["adjusted_fields"]:
+            applied_ids.extend(cal_rule_ids)
 
         generic_normal, generic_conservative, generic_fallback_id = self._local_completion_candidate(
             observation, base_dims, base_weight,
@@ -564,19 +744,39 @@ class PackagingEstimationService:
             if generic_reasons:
                 rejected["generic_candidate"] = generic_reasons
 
+        # A partial legacy reference may still correct its supported fields after
+        # local completion supplies only the fields the reference does not have.
+        if (not usable_ai_normal or not usable_ai_conservative) and generic_normal and generic_conservative and (cal_normal or cal_conservative):
+            completed_normal, completed_conservative, completion_trace = self._coordinate_ai_cal_fields(
+                generic_normal, generic_conservative, cal_normal, cal_conservative,
+                match_strength=cal_strength, observation=observation,
+            )
+            if completion_trace["adjusted_fields"]:
+                coordinated_normal, coordinated_conservative = completed_normal, completed_conservative
+                cal_trace["adjusted_fields"].update(completion_trace["adjusted_fields"])
+                cal_trace["risk_only"] = cal_trace["risk_only"] and completion_trace["risk_only"]
+                applied_ids.extend(cal_rule_ids)
+                if "cal_coordination" in records:
+                    records["cal_coordination"]["adjusted_fields"] = cal_trace["adjusted_fields"]
+
         # The selected output stays a single PackagingProposal for UI, logistics and history.
         if merchant_normal and merchant_conservative:
             source, normal, conservative = "merchant_candidate", merchant_normal, merchant_conservative
             review.append("merchant shipping package facts adopted")
+        elif cal_trace["adjusted_fields"] and coordinated_normal and coordinated_conservative:
+            source = "ai_cal_coordinated" if usable_ai_normal and usable_ai_conservative else "cal_candidate_completed"
+            normal, conservative = coordinated_normal, coordinated_conservative
+            review.append(f"{cal_strength} CAL match adjusted selected packaging fields")
         elif ai_normal and ai_conservative and "ai_candidate" not in rejected:
             source, normal, conservative = "ai_candidate", ai_normal, ai_conservative
             review.append("complete AI packaging candidate adopted after local validation")
         elif salvaged_normal and salvaged_conservative and "salvaged_ai_candidate" not in rejected:
             source, normal, conservative = "ai_candidate_salvaged", salvaged_normal, salvaged_conservative
             review.append("reliable AI candidate fields preserved; missing fields completed locally")
-        elif cal_normal and cal_conservative and "cal_candidate" not in rejected:
+        elif cal_normal and cal_conservative and cal_normal.is_complete() and cal_conservative.is_complete() and "cal_candidate" not in rejected:
             source, normal, conservative = "cal_candidate", cal_normal, cal_conservative
             review.append("AI candidate unavailable or invalid; compatible CAL candidate adopted")
+            applied_ids.extend(cal_rule_ids)
         elif generic_normal and generic_conservative and "generic_candidate" not in rejected:
             source, normal, conservative = "generic_candidate", generic_normal, generic_conservative
             review.append("AI and CAL could not form a valid candidate; generic physical-form fallback adopted")
