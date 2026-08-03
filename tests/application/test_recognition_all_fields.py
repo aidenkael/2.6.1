@@ -8,6 +8,7 @@ def test_prompt_scans_every_image_without_slot_restrictions():
     assert "scan every image" in prompt
     assert "do not restrict by image slot" in prompt
     assert "domestic shipping" in prompt
+    assert "confirmed_facts supplied in context are authoritative facts" in prompt
 
 
 def test_parse_keeps_evidence_money_types_and_normalized_category():

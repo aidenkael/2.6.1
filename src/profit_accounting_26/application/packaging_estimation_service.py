@@ -188,6 +188,27 @@ class PackagingEstimationService:
             return PackagingState.STRONG_COMPRESSION
         return PackagingState.MODERATE_COMPRESSION
 
+    def _transport_outline(self, dims: tuple[float, float, float], observation: AIObservation) -> tuple[float, float, float]:
+        """Apply a declared packing action before deriving a transport envelope."""
+        actions, constraints = self._actions(observation), self._constraints(observation)
+        if ("longest_nonfoldable_axis" in constraints or "rigid_outline" in constraints
+                or observation.requires_shape_retention is True or "retain_shape" in actions):
+            return dims
+        longest, middle, shortest = sorted((float(value) for value in dims), reverse=True)
+        if "coil" in actions:
+            side = max(middle, math.sqrt(longest * middle))
+            depth = max(shortest, (longest * middle * shortest) / (side * side))
+            return tuple(sorted((side, side, depth), reverse=True))
+        if "flat_fold" in actions:
+            folded_length = max(middle, longest / 3.0)
+            folded_depth = max(shortest, (longest * shortest) / folded_length)
+            return tuple(sorted((folded_length, middle, folded_depth), reverse=True))
+        if "nest" in actions or "disassemble" in actions:
+            return tuple(sorted(self._volume_scale((longest, middle, shortest), 0.8), reverse=True))
+        if "compress" in actions:
+            return tuple(sorted(self._volume_scale((longest, middle, shortest), 0.75), reverse=True))
+        return dims
+
     def _generic_fallback(self, observation: AIObservation):
         """Last-resort proposal based on physical form, never material hardness alone."""
         identifiable = bool(observation.product_name or observation.product_type or observation.product_family_code != "unknown")
@@ -229,6 +250,15 @@ class PackagingEstimationService:
             reasons.append("shorter_than_nonfoldable_axis")
         if "rigid_outline" in constraints and normal.packaging_state == PackagingState.FULL_FLAT_FOLD:
             reasons.append("violates_rigid_outline")
+        if observation.weight_scope != "packaged_weight" and observation.weight_g and normal.weight_g:
+            if float(normal.weight_g) < float(observation.weight_g):
+                reasons.append("packaged_weight_below_confirmed_net_weight")
+        raw_dims = (observation.length_cm, observation.width_cm, observation.height_cm)
+        if self._complete(raw_dims):
+            transport_dims = self._transport_outline(tuple(float(value) for value in raw_dims), observation)
+            if transport_dims != tuple(float(value) for value in raw_dims):
+                if max(float(normal.length_cm or 0), float(normal.width_cm or 0), float(normal.height_cm or 0)) >= max(raw_dims):
+                    reasons.append("uses_unfolded_outline_despite_packing_action")
         return reasons
 
     @staticmethod
@@ -296,7 +326,7 @@ class PackagingEstimationService:
         matched = [rule for rule in sorted(self.registry.get("aggregate_rules", []), key=lambda item: int(item.get("priority", 0)), reverse=True)
                    if rule.get("enabled", True) and self._match_rule(rule, observation)]
         selected = matched[0] if matched else None
-        base_dims = tuple(float(value) for value in obs_dims) if dims_complete else None
+        base_dims = self._transport_outline(tuple(float(value) for value in obs_dims), observation) if dims_complete else None
         base_weight = float(observation.weight_g) if observation.weight_g and observation.weight_g > 0 else None
         if not base_dims and ai_normal and ai_normal.is_complete():
             base_dims = (float(ai_normal.length_cm), float(ai_normal.width_cm), float(ai_normal.height_cm))

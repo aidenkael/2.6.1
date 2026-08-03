@@ -62,7 +62,7 @@ class LocalReestimateService:
             "original_summary": original_summary,
             "edited_summary": current_summary,
             "original_observation": original_observation,
-            "user_confirmed_overrides": user_overrides,
+            "confirmed_facts": user_overrides,
             "adopted_normal_packaging": adopted_normal or {},
             "original_product_summary": original_product_summary,
             "current_product_summary": current_product_summary,

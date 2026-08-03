@@ -62,3 +62,21 @@ def test_selected_result_keeps_conservative_values_monotonic():
     assert proposal.conservative.width_cm >= proposal.normal.width_cm
     assert proposal.conservative.height_cm >= proposal.normal.height_cm
     assert proposal.conservative.weight_g >= proposal.normal.weight_g
+
+
+def test_foldable_item_uses_transformed_transport_outline_before_generic_candidate():
+    proposal = PackagingEstimationService().estimate(
+        AIObservation(product_name="generic flexible strip", length_cm=55, width_cm=2, height_cm=1,
+                      weight_g=110, foldability="good", packing_actions=["flat_fold"]),
+    )
+    assert proposal.normal.length_cm < 55
+    assert proposal.normal.weight_g >= 110
+
+
+def test_nonfoldable_item_keeps_outline_and_ai_cannot_drop_confirmed_net_weight():
+    observation = AIObservation(product_name="generic rigid item", length_cm=55, width_cm=2, height_cm=1,
+                                weight_g=110, foldability="none", packing_constraints=["longest_nonfoldable_axis"])
+    proposal = PackagingEstimationService().estimate(
+        observation, external_proposal=_ai(_scenario("normal", dims=(56, 3, 2), weight=100)),
+    )
+    assert "packaged_weight_below_confirmed_net_weight" in proposal.rejected_candidates["ai_candidate"]

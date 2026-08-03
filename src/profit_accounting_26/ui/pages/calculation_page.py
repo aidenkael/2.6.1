@@ -142,6 +142,7 @@ class CalculationPage(QWidget):
         self._ai_baseline: dict[str, Any] | None = None
         self._recognized_image_fingerprint: tuple[tuple[str, str], ...] = ()
         self._accepted_bare_fields: set[str] = set()
+        self._pending_confirmed_normal: dict[str, Any] = {}
 
         self.content_layout = QVBoxLayout(self)
         self.content_layout.setContentsMargins(12, 10, 12, 12)
@@ -493,8 +494,8 @@ class CalculationPage(QWidget):
             for key in ("length", "width", "height", "weight"):
                 fields[key].valueChanged.connect(lambda _value, n=name: self._scenario_manually_changed(n))
 
-        self.product_cost.editingFinished.connect(self.recalculate)
-        self.domestic_shipping.editingFinished.connect(self.recalculate)
+        self.product_cost.editingFinished.connect(lambda: self._accept_numeric_field("product_cost_rmb", self.product_cost))
+        self.domestic_shipping.editingFinished.connect(lambda: self._accept_numeric_field("domestic_shipping_rmb", self.domestic_shipping))
         for widget in (self.bare_length, self.bare_width, self.bare_height, self.bare_weight):
             widget.editingFinished.connect(self._upstream_changed)
         for key, widget in (("length_cm", self.bare_length), ("width_cm", self.bare_width), ("height_cm", self.bare_height), ("weight_g", self.bare_weight)):
@@ -662,6 +663,42 @@ class CalculationPage(QWidget):
     def _accept_bare_field(self, key: str) -> None:
         if not self._updating:
             self._accepted_bare_fields.add(key)
+            widgets = {
+                "length_cm": self.bare_length, "width_cm": self.bare_width,
+                "height_cm": self.bare_height, "weight_g": self.bare_weight,
+            }
+            self._accept_numeric_field(key, widgets[key])
+
+    def _accept_numeric_field(self, key: str, widget: Any) -> None:
+        if self._updating:
+            return
+        value = widget.value()
+        self.session.confirm_value(key, value if value > 0 or key == "domestic_shipping_rmb" else None)
+        self.recalculate()
+
+    def _confirmed_facts(self) -> dict[str, dict[str, Any]]:
+        facts = self.session.confirmed_facts()
+        if "正常档" in self.manual_scenarios:
+            normal = self._scenario_data(self.normal_fields)
+            if all(normal.get(key) for key in ("length_cm", "width_cm", "height_cm", "weight_g")):
+                facts["normal_packaging"] = {
+                    "value": normal, "source": "user_confirmed", "meaning": "confirmed normal packaged dimensions and weight",
+                }
+        return facts
+
+    def _restore_confirmed_normal(self, proposal: PackagingProposal) -> None:
+        normal = self._pending_confirmed_normal
+        if not normal:
+            return
+        for field in ("length_cm", "width_cm", "height_cm", "weight_g"):
+            value = normal.get(field)
+            if value:
+                setattr(proposal.normal, field, float(value))
+                if float(getattr(proposal.conservative, field) or 0) < float(value):
+                    setattr(proposal.conservative, field, float(value))
+        proposal.normal.confidence = "high"
+        proposal.normal.needs_review = False
+        proposal.review_reasons.append("user confirmed normal packaging retained")
 
     def _apply_observation(self, observation: AIObservation) -> None:
         previous_updating = self._updating
@@ -722,17 +759,20 @@ class CalculationPage(QWidget):
         self._diagnostic_operation = self.context.diagnostic_logger.begin_operation("ai-recognition")
         images = [self.context.diagnostic_logger.image_metadata(item["path"]) for item in image_items]
         self._diagnostic_operation.event("image_attached", images=images)
+        confirmed_facts = self._confirmed_facts()
+        self._diagnostic_operation.event("user_confirmed_facts", confirmed_facts=confirmed_facts)
         self._diagnostic_operation.event("ai_request_started")
         self._show_recognition_dialog()
         self.ai_button.setEnabled(False)
         self._recognition_cancellation = RecognitionCancellation()
+        self._pending_confirmed_normal = self._scenario_data(self.normal_fields) if "正常档" in self.manual_scenarios else {}
         self._recognition_thread = QThread(self)
         self._recognition_worker = RecognitionWorker(
             self.context.recognition_service,
             image_items,
             self._recognition_cancellation,
             self._diagnostic_operation,
-            self.session.user_overrides,
+            {"confirmed_facts": confirmed_facts},
         )
         self._recognition_worker.moveToThread(self._recognition_thread)
         self._recognition_thread.started.connect(self._recognition_worker.run)
@@ -780,6 +820,7 @@ class CalculationPage(QWidget):
 
     @Slot(object, object)
     def _recognition_completed(self, observation: AIObservation, external_proposal: PackagingProposal | None) -> None:
+        conflicts = self.session.protect_confirmed_values(observation)
         self.session.ai_raw_response = observation.raw_payload
         self.session.ai_raw_observation = dict(observation.raw_payload.get("observation") or {})
         self.session.normalized_observation = observation
@@ -788,6 +829,9 @@ class CalculationPage(QWidget):
         self.session.observation = observation
         self.observation = self.session.observation
         self._adopt_packaging(self.context.packaging_service.estimate(observation, external_proposal=external_proposal))
+        self._restore_confirmed_normal(self._adopted_packaging())
+        if conflicts:
+            self._adopted_packaging().review_reasons.append("user confirmed facts conflict with image evidence")
         self._apply_observation(observation)
         self._refresh_display_summaries(observation, self._adopted_packaging())
         self.apply_proposal(self._adopted_packaging())
@@ -802,6 +846,7 @@ class CalculationPage(QWidget):
             "normal_packaging": self._scenario_data(self.normal_fields),
         }
         self._accepted_bare_fields.clear()
+        self._pending_confirmed_normal = {}
         self._recognized_image_fingerprint = self._image_fingerprint()
         self.ai_button.setText("AI识图")
         self.ai_button.setEnabled(False)
@@ -919,7 +964,7 @@ class CalculationPage(QWidget):
             "original_summary": str(original["summary"]),
             "current_summary": self._current_summary(),
             "original_observation": dict(self.session.ai_raw_observation or self.observation.to_dict()),
-            "user_overrides": {**self.session.user_overrides, **adopted_bare},
+            "user_overrides": self._confirmed_facts(),
             "adopted_normal": adopted_normal or (self._adopted_packaging().normal.to_dict() if self._adopted_packaging() else {}),
             "original_product_summary": str(original.get("product_summary") or ""),
             "current_product_summary": self.product_summary.text().strip(),
@@ -1499,6 +1544,7 @@ class CalculationPage(QWidget):
         self._ai_baseline = None
         self._recognized_image_fingerprint = ()
         self._accepted_bare_fields.clear()
+        self._pending_confirmed_normal = {}
         self.packaging_stale = False
         self.manual_scenarios.clear()
         self.product_summary.clear()

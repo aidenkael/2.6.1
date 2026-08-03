@@ -18,3 +18,21 @@ def test_patch_never_overrides_user_confirmed_value():
     assert changed == ["rigidity"]
     assert session.observation.weight_g is None
     assert session.observation.rigidity == "soft"
+
+
+def test_confirmed_facts_are_serialized_and_win_over_ai_observation():
+    session = CalculationSession()
+    session.confirm_value("weight_g", 110)
+    session.confirm_value("length_cm", 55)
+    facts = session.confirmed_facts()
+    assert facts["weight_g"]["source"] == "user_confirmed"
+    assert facts["weight_g"]["value"] == 110
+
+    observation = session.observation
+    observation.weight_g = 100
+    observation.length_cm = 50
+    conflicts = session.protect_confirmed_values(observation)
+    assert observation.weight_g == 110
+    assert observation.length_cm == 55
+    assert observation.weight_scope == "net_weight"
+    assert set(conflicts) == {"weight_g", "length_cm"}

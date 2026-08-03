@@ -29,6 +29,52 @@ class CalculationSession:
     calculation_result: dict[str, Any] = field(default_factory=dict)
     rule_trace: list[str] = field(default_factory=list)
 
+    def confirm_value(self, field: str, value: Any) -> None:
+        """Record a valid user-entered fact in the existing session authority."""
+        if field not in self.observation.__dataclass_fields__:
+            return
+        if value is None or value == "":
+            self.user_overrides.pop(field, None)
+            self.confirmed_fields.discard(field)
+            self.field_sources.pop(field, None)
+            return
+        self.user_overrides[field] = value
+        self.confirmed_fields.add(field)
+        self.field_sources[field] = "user_confirmed"
+
+    def confirmed_facts(self) -> dict[str, dict[str, Any]]:
+        meanings = {
+            "weight_g": "single-item net weight in grams",
+            "length_cm": "unpacked item length in centimetres",
+            "width_cm": "unpacked item width in centimetres",
+            "height_cm": "unpacked item height in centimetres",
+            "product_cost_rmb": "product cost in RMB",
+            "domestic_shipping_rmb": "domestic shipping in RMB",
+        }
+        return {
+            field: {"value": value, "source": "user_confirmed", "meaning": meanings.get(field, field)}
+            for field, value in self.user_overrides.items()
+            if field in self.confirmed_fields and value is not None
+        }
+
+    def protect_confirmed_values(self, observation: AIObservation) -> dict[str, dict[str, Any]]:
+        """Keep user facts authoritative while retaining AI disagreement for diagnostics."""
+        conflicts: dict[str, dict[str, Any]] = {}
+        for field, value in self.user_overrides.items():
+            if field not in self.confirmed_fields or field not in observation.__dataclass_fields__:
+                continue
+            ai_value = getattr(observation, field)
+            if ai_value is not None and ai_value != value:
+                conflicts[field] = {"user_confirmed": value, "ai_returned": ai_value}
+            setattr(observation, field, value)
+        if "weight_g" in self.confirmed_fields:
+            observation.weight_scope = "net_weight"
+        if any(field in self.confirmed_fields for field in ("length_cm", "width_cm", "height_cm")):
+            observation.dimension_scope = "product_size"
+        if conflicts:
+            observation.raw_payload.setdefault("user_confirmed_conflicts", {}).update(conflicts)
+        return conflicts
+
     def apply_observation_patch(self, patch: dict[str, Any]) -> list[str]:
         changed: list[str] = []
         allowed = self.observation.__dataclass_fields__.keys()
