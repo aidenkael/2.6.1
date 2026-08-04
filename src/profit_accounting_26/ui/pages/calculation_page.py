@@ -1342,7 +1342,15 @@ class CalculationPage(QWidget):
         profit_scenarios = self.profit_binder.export_profit_scenarios()
         no_activity = profit_scenarios.get("no_activity", {})
         activity = profit_scenarios.get("activity", {})
-        exchange_rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
+        # 快照/旧记录兼容状态下，layers 中的汇率/成本/利润必须来自
+        # profit_scenarios 快照，不得混入当前 settings 或 current_system_cost
+        if self.profit_binder.is_in_snapshot_mode():
+            exchange_rate = float(profit_scenarios.get("exchange_rate", 0) or 0) or float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
+            snapshot_cost = float(profit_scenarios.get("calculation_total_cost_rmb", 0) or 0)
+            system_cost_for_record = snapshot_cost if snapshot_cost > 0 else self.current_system_cost
+        else:
+            exchange_rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
+            system_cost_for_record = self.current_system_cost
         return {
             "product_name": self.product_summary.text().strip(),
             "product_link": self.product_link.text().strip() if self.product_link else "",
@@ -1363,11 +1371,11 @@ class CalculationPage(QWidget):
                     "conservative": conservative.to_dict(),
                     "selected_packaging": scenario.label,
                     "selected_forwarder_id": self.selected_forwarder_id,
-                    "calculation_cost_rmb": self.profit_binder._calculation_total_cost_rmb,
+                    "calculation_cost_rmb": float(profit_scenarios.get("calculation_total_cost_rmb", 0) or 0) if self.profit_binder.is_in_snapshot_mode() else self.profit_binder._calculation_total_cost_rmb,
                     "packaging_estimate_stale": self.packaging_stale,
                 },
                 "calculated": {
-                    "system_cost_rmb": self.current_system_cost,
+                    "system_cost_rmb": system_cost_for_record,
                     "sale_price_usd": no_activity.get("sale_price_usd", 0.0),
                     "reserve_percent": profit_scenarios.get("reserve_percent", 0.0),
                     "profit_rmb": no_activity.get("profit_rmb", 0.0),

@@ -94,6 +94,9 @@ class CalculationBinder(QObject):
         # 内部 recalculate/set_calculation_cost 不得退出快照；
         # 恢复结束后在 finally 中置 False。
         self._loading_record = False
+        # 旧记录原始利润快照：load_from_record 时保存，export 时原样输出
+        # 不重新推导售价/利润/利润率
+        self._legacy_snapshot: dict[str, Any] | None = None
         # 快照显示模式：记录加载后保持保存时界面结果，自动重算只做冻结换算
         # 显示，不按当前设置静默重算双场景；用户主动编辑利润区字段后退出
         # 该模式，之后的计算属当前推算。
@@ -305,6 +308,14 @@ class CalculationBinder(QObject):
     def selected_rule_id(self) -> str:
         return self._selected_rule_id
 
+    def is_in_snapshot_mode(self) -> bool:
+        """是否处于历史快照或旧记录兼容状态（未被用户明确操作退出）。
+
+        build_record_payload 据此判断是否使用 profit_scenarios 快照值
+        而非当前 settings/current_system_cost。
+        """
+        return self._snapshot_display_mode
+
     def set_shein_quote_usd(self, value: float) -> None:
         """外部（记录加载/清空）设置 SHEIN 核价 USD。"""
         if self.txt_shein_usd:
@@ -318,6 +329,7 @@ class CalculationBinder(QObject):
         self._snapshot_legacy = False
         self._legacy_exited = False
         self._loading_record = False
+        self._legacy_snapshot = None
         self._profit_driver = DRIVER_NO_ACTIVITY_PRICE
         self._calculation_total_cost_rmb = 0.0
         self._no_activity_price_usd = 0.0
@@ -796,23 +808,31 @@ class CalculationBinder(QObject):
         将当前快照状态写入 lblProfitConclusion 的 tooltip，用户可
         从界面 tooltip 明确区分三种状态。
 
+        写入前删除 tooltip 中已有的所有"[利润区状态] ..."行，
+        保留其他核价差额或说明内容，最终只追加一条当前最新状态。
         如果 lblProfitConclusion 当前有差额提醒文本（如"超过核价"），
-        保留提醒文本不覆盖，仅在 tooltip 末尾追加状态标记。
-        如果无提醒文本，直接在 lblProfitConclusion 显示状态文案。
+        保留提醒文本不覆盖。如果无提醒文本，直接显示状态文案。
         """
         if not self.lbl_conclusion:
             return
         status = self._current_snapshot_status()
         existing_text = self.lbl_conclusion.text()
         existing_tip = self.lbl_conclusion.toolTip()
-        # 合并 tooltip：保留原有差额提醒 tooltip 信息，追加快照状态
+        # 清理 tooltip 中已有的 [利润区状态] 行，保留其他内容
         tip_parts = []
         if existing_tip and existing_tip.strip():
-            tip_parts.append(existing_tip.strip())
+            for line in existing_tip.strip().split("\n"):
+                stripped = line.strip()
+                if stripped.startswith("[利润区状态]"):
+                    continue  # 删除旧状态行
+                if stripped:
+                    tip_parts.append(stripped)
         tip_parts.append(f"[利润区状态] {status}")
         self.lbl_conclusion.setToolTip("\n".join(tip_parts))
         # 如果无差额提醒文本，显示状态文案
-        if not existing_text or not existing_text.strip():
+        if not existing_text or not existing_text.strip() or existing_text.strip() in (
+            self._STATUS_HISTORY, self._STATUS_LEGACY, self._STATUS_CURRENT
+        ):
             if status == self._STATUS_LEGACY:
                 self.lbl_conclusion.setText(self._STATUS_LEGACY)
                 self.lbl_conclusion.setStyleSheet(f"color:{_COLOR_NORMAL};")
@@ -852,28 +872,27 @@ class CalculationBinder(QObject):
         shein = self._shein_quote_usd
         active_rules = self._active_rules()
 
-        # 旧记录兼容状态未被明确操作退出时，保存仍保持兼容状态
+        # 旧记录兼容状态未被明确操作退出时，原样输出加载时的历史值，
+        # 不重新推导售价/利润/利润率
         if self._snapshot_loaded and self._snapshot_legacy and not self._legacy_exited:
-            na_price_rmb = na_price * rate if (na_price > 0 and rate > 0) else 0.0
-            na_profit_rmb = na_price_rmb - cost if na_price > 0 else 0.0
-            na_profit_usd = na_profit_rmb / rate if (rate > 0 and na_price > 0) else 0.0
+            snap = self._legacy_snapshot or {}
             return build_profit_scenarios(
                 driver=self._profit_driver,
-                calculation_total_cost_rmb=cost,
+                calculation_total_cost_rmb=snap.get("calculation_total_cost_rmb", cost),
                 shein_quote_usd=shein,
                 reserve_percent=reserve,
-                no_activity_price_usd=na_price,
-                no_activity_price_rmb=na_price_rmb,
-                no_activity_profit_rmb=na_profit_rmb,
-                no_activity_profit_usd=na_profit_usd,
-                no_activity_rule_status={},
+                no_activity_price_usd=snap.get("no_activity_sale_price_usd", na_price),
+                no_activity_price_rmb=snap.get("no_activity_sale_price_rmb", 0.0),
+                no_activity_profit_rmb=snap.get("no_activity_profit_rmb", 0.0),
+                no_activity_profit_usd=snap.get("no_activity_profit_usd", 0.0),
+                no_activity_rule_status=snap.get("rule_status", {}),
                 activity_price_usd=0.0,
                 activity_price_rmb=0.0,
                 activity_profit_rmb=0.0,
                 activity_profit_usd=0.0,
-                activity_profit_rate_on_cost=None,
+                activity_profit_rate_on_cost=snap.get("profit_rate_on_cost"),
                 activity_rule_status={},
-                exchange_rate=rate,
+                exchange_rate=snap.get("exchange_rate", rate),
                 applied_rule_ids=[],
                 applied_rules=[],
                 selected_rule_id=self._selected_rule_id,
@@ -999,6 +1018,21 @@ class CalculationBinder(QObject):
         self._no_activity_price_usd = float(na.get("sale_price_usd", 0) or 0)
 
         legacy = self._snapshot_legacy
+
+        # 旧记录：保存原始利润快照，export 时原样输出不重算
+        if legacy:
+            self._legacy_snapshot = {
+                "no_activity_sale_price_usd": float(na.get("sale_price_usd", 0) or 0),
+                "no_activity_sale_price_rmb": float(na.get("sale_price_rmb", 0) or 0),
+                "no_activity_profit_rmb": float(na.get("profit_rmb", 0) or 0),
+                "no_activity_profit_usd": float(na.get("profit_usd", 0) or 0),
+                "profit_rate_on_cost": float(act.get("profit_rate_on_cost", 0) or 0) if act.get("profit_rate_on_cost") is not None else None,
+                "calculation_total_cost_rmb": self._calculation_total_cost_rmb,
+                "exchange_rate": self._exchange_rate if self._exchange_rate > 0 else saved_rate,
+                "rule_status": na.get("rule_status", {}),
+            }
+        else:
+            self._legacy_snapshot = None
 
         # 先置位快照显示模式，再程序化填充控件。
         # 填充期间必须阻断 valueChanged，否则 handler 会触发 _exit_snapshot_mode

@@ -777,3 +777,213 @@ class TestSnapshotStatusLabel:
         binder._exit_snapshot_mode()
         assert binder._current_snapshot_status() == "当前推算（非历史快照）"
         assert "当前推算" in binder.lbl_conclusion.toolTip()
+
+
+# ===========================================================================
+# 第三轮定点修正：payload 数据一致 / 旧记录原样保存 / tooltip 去重
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# 修正 1：历史快照保存数据一致（build_record_payload 不混入当前数据）
+# ---------------------------------------------------------------------------
+
+
+class TestPayloadDataConsistency:
+    """验证快照/legacy 状态下 build_record_payload 数据一致。"""
+
+    def test_snapshot_payload_uses_snapshot_values(self, qapp, temp_context, monkeypatch):
+        """保存记录后改汇率/物流，打开历史记录直接保存，layers 字段来自同一快照。"""
+        from profit_accounting_26.ui.pages import CalculationPage
+
+        page = CalculationPage(temp_context)
+        try:
+            b, rid = _fill_and_save_record(page, monkeypatch, na_price=30.0, cost=35.0)
+            saved_rate = b._exchange_rate
+            saved_cost = b._calculation_total_cost_rmb
+
+            # 修改当前汇率
+            settings = temp_context.settings_service.load()
+            settings["exchange_rate_usd_to_rmb"] = 6.5
+            temp_context.settings_service.save(settings)
+
+            # 重新打开
+            page.load_record_payload(rid)
+            b2 = page.profit_binder
+            assert b2.is_in_snapshot_mode() is True
+
+            # 直接 build_record_payload（模拟保存）
+            payload = page.build_record_payload()
+            ps = payload["profit_scenarios"]
+            calc = payload["layers"]["calculated"]
+            adopted = payload["layers"]["adopted"]
+
+            # layers.calculated.exchange_rate 来自快照，不是当前 settings
+            assert calc["exchange_rate"] == pytest.approx(saved_rate)
+            # layers.calculated.system_cost_rmb 来自快照
+            assert calc["system_cost_rmb"] == pytest.approx(ps["calculation_total_cost_rmb"])
+            # layers.adopted.calculation_cost_rmb 来自快照
+            assert adopted["calculation_cost_rmb"] == pytest.approx(ps["calculation_total_cost_rmb"])
+            # sale_price / profit / profit_rate 来自同一 profit_scenarios
+            assert calc["sale_price_usd"] == pytest.approx(ps["no_activity"]["sale_price_usd"])
+            assert calc["profit_rmb"] == pytest.approx(ps["no_activity"]["profit_rmb"])
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_current_mode_payload_uses_current_values(self, qapp, temp_context, monkeypatch):
+        """当前推算模式下 build_record_payload 使用当前 settings 和 system_cost。"""
+        from profit_accounting_26.ui.pages import CalculationPage
+
+        page = CalculationPage(temp_context)
+        try:
+            _fill_and_save_record(page, monkeypatch, na_price=30.0, cost=35.0)
+            current_rate = float(page.settings.get("exchange_rate_usd_to_rmb", 7.2))
+            current_cost = page.current_system_cost
+
+            # 不打开历史记录，直接 build payload（当前模式）
+            assert page.profit_binder.is_in_snapshot_mode() is False
+            payload = page.build_record_payload()
+            calc = payload["layers"]["calculated"]
+            assert calc["exchange_rate"] == pytest.approx(current_rate)
+            assert calc["system_cost_rmb"] == pytest.approx(current_cost)
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+
+# ---------------------------------------------------------------------------
+# 修正 2：旧记录未退出兼容状态时原样保存历史值
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyOriginalValuesPreserved:
+    """验证旧记录原样保存，不重新推导。"""
+
+    def test_legacy_inconsistent_profit_preserved(self, qapp, temp_context):
+        """故意不满足 售价×汇率−成本=旧利润 的旧记录，打开后直接保存旧利润保持原值。"""
+        # 构造一个利润值与售价/成本/汇率不一致的旧记录
+        # 25 USD × 7.0 = 175 RMB, 成本 145 RMB, 正确利润应为 30 RMB
+        # 但我们故意写入利润 50 RMB（不一致）
+        legacy_record = {
+            "product_name": "不一致旧记录",
+            "layers": {
+                "calculated": {
+                    "sale_price_usd": 25.0,
+                    "exchange_rate": 7.0,
+                    "profit_rmb": 50.0,  # 故意不一致（应为 30.0）
+                    "calculation_cost_rmb": 145.0,
+                    "reserve_percent": 0,
+                    "profit_rate_percent": 34.48,
+                    "selected_profit_rule_id": "",
+                }
+            },
+            "shein_quote_usd": 22.0,
+        }
+        rid = temp_context.record_service.save(legacy_record, images=[])
+
+        from profit_accounting_26.ui.pages import CalculationPage
+        page = CalculationPage(temp_context)
+        try:
+            page.load_record_payload(rid)
+            b = page.profit_binder
+            assert b._snapshot_legacy is True
+            assert b._legacy_exited is False
+
+            # 直接导出（模拟保存）
+            snap = b.export_profit_scenarios()
+            na = snap.get("no_activity", {})
+            # 旧利润原样保持 50.0，不被重新计算为 30.0
+            assert na["profit_rmb"] == pytest.approx(50.0)
+            assert na["sale_price_usd"] == pytest.approx(25.0)
+            assert na["sale_price_rmb"] == pytest.approx(175.0)
+            # 活动场景为空
+            act = snap.get("activity", {})
+            assert act["sale_price_usd"] == 0.0
+            assert act["profit_rmb"] == 0.0
+            assert snap["legacy_compatible"] is True
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_legacy_shein_change_preserves_original_profit(self, qapp, temp_context):
+        """旧记录打开后只改核价再保存，旧利润仍保持原值。"""
+        legacy_record = {
+            "product_name": "旧记录核价测试",
+            "layers": {
+                "calculated": {
+                    "sale_price_usd": 25.0,
+                    "exchange_rate": 7.0,
+                    "profit_rmb": 50.0,  # 故意不一致
+                    "calculation_cost_rmb": 145.0,
+                }
+            },
+            "shein_quote_usd": 22.0,
+        }
+        rid = temp_context.record_service.save(legacy_record, images=[])
+
+        from profit_accounting_26.ui.pages import CalculationPage
+        page = CalculationPage(temp_context)
+        try:
+            page.load_record_payload(rid)
+            b = page.profit_binder
+            # 只修改 SHEIN 核价
+            b.txt_shein_usd.setValue(18.0)
+            assert b._legacy_exited is False
+
+            snap = b.export_profit_scenarios()
+            na = snap.get("no_activity", {})
+            assert na["profit_rmb"] == pytest.approx(50.0)  # 原值不变
+            assert snap["shein_quote_usd"] == pytest.approx(18.0)  # 核价已更新
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+
+# ---------------------------------------------------------------------------
+# 修正 3：状态 tooltip 重复累积
+# ---------------------------------------------------------------------------
+
+
+class TestTooltipNoAccumulation:
+    """验证状态 tooltip 不重复累积。"""
+
+    def test_five_refreshes_one_status_line(self, qapp, binder):
+        """连续刷新 5 次，tooltip 中状态行只有 1 条。"""
+        binder._snapshot_display_mode = True
+        binder._snapshot_loaded = True
+        binder._snapshot_legacy = False
+        binder._legacy_exited = False
+        for _ in range(5):
+            binder._update_snapshot_status_label()
+        tip = binder.lbl_conclusion.toolTip()
+        count = tip.count("[利润区状态]")
+        assert count == 1
+
+    def test_history_to_current_no_old_status(self, qapp, binder):
+        """历史快照 → 当前推算后，tooltip 不再包含'历史快照'状态行。"""
+        binder._snapshot_display_mode = True
+        binder._snapshot_loaded = True
+        binder._snapshot_legacy = False
+        binder._legacy_exited = False
+        binder._update_snapshot_status_label()
+        assert "[利润区状态] 历史快照" in binder.lbl_conclusion.toolTip()
+        # 退出快照
+        binder._exit_snapshot_mode()
+        tip = binder.lbl_conclusion.toolTip()
+        assert "[利润区状态] 历史快照" not in tip
+        assert "[利润区状态] 当前推算" in tip
+
+    def test_legacy_to_current_no_old_status(self, qapp, binder):
+        """旧记录兼容 → 当前推算后，tooltip 不再包含'旧记录兼容数据'。"""
+        binder._snapshot_display_mode = True
+        binder._snapshot_loaded = True
+        binder._snapshot_legacy = True
+        binder._legacy_exited = False
+        binder._update_snapshot_status_label()
+        assert "旧记录兼容数据" in binder.lbl_conclusion.toolTip()
+        # 退出 legacy
+        binder._exit_snapshot_mode()
+        tip = binder.lbl_conclusion.toolTip()
+        assert "旧记录兼容数据" not in tip
+        assert "当前推算" in tip
