@@ -61,6 +61,7 @@ class CalculationBinder(QObject):
     """
 
     profitChanged = Signal()  # 利润区数据变化时发射，供 CalculationPage 同步记录 payload
+    selectedRuleChanged = Signal(str)  # 利润规则选择变化，供页面持久化到 settings
 
     def __init__(self, page: QWidget, context: AppContext) -> None:
         super().__init__(page)
@@ -169,6 +170,23 @@ class CalculationBinder(QObject):
                 pal.setColor(QPalette.ColorRole.Base, QColor("#f1f5fa"))
                 widget.setPalette(pal)
 
+        # 显式范围：.ui 未全部声明 min/max，不能依赖 Qt 默认值（0–99.99）
+        range_specs = [
+            (self.txt_shein_usd, 0.0, 1_000_000.0),
+            (self.txt_shein_rmb, 0.0, 10_000_000.0),
+            (self.txt_cost_rmb, 0.0, 10_000_000.0),
+            (self.txt_cost_usd, 0.0, 10_000_000.0),
+            (self.txt_na_price_usd, 0.0, 1_000_000.0),
+            (self.txt_na_price_rmb, 0.0, 10_000_000.0),
+            (self.txt_act_price_usd, 0.0, 1_000_000.0),
+            (self.txt_act_price_rmb, 0.0, 10_000_000.0),
+            (self.spin_profit_rate, -10_000.0, 10_000.0),
+            (self.spin_reserve, 0.0, 99.0),
+        ]
+        for widget, lo, hi in range_specs:
+            if widget:
+                widget.setRange(lo, hi)
+
         # 利润相关字段允许负值（亏损场景）
         profit_widgets = [
             self.txt_na_profit_rmb,
@@ -229,6 +247,47 @@ class CalculationBinder(QObject):
         self._selected_rule_id = rule_id
         self._refresh_rule_combo()
 
+    @property
+    def selected_rule_id(self) -> str:
+        return self._selected_rule_id
+
+    def set_shein_quote_usd(self, value: float) -> None:
+        """外部（记录加载/清空）设置 SHEIN 核价 USD。"""
+        if self.txt_shein_usd:
+            self.txt_shein_usd.setValue(float(value))
+        self._shein_quote_usd = float(value)
+
+    def reset(self) -> None:
+        """清空并新建时复位利润区（driver 回到无活动售价，全部数值归零）。"""
+        self._profit_driver = DRIVER_NO_ACTIVITY_PRICE
+        self._calculation_total_cost_rmb = 0.0
+        self._no_activity_price_usd = 0.0
+        self._shein_quote_usd = 0.0
+        self._profit_updating = True
+        try:
+            for widget in (
+                self.txt_shein_usd,
+                self.txt_shein_rmb,
+                self.txt_cost_rmb,
+                self.txt_cost_usd,
+                self.spin_profit_rate,
+                self.txt_na_price_usd,
+                self.txt_na_price_rmb,
+                self.txt_na_profit_rmb,
+                self.txt_na_profit_usd,
+                self.txt_act_price_usd,
+                self.txt_act_price_rmb,
+                self.txt_act_profit_rmb,
+                self.txt_act_profit_usd,
+                self.spin_reserve,
+            ):
+                if widget:
+                    widget.setValue(0.0)
+            self._reserve_percent = 0.0
+        finally:
+            self._profit_updating = False
+        self._refresh_all()
+
     # ------------------------------------------------------------------
     # 规则下拉
     # ------------------------------------------------------------------
@@ -240,7 +299,7 @@ class CalculationBinder(QObject):
             self.cmb_rule.clear()
             self.cmb_rule.addItem("不使用规则", "")
             for rule in self._rules:
-                if rule.archived:
+                if rule.archived or not rule.enabled:
                     continue
                 self.cmb_rule.addItem(rule.name, rule.id)
             # 选中当前规则
@@ -268,6 +327,7 @@ class CalculationBinder(QObject):
     def _on_rule_changed(self, _index: int) -> None:
         self._selected_rule_id = self.cmb_rule.currentData() if self.cmb_rule else ""
         self._refresh_all()
+        self.selectedRuleChanged.emit(str(self._selected_rule_id))
 
     # ------------------------------------------------------------------
     # 核心刷新逻辑

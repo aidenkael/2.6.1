@@ -149,6 +149,7 @@ class MainWindowBinder:
             "pageHistory": self.history_page,
             "pageImportExport": self.import_export_page,
             "pageCalibration": self.calibration_page,
+            "pageSettingsHost": self.settings_page,
         }
         for page_name, page_widget in page_map.items():
             if page_widget is None:
@@ -185,6 +186,7 @@ class MainWindowBinder:
                 child.setParent(None)
                 child.deleteLater()
         real_widget.setParent(placeholder)
+        real_widget.setVisible(True)  # setParent 会清除可见标记，必须显式恢复
         layout.addWidget(real_widget)
 
     # ------------------------------------------------------------------
