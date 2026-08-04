@@ -1558,27 +1558,33 @@ class CalculationPage(QWidget):
             selected_rule_id=str(current_settings.get("selected_profit_rule_id") or ""),
         )
         self.profit_binder.set_selected_rule_id(self.selected_profit_rule_id)
-        self.profit_binder.load_from_record(record)
-        self._select_package(selected_package, user=False)
-        if self.packaging_stale:
-            self.review_badge.setText("估算已过期 · 禁止保存")
-            self.review_badge.setProperty("warning", True)
-            self.review_badge.setProperty("success", False)
-        elif self.proposal is not None:
-            if self.proposal.needs_review or self.manual_scenarios:
-                self.review_badge.setText("需要复核")
+        # 记录加载保护：内部 _select_package/recalculate/set_calculation_cost
+        # 期间不得退出历史快照；恢复结束后在 finally 中复位。
+        self.profit_binder._loading_record = True
+        try:
+            self.profit_binder.load_from_record(record)
+            self._select_package(selected_package, user=False)
+            if self.packaging_stale:
+                self.review_badge.setText("估算已过期 · 禁止保存")
                 self.review_badge.setProperty("warning", True)
                 self.review_badge.setProperty("success", False)
+            elif self.proposal is not None:
+                if self.proposal.needs_review or self.manual_scenarios:
+                    self.review_badge.setText("需要复核")
+                    self.review_badge.setProperty("warning", True)
+                    self.review_badge.setProperty("success", False)
+                else:
+                    self.review_badge.setText("已载入")
+                    self.review_badge.setProperty("success", True)
+                    self.review_badge.setProperty("warning", False)
             else:
-                self.review_badge.setText("已载入")
-                self.review_badge.setProperty("success", True)
-                self.review_badge.setProperty("warning", False)
-        else:
-            self.review_badge.setText("人工方案 · 需要复核")
-            self.review_badge.setProperty("warning", True)
-            self.review_badge.setProperty("success", False)
-        self._refresh_badge_style()
-        self.recalculate()
+                self.review_badge.setText("人工方案 · 需要复核")
+                self.review_badge.setProperty("warning", True)
+                self.review_badge.setProperty("success", False)
+            self._refresh_badge_style()
+            self.recalculate()
+        finally:
+            self.profit_binder._loading_record = False
         self.mark_saved()
 
     def set_product_link(self, link: str) -> None:

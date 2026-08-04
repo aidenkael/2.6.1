@@ -376,3 +376,404 @@ def test_real_main_window_title_is_261_from_ui(qapp, temp_context):
     finally:
         window.close()
         qapp.processEvents()
+
+
+# ===========================================================================
+# 第二轮定点修正：加载保护 / 系统成本联动 / SHEIN 核价 / 旧记录保存 / 状态提示
+# ===========================================================================
+
+
+def _fill_and_save_record(page, monkeypatch, na_price=30.0, cost=35.0):
+    """填充并保存一条带双场景快照的记录，返回 (binder, record_id)。"""
+    import PySide6.QtWidgets as qw
+
+    monkeypatch.setattr(qw.QMessageBox, "information", lambda *a, **k: None)
+    page.product_cost.setValue(cost)
+    page.domestic_shipping.setValue(5.0)
+    page.normal_fields["length"].setValue(25.0)
+    page.normal_fields["width"].setValue(18.0)
+    page.normal_fields["height"].setValue(6.0)
+    page.normal_fields["weight"].setValue(320.0)
+    page.recalculate()
+    assert page.current_quote is not None
+    b = page.profit_binder
+    b._profit_driver = DRIVER_NO_ACTIVITY_PRICE
+    b.txt_na_price_usd.setValue(na_price)
+    b.spin_reserve.setValue(10.0)
+    b._refresh_all()
+    page.save_record()
+    assert page.record_id
+    return b, page.record_id
+
+
+# ---------------------------------------------------------------------------
+# 修正 1+：加载保护状态 _loading_record
+# ---------------------------------------------------------------------------
+
+
+class TestLoadingRecordProtection:
+    """验证 _loading_record 保护机制。"""
+
+    def test_loading_record_flag_reset_after_load(self, qapp, temp_context, monkeypatch):
+        """load_record_payload 完成后 _loading_record 必须为 False。"""
+        from profit_accounting_26.ui.pages import CalculationPage
+
+        page = CalculationPage(temp_context)
+        try:
+            _fill_and_save_record(page, monkeypatch)
+            rid = page.record_id
+            page.profit_binder._loading_record = True  # 模拟异常残留
+            page.load_record_payload(rid)
+            assert page.profit_binder._loading_record is False
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_loading_record_false_on_exception(self, qapp, temp_context, monkeypatch):
+        """load_record_payload 异常时 _loading_record 通过 finally 正确复位。"""
+        from profit_accounting_26.ui.pages import CalculationPage
+
+        page = CalculationPage(temp_context)
+        try:
+            _fill_and_save_record(page, monkeypatch)
+            rid = page.record_id
+            # 模拟 _select_package 抛异常
+            original = page._select_package
+            def boom(*a, **k):
+                raise RuntimeError("test")
+            page._select_package = boom
+            try:
+                page.load_record_payload(rid)
+            except RuntimeError:
+                pass
+            finally:
+                page._select_package = original
+            assert page.profit_binder._loading_record is False
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_internal_recalculate_does_not_exit_snapshot(self, qapp, temp_context, monkeypatch):
+        """加载记录时内部 recalculate 不退出快照。"""
+        from profit_accounting_26.ui.pages import CalculationPage
+
+        page = CalculationPage(temp_context)
+        try:
+            b, rid = _fill_and_save_record(page, monkeypatch)
+            saved_rate = b._exchange_rate
+            page.load_record_payload(rid)
+            b2 = page.profit_binder
+            # 加载后仍处于快照模式
+            assert b2._snapshot_display_mode is True
+            assert b2._loading_record is False
+            # 汇率仍为保存时汇率，未被当前设置覆盖
+            assert b2._exchange_rate == pytest.approx(saved_rate)
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_system_cost_change_after_load_exits_snapshot(self, qapp, temp_context, monkeypatch):
+        """加载完成后修改系统成本会退出快照。"""
+        from profit_accounting_26.ui.pages import CalculationPage
+
+        page = CalculationPage(temp_context)
+        try:
+            b, rid = _fill_and_save_record(page, monkeypatch)
+            saved_na_profit = b.txt_na_profit_rmb.value()
+            page.load_record_payload(rid)
+            b2 = page.profit_binder
+            assert b2._snapshot_display_mode is True
+            # 模拟加载完成后系统成本变化
+            b2.set_calculation_cost(999.99)
+            assert b2._snapshot_display_mode is False
+            assert b2._calculation_total_cost_rmb == pytest.approx(999.99)
+            # 利润已按新成本重算，与保存时不同
+            assert b2.txt_na_profit_rmb.value() != pytest.approx(saved_na_profit, abs=0.01)
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_tiny_float_diff_does_not_exit_snapshot(self, qapp, binder):
+        """即使加载重算成本存在极小浮点差异，_loading_record=True 也不退出快照。"""
+        binder.set_calculation_cost(100.0)
+        binder._profit_driver = DRIVER_NO_ACTIVITY_PRICE
+        binder.txt_na_price_usd.setValue(30.0)
+        binder._snapshot_display_mode = True
+        binder._loading_record = True
+        # 极小浮点差异
+        binder.set_calculation_cost(100.0000001)
+        assert binder._snapshot_display_mode is True
+        assert binder._loading_record is True
+        # 加载结束
+        binder._loading_record = False
+        # 加载结束后微小差异仍不退出（因为 _exit 只在 _loading_record=False 时触发）
+        binder.set_calculation_cost(200.0)
+        assert binder._snapshot_display_mode is False
+
+
+# ---------------------------------------------------------------------------
+# 修正 2+：SHEIN 核价编辑不退出快照、不重算利润
+# ---------------------------------------------------------------------------
+
+
+class TestSheinQuoteEditBehavior:
+    """验证 SHEIN 核价编辑行为。"""
+
+    def test_shein_edit_does_not_exit_snapshot(self, qapp, temp_context, monkeypatch):
+        """保存记录后改汇率规则再打开，仅修改核价，两个场景售价/利润/规则状态不变。"""
+        from profit_accounting_26.ui.pages import CalculationPage
+
+        page = CalculationPage(temp_context)
+        try:
+            b, rid = _fill_and_save_record(page, monkeypatch, na_price=30.0)
+            saved_na_price = b.txt_na_price_usd.value()
+            saved_act_price = b.txt_act_price_usd.value()
+            saved_na_profit = b.txt_na_profit_rmb.value()
+            saved_act_profit = b.txt_act_profit_rmb.value()
+            saved_na_status = b.lbl_na_status.text()
+            saved_act_status = b.lbl_act_status.text()
+
+            # 修改当前设置：汇率 + 新增规则
+            settings = temp_context.settings_service.load()
+            settings["exchange_rate_usd_to_rmb"] = 6.5
+            settings.setdefault("profit_rules", [])
+            settings["profit_rules"].append(asdict(_income_rule("new_r", "新规则", 100.0, 5.0)))
+            temp_context.settings_service.save(settings)
+
+            # 重新打开
+            page.load_record_payload(rid)
+            b2 = page.profit_binder
+            assert b2._snapshot_display_mode is True
+
+            # 仅修改 SHEIN 核价
+            b2.txt_shein_usd.setValue(28.0)
+
+            # 两个场景售价、利润、规则状态全部保持不变
+            assert b2.txt_na_price_usd.value() == pytest.approx(saved_na_price)
+            assert b2.txt_act_price_usd.value() == pytest.approx(saved_act_price)
+            assert b2.txt_na_profit_rmb.value() == pytest.approx(saved_na_profit, abs=0.02)
+            assert b2.txt_act_profit_rmb.value() == pytest.approx(saved_act_profit, abs=0.02)
+            assert b2.lbl_na_status.text() == saved_na_status
+            assert b2.lbl_act_status.text() == saved_act_status
+            # 仍在快照模式
+            assert b2._snapshot_display_mode is True
+            # SHEIN RMB 已按保存时汇率换算
+            assert b2.txt_shein_rmb.value() == pytest.approx(28.0 * RATE, abs=0.02)
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_shein_edit_does_not_change_driver(self, qapp, binder):
+        """修改 SHEIN 核价不改变当前 driver。"""
+        binder.set_calculation_cost(100.0)
+        binder._profit_driver = DRIVER_NO_ACTIVITY_PRICE
+        binder.txt_na_price_usd.setValue(30.0)
+        binder._snapshot_display_mode = True
+        binder._snapshot_loaded = True
+        driver_before = binder._profit_driver
+        binder.txt_shein_usd.setValue(25.0)
+        assert binder._profit_driver == driver_before
+        assert binder._snapshot_display_mode is True
+
+
+# ---------------------------------------------------------------------------
+# 修正 3+：旧记录保存逻辑
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyRecordSaveLogic:
+    """验证旧记录保存逻辑。"""
+
+    def _make_legacy_record(self, temp_context):
+        legacy_record = {
+            "product_name": "旧记录",
+            "layers": {
+                "calculated": {
+                    "sale_price_usd": 25.0,
+                    "exchange_rate": 7.0,
+                    "profit_rmb": 30.0,
+                    "calculation_cost_rmb": 145.0,
+                    "reserve_percent": 0,
+                    "profit_rate_percent": 20.0,
+                    "selected_profit_rule_id": "",
+                }
+            },
+            "shein_quote_usd": 22.0,
+        }
+        return temp_context.record_service.save(legacy_record, images=[])
+
+    def test_legacy_no_modify_save_keeps_empty_activity(self, qapp, temp_context, monkeypatch):
+        """打开旧记录后不做任何修改直接保存，活动场景仍为空。"""
+        from profit_accounting_26.ui.pages import CalculationPage
+
+        rid = self._make_legacy_record(temp_context)
+        page = CalculationPage(temp_context)
+        try:
+            page.load_record_payload(rid)
+            b = page.profit_binder
+            assert b._snapshot_legacy is True
+            assert b._legacy_exited is False
+            # 直接导出（模拟保存）
+            snap = b.export_profit_scenarios()
+            assert snap["legacy_compatible"] is True
+            act = snap.get("activity", {})
+            assert act.get("sale_price_usd", 0) == 0.0
+            assert act.get("profit_rmb", 0) == 0.0
+            assert act.get("profit_usd", 0) == 0.0
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_legacy_shein_only_save_keeps_empty_activity(self, qapp, temp_context, monkeypatch):
+        """打开旧记录后只修改 SHEIN 核价再保存，活动场景仍为空。"""
+        from profit_accounting_26.ui.pages import CalculationPage
+
+        rid = self._make_legacy_record(temp_context)
+        page = CalculationPage(temp_context)
+        try:
+            page.load_record_payload(rid)
+            b = page.profit_binder
+            # 只修改 SHEIN 核价
+            b.txt_shein_usd.setValue(20.0)
+            assert b._legacy_exited is False
+            snap = b.export_profit_scenarios()
+            assert snap["legacy_compatible"] is True
+            act = snap.get("activity", {})
+            assert act.get("sale_price_usd", 0) == 0.0
+            assert act.get("profit_rmb", 0) == 0.0
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_legacy_modify_reserve_exits_to_current(self, qapp, temp_context, monkeypatch):
+        """打开旧记录后修改活动预留，转为当前推算并生成双场景。"""
+        from profit_accounting_26.ui.pages import CalculationPage
+
+        rid = self._make_legacy_record(temp_context)
+        page = CalculationPage(temp_context)
+        try:
+            page.load_record_payload(rid)
+            b = page.profit_binder
+            # 修改活动预留
+            b.spin_reserve.setValue(10.0)
+            assert b._legacy_exited is True
+            assert b._snapshot_display_mode is False
+            snap = b.export_profit_scenarios()
+            assert snap["legacy_compatible"] is False
+            act = snap.get("activity", {})
+            assert act.get("sale_price_usd", 0) > 0.0
+            assert act.get("profit_rmb", 0) != 0.0
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_legacy_system_cost_change_exits_to_current(self, qapp, temp_context, monkeypatch):
+        """打开旧记录后修改系统成本，转为当前推算。"""
+        from profit_accounting_26.ui.pages import CalculationPage
+
+        rid = self._make_legacy_record(temp_context)
+        page = CalculationPage(temp_context)
+        try:
+            page.load_record_payload(rid)
+            b = page.profit_binder
+            b.set_calculation_cost(200.0)
+            assert b._legacy_exited is True
+            assert b._snapshot_display_mode is False
+            snap = b.export_profit_scenarios()
+            assert snap["legacy_compatible"] is False
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_legacy_save_reopen_status_consistent(self, qapp, temp_context, monkeypatch):
+        """旧记录退出 legacy 后保存重开，状态和标记一致。"""
+        from profit_accounting_26.ui.pages import CalculationPage
+        import PySide6.QtWidgets as qw
+
+        rid = self._make_legacy_record(temp_context)
+        page = CalculationPage(temp_context)
+        try:
+            page.load_record_payload(rid)
+            b = page.profit_binder
+            b.spin_reserve.setValue(10.0)
+            assert b._legacy_exited is True
+            # 填充必要数据后保存
+            page.product_cost.setValue(35.0)
+            page.domestic_shipping.setValue(5.0)
+            page.normal_fields["length"].setValue(25.0)
+            page.normal_fields["width"].setValue(18.0)
+            page.normal_fields["height"].setValue(6.0)
+            page.normal_fields["weight"].setValue(320.0)
+            page.recalculate()
+            monkeypatch.setattr(qw.QMessageBox, "information", lambda *a, **k: None)
+            page.save_record()
+            rid2 = page.record_id
+
+            # 重新打开
+            page.load_record_payload(rid2)
+            b2 = page.profit_binder
+            assert b2._snapshot_legacy is False
+            assert b2._legacy_exited is False
+            assert b2._snapshot_display_mode is True
+            snap = b2.export_profit_scenarios()
+            assert snap["legacy_compatible"] is False
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+
+# ---------------------------------------------------------------------------
+# 修正 4+：快照状态提示
+# ---------------------------------------------------------------------------
+
+
+class TestSnapshotStatusLabel:
+    """验证快照状态提示。"""
+
+    def test_status_history_snapshot(self, qapp, binder):
+        """历史快照状态文案正确。"""
+        binder.set_calculation_cost(100.0)
+        binder.txt_na_price_usd.setValue(30.0)
+        binder._snapshot_display_mode = True
+        binder._snapshot_loaded = True
+        binder._snapshot_legacy = False
+        binder._legacy_exited = False
+        binder._update_snapshot_status_label()
+        assert binder._current_snapshot_status() == "历史快照"
+        tip = binder.lbl_conclusion.toolTip()
+        assert "历史快照" in tip
+
+    def test_status_legacy(self, qapp, binder):
+        """旧记录兼容数据状态文案正确。"""
+        binder._snapshot_display_mode = True
+        binder._snapshot_loaded = True
+        binder._snapshot_legacy = True
+        binder._legacy_exited = False
+        binder._update_snapshot_status_label()
+        assert binder._current_snapshot_status() == "旧记录兼容数据"
+        tip = binder.lbl_conclusion.toolTip()
+        assert "旧记录兼容数据" in tip
+
+    def test_status_current(self, qapp, binder):
+        """当前推算状态文案正确。"""
+        binder._snapshot_display_mode = False
+        binder._snapshot_loaded = False
+        binder._snapshot_legacy = False
+        binder._legacy_exited = False
+        binder._update_snapshot_status_label()
+        assert binder._current_snapshot_status() == "当前推算（非历史快照）"
+
+    def test_status_transitions_on_exit(self, qapp, binder):
+        """退出快照后状态从历史快照转为当前推算。"""
+        binder.set_calculation_cost(100.0)
+        binder.txt_na_price_usd.setValue(30.0)
+        binder._snapshot_display_mode = True
+        binder._snapshot_loaded = True
+        binder._snapshot_legacy = False
+        binder._legacy_exited = False
+        binder._update_snapshot_status_label()
+        assert "历史快照" in binder.lbl_conclusion.toolTip()
+        # 退出快照
+        binder._exit_snapshot_mode()
+        assert binder._current_snapshot_status() == "当前推算（非历史快照）"
+        assert "当前推算" in binder.lbl_conclusion.toolTip()
