@@ -67,3 +67,6 @@ token_*.json
 logs/
 !docs/.gitkeep
 !tests/.gitkeep
+
+# 用户下载的原始 .ui 文件存放目录（非项目源码，实际 .ui 在 src/.../ui/forms/）
+/ui/

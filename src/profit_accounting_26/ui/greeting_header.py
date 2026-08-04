@@ -91,7 +91,9 @@ class GreetingHeaderController(QObject):
 
         shuffle_button.setText("↻")
         shuffle_button.setToolTip("换一句")
-        shuffle_button.setAutoRaise(True)
+        # setAutoRaise 仅存在于 QToolButton；QPushButton 无此方法，安全跳过
+        if hasattr(shuffle_button, "setAutoRaise"):
+            shuffle_button.setAutoRaise(True)
         shuffle_button.setFixedSize(24, 24)
         shuffle_button.clicked.connect(self.show_random)
 
