@@ -151,11 +151,22 @@ class MainWindowBinder:
             "pageCalibration": self.calibration_page,
             "pageSettingsHost": self.settings_page,
         }
+        stack = self.window.findChild(QStackedWidget, "mainStack")
         for page_name, page_widget in page_map.items():
             if page_widget is None:
                 continue
             placeholder = self.window.findChild(QWidget, page_name)
             if placeholder is None:
+                continue
+            if page_name == "pageCalculation" and stack is not None:
+                # CalculationPage 自带从同一 .ui 加载的 pageCalculation 根节点；
+                # 直接替换 stack 中的占位页，避免同名控件重复嵌套。
+                index = stack.indexOf(placeholder)
+                stack.removeWidget(placeholder)
+                placeholder.setParent(None)
+                placeholder.deleteLater()
+                stack.insertWidget(index, page_widget)
+                page_widget.setVisible(True)  # setParent 会清除可见标记，必须显式恢复
                 continue
             self._replace_placeholder(placeholder, page_widget)
 
