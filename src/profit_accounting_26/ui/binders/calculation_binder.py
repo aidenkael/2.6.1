@@ -48,6 +48,9 @@ _VALID_DRIVERS = (
     DRIVER_ACTIVITY_PROFIT,
 )
 
+# 规则下拉特殊选项：全部启用规则同时参与计算
+ALL_ENABLED_RULES_ID = "__all_enabled__"
+
 # 颜色常量
 _COLOR_NORMAL = "#607089"
 _COLOR_TRIGGERED_INCOME = "#168A58"  # 绿色：增加收入
@@ -79,6 +82,20 @@ class CalculationBinder(QObject):
         self._no_activity_price_usd: float = 0.0
         self._rules: tuple[AdjustmentRule, ...] = ()
         self._selected_rule_id: str = ""
+        # 活动预留刚变化标志：刷新时保持无活动售价不变、不反推
+        self._reserve_just_changed = False
+        # 记录快照加载标志：load_from_record 后置位，供页面判断历史/当前推算
+        self._snapshot_loaded = False
+        self._snapshot_legacy = False
+        # 快照显示模式：记录加载后保持保存时界面结果，自动重算只做冻结换算
+        # 显示，不按当前设置静默重算双场景；用户主动编辑利润区字段后退出
+        # 该模式，之后的计算属当前推算。
+        self._snapshot_display_mode = False
+        # 打开记录时捕获的当前设置状态（汇率/规则/选中规则/成本），退出快照模式时恢复
+        self._live_exchange_rate: float | None = None
+        self._live_rules: tuple[AdjustmentRule, ...] | None = None
+        self._live_selected_rule_id: str | None = None
+        self._live_cost: float | None = None
 
         # 查找所有利润区控件
         self._find_widgets()
@@ -225,27 +242,46 @@ class CalculationBinder(QObject):
     # 外部数据注入
     # ------------------------------------------------------------------
 
-    def set_rules(self, rules: tuple[AdjustmentRule, ...]) -> None:
-        """设置利润规则列表（来自 SettingsService）。"""
-        self._rules = rules
-        self._refresh_rule_combo()
-        self._refresh_all()
-
     def set_exchange_rate(self, rate: float) -> None:
-        """汇率变化时更新冻结换算。"""
+        """汇率变化时更新冻结换算。
+
+        快照显示模式下只记录当前设置汇率，不改写保存时快照。
+        """
         if rate <= 0:
+            return
+        if self._snapshot_display_mode:
+            self._live_exchange_rate = rate
             return
         self._exchange_rate = rate
         self._refresh_all()
 
     def set_calculation_cost(self, cost_rmb: float) -> None:
-        """上方成本变化时覆盖利润区计算总成本。"""
+        """上方成本变化时覆盖利润区计算总成本。
+
+        快照显示模式下只记录当前系统成本，不改写保存时快照。
+        """
+        if self._snapshot_display_mode:
+            self._live_cost = max(0.0, float(cost_rmb))
+            return
         self._calculation_total_cost_rmb = max(0.0, float(cost_rmb))
         self._refresh_all()
 
     def set_selected_rule_id(self, rule_id: str) -> None:
         self._selected_rule_id = rule_id
         self._refresh_rule_combo()
+
+    def set_rules(self, rules) -> None:
+        """设置利润规则列表（来自 SettingsService）。
+
+        快照显示模式下只记录当前设置规则，不改写保存时规则快照。
+        """
+        rules = tuple(rules)
+        if self._snapshot_display_mode:
+            self._live_rules = rules
+            return
+        self._rules = rules
+        self._refresh_rule_combo()
+        self._refresh_all()
 
     @property
     def selected_rule_id(self) -> str:
@@ -259,6 +295,9 @@ class CalculationBinder(QObject):
 
     def reset(self) -> None:
         """清空并新建时复位利润区（driver 回到无活动售价，全部数值归零）。"""
+        self._snapshot_display_mode = False
+        self._snapshot_loaded = False
+        self._snapshot_legacy = False
         self._profit_driver = DRIVER_NO_ACTIVITY_PRICE
         self._calculation_total_cost_rmb = 0.0
         self._no_activity_price_usd = 0.0
@@ -302,6 +341,8 @@ class CalculationBinder(QObject):
                 if rule.archived or not rule.enabled:
                     continue
                 self.cmb_rule.addItem(rule.name, rule.id)
+            # “全部启用规则”：全部启用规则同时参与计算（多规则合计）
+            self.cmb_rule.addItem("全部启用规则", ALL_ENABLED_RULES_ID)
             # 选中当前规则
             idx = self.cmb_role_find(self._selected_rule_id)
             if idx >= 0:
@@ -316,15 +357,22 @@ class CalculationBinder(QObject):
         return -1
 
     def _active_rules(self) -> tuple[AdjustmentRule, ...]:
-        """返回当前选中的规则（单选）。"""
+        """返回当前参与计算的规则。
+
+        - 选择“全部启用规则”时返回全部启用且未归档规则（多规则合计）；
+        - 否则返回下拉选中的单一规则。
+        """
         if not self.cmb_rule:
             return ()
         rule_id = self.cmb_rule.currentData()
         if not rule_id:
             return ()
+        if rule_id == ALL_ENABLED_RULES_ID:
+            return tuple(r for r in self._rules if r.enabled and not r.archived)
         return tuple(r for r in self._rules if r.id == rule_id and r.enabled and not r.archived)
 
     def _on_rule_changed(self, _index: int) -> None:
+        self._exit_snapshot_mode()
         self._selected_rule_id = self.cmb_rule.currentData() if self.cmb_rule else ""
         self._refresh_all()
         self.selectedRuleChanged.emit(str(self._selected_rule_id))
@@ -339,13 +387,39 @@ class CalculationBinder(QObject):
         防递归：如果 _profit_updating 为 True，直接返回。
         """
         if self._profit_updating:
+            # 程序化更新期间不处理“活动预留刚变化”标记，丢弃以免泄漏到下一次用户刷新
+            self._reserve_just_changed = False
+            return
+        if self._snapshot_display_mode:
+            # 记录快照显示模式：保持保存时/恢复的界面结果，只更新冻结换算显示，
+            # 不按当前设置重算双场景（不静默重算、不伪造活动场景历史），
+            # 直到用户主动编辑利润区字段才退出该模式（属当前推算）。
+            self._profit_updating = True
+            try:
+                self._do_display_only_refresh()
+            finally:
+                self._profit_updating = False
+                self._reserve_just_changed = False
+            self.profitChanged.emit()
             return
         self._profit_updating = True
         try:
             self._do_refresh()
         finally:
             self._profit_updating = False
+            self._reserve_just_changed = False
         self.profitChanged.emit()
+
+    def _do_display_only_refresh(self) -> None:
+        """旧记录显示模式：只刷新成本与 SHEIN 核价冻结换算，不重算双场景。"""
+        cost = self._calculation_total_cost_rmb
+        rate = self._exchange_rate
+        self._set_spin(self.txt_cost_rmb, cost)
+        self._set_spin(self.txt_cost_usd, cost / rate if rate > 0 and cost > 0 else 0.0)
+        shein_usd = self.txt_shein_usd.value() if self.txt_shein_usd else 0.0
+        self._shein_quote_usd = shein_usd
+        self._set_spin(self.txt_shein_rmb, shein_usd * rate if rate > 0 else 0.0)
+        self._update_shein_comparison_from_values()
 
     def _do_refresh(self) -> None:
         driver = self._profit_driver
@@ -355,8 +429,13 @@ class CalculationBinder(QObject):
         reserve = self._reserve_percent
         na_price = self._no_activity_price_usd
 
-        # 从 UI 读取当前 driver 的目标值
-        if driver == DRIVER_PROFIT_RATE and self.spin_profit_rate:
+        # 从 UI 读取当前 driver 的目标值。
+        # 例外：活动预留刚变化时，无条件保持修改前的无活动售价 USD 不变，
+        # 跳过所有按 driver 反推售价的分支（不保持原利润率/原活动利润），
+        # 只重算活动后售价/活动后利润/利润率/两规则状态。
+        if self._reserve_just_changed:
+            na_price = max(0.0, na_price)
+        elif driver == DRIVER_PROFIT_RATE and self.spin_profit_rate:
             target_rate = self.spin_profit_rate.value() / 100.0
             if cost > 0:
                 target_act_profit = cost * target_rate
@@ -441,8 +520,9 @@ class CalculationBinder(QObject):
         self._set_spin(self.txt_cost_rmb, cost)
         self._set_spin(self.txt_cost_usd, cost / rate if rate > 0 and cost > 0 else 0.0)
 
-        # 利润率（只在非 profit_rate driver 时更新，避免覆盖用户输入）
-        if driver != DRIVER_PROFIT_RATE and self.spin_profit_rate:
+        # 利润率（只在非 profit_rate driver 时更新，避免覆盖用户输入；
+        # 例外：活动预留刚变化时，即使 driver 是 profit_rate 也必须重算利润率显示）
+        if (driver != DRIVER_PROFIT_RATE or self._reserve_just_changed) and self.spin_profit_rate:
             rate_pct = (profit_rate * 100.0) if profit_rate is not None else 0.0
             self._set_spin(self.spin_profit_rate, rate_pct)
 
@@ -553,58 +633,123 @@ class CalculationBinder(QObject):
             if self.txt_shein_usd:
                 self.txt_shein_usd.setStyleSheet("border: 2px solid #D32F2F;")
 
+    def _update_shein_comparison_from_values(self) -> None:
+        """旧记录加载路径：用内部保存的无活动售价做核价比较，不触发重算。"""
+
+        class _Snap:
+            sale_price_usd = self._no_activity_price_usd
+
+        self._update_shein_comparison(_Snap())
+
     # ------------------------------------------------------------------
     # 用户编辑处理（driver 切换）
     # ------------------------------------------------------------------
 
     def _on_shein_quote_changed(self, _value: float) -> None:
         """SHEIN 核价 USD 变化：不改变 driver，只刷新核价换算和比较。"""
+        self._exit_snapshot_mode()
         self._refresh_all()
 
     def _on_calc_cost_changed(self, _value: float) -> None:
         """计算总成本 RMB 变化：用户手动修改成本。"""
+        self._exit_snapshot_mode()
+        # 用户手动成本优先于快照期间捕获的系统成本
         if self.txt_cost_rmb:
             self._calculation_total_cost_rmb = self.txt_cost_rmb.value()
         self._refresh_all()
 
     def _on_profit_rate_changed(self, _value: float) -> None:
+        self._exit_snapshot_mode()
         self._profit_driver = DRIVER_PROFIT_RATE
         self._refresh_all()
 
     def _on_na_price_changed(self, _value: float) -> None:
+        self._exit_snapshot_mode()
         self._profit_driver = DRIVER_NO_ACTIVITY_PRICE
         if self.txt_na_price_usd:
             self._no_activity_price_usd = self.txt_na_price_usd.value()
         self._refresh_all()
 
     def _on_na_profit_changed(self, _value: float) -> None:
+        self._exit_snapshot_mode()
         self._profit_driver = DRIVER_NO_ACTIVITY_PROFIT
         self._refresh_all()
 
     def _on_reserve_changed(self, _value: float) -> None:
-        """活动预留变化：无活动售价保持不变，活动后售价/利润/利润率重算。"""
+        """活动预留变化：无活动售价保持不变，活动后售价/利润/利润率重算。
+
+        无论当前 driver 是什么（profit_rate / no_activity_price /
+        no_activity_profit / activity_profit），都不得为保持原利润率或原活动
+        利润而反推改写无活动售价 USD；只重算活动后售价、活动后利润、利润率
+        与两规则状态。driver 保持当前状态，不切换。
+        """
         if self.spin_reserve:
             self._reserve_percent = self.spin_reserve.value()
-        # driver 保持当前状态，不切换
+        self._exit_snapshot_mode()
+        self._reserve_just_changed = True
         self._refresh_all()
 
     def _on_act_profit_changed(self, _value: float) -> None:
+        self._exit_snapshot_mode()
         self._profit_driver = DRIVER_ACTIVITY_PROFIT
         self._refresh_all()
+
+    def _exit_snapshot_mode(self) -> None:
+        """用户主动编辑利润区字段：退出快照显示模式，之后属当前推算。
+
+        恢复快照期间捕获的当前设置（汇率/规则/成本），使后续重算使用
+        当前设置，而不是继续使用保存时的历史快照值。
+        """
+        if not self._snapshot_display_mode:
+            return
+        self._snapshot_display_mode = False
+        if self._live_exchange_rate is not None:
+            self._exchange_rate = self._live_exchange_rate
+        if self._live_rules is not None:
+            self._rules = self._live_rules
+            self._refresh_rule_combo()
+        if self._live_selected_rule_id is not None:
+            self._selected_rule_id = self._live_selected_rule_id
+            self._refresh_rule_combo()
+        if self._live_cost is not None:
+            self._calculation_total_cost_rmb = self._live_cost
+        self._live_exchange_rate = None
+        self._live_rules = None
+        self._live_selected_rule_id = None
+        self._live_cost = None
+
+    def capture_current_settings(self, *, exchange_rate: float, rules, selected_rule_id: str = "") -> None:
+        """打开记录前捕获当前设置状态（汇率/启用规则/选中规则），供退出快照模式时恢复。"""
+        self._live_exchange_rate = float(exchange_rate) if exchange_rate > 0 else None
+        self._live_rules = tuple(rules)
+        self._live_selected_rule_id = str(selected_rule_id or "")
+        self._live_cost = None
 
     # ------------------------------------------------------------------
     # 数据导出（供记录保存使用）
     # ------------------------------------------------------------------
 
     def export_profit_scenarios(self) -> dict[str, Any]:
-        """导出当前利润区状态为 profit_scenarios 字段。"""
-        from profit_accounting_26.application.profit_scenario_codec import build_profit_scenarios
+        """导出当前利润区状态为 profit_scenarios 字段。
+
+        除双场景数值外，还写入保存时快照字段：
+        - ``exchange_rate``：保存时汇率；
+        - ``applied_rule_ids``：实际应用的规则 ID 集合；
+        - ``applied_rules``：完整应用规则快照（含未命中规则）；
+        - ``selected_rule_id``：当前规则下拉选择；
+        - ``legacy_compatible``：新记录恒为 False。
+        """
+        from profit_accounting_26.application.profit_scenario_codec import (
+            build_profit_scenarios,
+            rules_to_snapshot,
+        )
 
         cost = self._calculation_total_cost_rmb
         rate = self._exchange_rate
         reserve = self._reserve_percent
         na_price = self._no_activity_price_usd
         shein = self._shein_quote_usd
+        active_rules = self._active_rules()
 
         if na_price > 0 and rate > 0:
             result = calculate_dual_profit(
@@ -612,7 +757,7 @@ class CalculationBinder(QObject):
                 reserve_percent=reserve,
                 total_cost_rmb=cost,
                 exchange_rate=rate,
-                rules=self._active_rules(),
+                rules=active_rules,
             )
             na = result.no_activity
             act = result.activity
@@ -638,6 +783,11 @@ class CalculationBinder(QObject):
             activity_profit_usd=act.profit_usd if act else 0.0,
             activity_profit_rate_on_cost=profit_rate,
             activity_rule_status=self._export_rule_status(act, "activity"),
+            exchange_rate=rate,
+            applied_rule_ids=[rule.id for rule in active_rules],
+            applied_rules=rules_to_snapshot(self._rules),
+            selected_rule_id=self._selected_rule_id,
+            legacy_compatible=False,
         )
 
     @staticmethod
@@ -667,12 +817,24 @@ class CalculationBinder(QObject):
     # ------------------------------------------------------------------
 
     def load_from_record(self, record: dict[str, Any]) -> None:
-        """从记录加载利润区数据，支持旧记录兼容。"""
-        from profit_accounting_26.application.profit_scenario_codec import extract_profit_scenarios, is_legacy_record
+        """从记录加载利润区数据，支持旧记录兼容。
+
+        新记录：使用保存时汇率与完整规则快照，界面结果与保存时完全一致，
+        不按当前设置静默重新计算。
+        旧记录：只恢复无活动历史字段，活动场景保持为空，不伪造活动历史。
+        """
+        from profit_accounting_26.application.profit_scenario_codec import (
+            extract_profit_scenarios,
+            is_legacy_record,
+            rules_from_snapshot,
+        )
 
         scenarios = extract_profit_scenarios(record)
         if scenarios is None:
             # 无利润数据：清空
+            self._snapshot_loaded = False
+            self._snapshot_legacy = False
+            self._snapshot_display_mode = False
             self._no_activity_price_usd = 0.0
             self._reserve_percent = 0.0
             self._calculation_total_cost_rmb = 0.0
@@ -681,6 +843,9 @@ class CalculationBinder(QObject):
             self._refresh_all()
             return
 
+        self._snapshot_loaded = True
+        self._snapshot_legacy = is_legacy_record(scenarios)
+
         self._calculation_total_cost_rmb = float(scenarios.get("calculation_total_cost_rmb", 0) or 0)
         self._shein_quote_usd = float(scenarios.get("shein_quote_usd", 0) or 0)
         self._reserve_percent = float(scenarios.get("reserve_percent", 0) or 0)
@@ -688,12 +853,38 @@ class CalculationBinder(QObject):
         if driver in _VALID_DRIVERS:
             self._profit_driver = driver
 
+        # 保存时汇率与完整规则快照：重开用它们，不按当前设置静默重算
+        saved_rate = float(scenarios.get("exchange_rate", 0) or 0)
+        if saved_rate > 0:
+            self._exchange_rate = saved_rate
+        snapshot_rules = rules_from_snapshot(scenarios.get("applied_rules"))
+        if snapshot_rules:
+            self._rules = snapshot_rules
+            saved_rule_id = str(scenarios.get("selected_rule_id") or "")
+            self._selected_rule_id = saved_rule_id
+            self._refresh_rule_combo()
+
         na = scenarios.get("no_activity", {})
         act = scenarios.get("activity", {})
         self._no_activity_price_usd = float(na.get("sale_price_usd", 0) or 0)
 
-        # 更新 UI
+        legacy = self._snapshot_legacy
+
+        # 先置位快照显示模式，再程序化填充控件。
+        # 填充期间必须阻断 valueChanged，否则 handler 会触发 _exit_snapshot_mode
+        # 把刚置位的快照模式清除，导致加载后仍按当前设置静默重算。
+        self._snapshot_display_mode = True
         self._profit_updating = True
+        editable_widgets = [
+            self.txt_shein_usd,
+            self.txt_cost_rmb,
+            self.spin_profit_rate,
+            self.txt_na_price_usd,
+            self.txt_na_profit_rmb,
+            self.spin_reserve,
+            self.txt_act_profit_rmb,
+        ]
+        blockers = [QSignalBlocker(w) for w in editable_widgets if w]
         try:
             if self.txt_shein_usd:
                 self.txt_shein_usd.setValue(self._shein_quote_usd)
@@ -705,12 +896,88 @@ class CalculationBinder(QObject):
                 self.txt_cost_rmb.setValue(self._calculation_total_cost_rmb)
             if self.txt_na_profit_rmb:
                 self.txt_na_profit_rmb.setValue(float(na.get("profit_rmb", 0) or 0))
-            if self.txt_act_profit_rmb:
-                self.txt_act_profit_rmb.setValue(float(act.get("profit_rmb", 0) or 0))
-            if self.spin_profit_rate:
-                rate_val = act.get("profit_rate_on_cost")
-                self.spin_profit_rate.setValue(float(rate_val) * 100 if rate_val is not None else 0.0)
+            # 冻结换算字段同样恢复为保存时数值（界面结果与保存时完全一致）
+            if self.txt_na_price_rmb:
+                self.txt_na_price_rmb.setValue(float(na.get("sale_price_rmb", 0) or 0))
+            if self.txt_na_profit_usd:
+                self.txt_na_profit_usd.setValue(float(na.get("profit_usd", 0) or 0))
+            if legacy:
+                # 旧记录：活动场景保持为空，不伪造活动历史
+                for widget in (
+                    self.txt_act_price_usd,
+                    self.txt_act_price_rmb,
+                    self.txt_act_profit_rmb,
+                    self.txt_act_profit_usd,
+                ):
+                    if widget:
+                        widget.setValue(0.0)
+                if self.spin_profit_rate:
+                    self.spin_profit_rate.setValue(0.0)
+                if self.lbl_act_status:
+                    self.lbl_act_status.setText("")
+                    self.lbl_act_status.setToolTip("")
+            else:
+                if self.txt_act_price_usd:
+                    self.txt_act_price_usd.setValue(float(act.get("sale_price_usd", 0) or 0))
+                if self.txt_act_price_rmb:
+                    self.txt_act_price_rmb.setValue(float(act.get("sale_price_rmb", 0) or 0))
+                if self.txt_act_profit_rmb:
+                    self.txt_act_profit_rmb.setValue(float(act.get("profit_rmb", 0) or 0))
+                if self.txt_act_profit_usd:
+                    self.txt_act_profit_usd.setValue(float(act.get("profit_usd", 0) or 0))
+                if self.spin_profit_rate:
+                    rate_val = act.get("profit_rate_on_cost")
+                    self.spin_profit_rate.setValue(float(rate_val) * 100 if rate_val is not None else 0.0)
         finally:
+            del blockers
             self._profit_updating = False
 
-        self._refresh_all()
+        if legacy:
+            # 旧记录：只恢复无活动历史字段，活动场景保持为空，
+            # 不伪造活动场景历史；后续自动刷新仅做冻结换算显示。
+            if self.lbl_na_status:
+                self.lbl_na_status.setText("无规则")
+                self.lbl_na_status.setStyleSheet(f"color:{_COLOR_NORMAL};")
+                self.lbl_na_status.setToolTip("")
+        else:
+            # 新记录：从保存快照恢复两规则状态标签（与保存时一致）
+            self._restore_rule_status_labels(na.get("rule_status"), self.lbl_na_status)
+            self._restore_rule_status_labels(act.get("rule_status"), self.lbl_act_status)
+
+        self._snapshot_display_mode = True
+        self._do_display_only_refresh()
+        self.profitChanged.emit()
+
+    def _restore_rule_status_labels(self, rule_status: dict[str, Any] | None, label: QLabel | None) -> None:
+        """从保存的规则状态快照恢复状态标签文本与 tooltip。"""
+        if label is None:
+            return
+        status = rule_status or {}
+        matched = int(status.get("matched_count", 0) or 0)
+        if matched <= 0:
+            label.setText("无规则" if not status else "未触发")
+            label.setStyleSheet(f"color:{_COLOR_NORMAL};")
+            label.setToolTip("")
+            return
+        income = float(status.get("total_income_rmb", 0) or 0)
+        cost_adj = float(status.get("total_cost_rmb", 0) or 0)
+        net = income - cost_adj
+        if net >= 0:
+            label.setText(f"已触发 +¥{net:.2f}")
+            label.setStyleSheet(f"color:{_COLOR_TRIGGERED_INCOME};font-weight:600;")
+        else:
+            label.setText(f"已调整 ¥{net:.2f}")
+            label.setStyleSheet(f"color:{_COLOR_TRIGGERED_COST};font-weight:600;")
+        lines = []
+        for rule in status.get("rules", []):
+            if not isinstance(rule, dict):
+                continue
+            direction_text = "增加收入" if rule.get("direction") == "income" else "增加成本"
+            amount_rmb = float(rule.get("amount_rmb", 0) or 0)
+            lines.append(
+                f"规则：{rule.get('name', '')}\n"
+                f"方向：{direction_text}\n"
+                f"原币金额：{rule.get('amount_original', 0)} {rule.get('currency', '')}\n"
+                f"换算 RMB：¥{amount_rmb:.2f}"
+            )
+        label.setToolTip("\n\n".join(lines))

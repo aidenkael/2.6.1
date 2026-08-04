@@ -636,7 +636,7 @@ class CalculationPage(QWidget):
                 parts.append(label)
         for enabled, label in (
             (observation.has_hard_bottom, "硬底"), (observation.has_hard_backboard, "硬背板"),
-            (observation.has_frame, "框架"), (observation.has_hard_insert, "硬内衬"),
+            (observation.has_frame, "框架"), (observation.has_rigid_insert, "硬内衬"),
             (observation.requires_shape_retention, "保形"), (observation.retail_box_visible, "原盒"),
         ):
             if enabled is True:
@@ -1545,6 +1545,18 @@ class CalculationPage(QWidget):
                     pass
         self._updating = False
         self.rebuild_quote_cards()
+        # 打开记录前捕获当前设置（汇率/启用规则/选中规则），
+        # 供退出快照显示模式时恢复为当前推算依据。
+        # 直接读 settings_service 最新值，避免页面缓存过期。
+        current_settings = self.context.settings_service.load()
+        self.profit_binder.capture_current_settings(
+            exchange_rate=float(current_settings.get("exchange_rate_usd_to_rmb", 7.2)),
+            rules=tuple(
+                rule for rule in self.context.settings_service.rules_from_settings(current_settings)
+                if rule.enabled and not rule.archived
+            ),
+            selected_rule_id=str(current_settings.get("selected_profit_rule_id") or ""),
+        )
         self.profit_binder.set_selected_rule_id(self.selected_profit_rule_id)
         self.profit_binder.load_from_record(record)
         self._select_package(selected_package, user=False)

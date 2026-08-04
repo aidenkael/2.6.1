@@ -15,7 +15,69 @@ from __future__ import annotations
 
 from typing import Any
 
+from profit_accounting_26.domain.rules import (
+    AdjustmentDirection,
+    AdjustmentRule,
+    AdjustmentType,
+    CompareOp,
+)
+
 SCHEMA_VERSION = "2.6.1-dual-profit-v1"
+
+
+def rules_to_snapshot(rules) -> list[dict[str, Any]]:
+    """完整应用规则快照序列化（含未命中规则，重开时据此还原）。"""
+    snapshot = []
+    for rule in rules:
+        snapshot.append(
+            {
+                "id": rule.id,
+                "name": rule.name,
+                "condition_field": rule.condition_field,
+                "compare_op": str(rule.compare_op),
+                "condition_value": rule.condition_value,
+                "direction": str(rule.direction),
+                "adjustment_type": str(rule.adjustment_type),
+                "adjustment_value": rule.adjustment_value,
+                "currency": rule.currency,
+                "percent_base": rule.percent_base,
+                "enabled": rule.enabled,
+                "archived": rule.archived,
+                "description": rule.description,
+            }
+        )
+    return snapshot
+
+
+def rules_from_snapshot(snapshot) -> tuple[AdjustmentRule, ...]:
+    """从完整规则快照还原规则对象；无效条目安全跳过。"""
+    rules: list[AdjustmentRule] = []
+    if not isinstance(snapshot, list):
+        return ()
+    for raw in snapshot:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            rule = AdjustmentRule(
+                id=str(raw.get("id") or ""),
+                name=str(raw.get("name") or ""),
+                condition_field=str(raw.get("condition_field") or ""),
+                compare_op=CompareOp(str(raw.get("compare_op") or "lt")),
+                condition_value=float(raw.get("condition_value") or 0.0),
+                direction=AdjustmentDirection(str(raw.get("direction") or "income")),
+                adjustment_type=AdjustmentType(str(raw.get("adjustment_type") or "fixed")),
+                adjustment_value=float(raw.get("adjustment_value") or 0.0),
+                currency=str(raw.get("currency") or "RMB"),
+                percent_base=raw.get("percent_base"),
+                enabled=bool(raw.get("enabled", True)),
+                archived=bool(raw.get("archived", False)),
+                description=str(raw.get("description") or ""),
+            )
+            rule.validate()
+        except (ValueError, TypeError, KeyError):
+            continue
+        rules.append(rule)
+    return tuple(rules)
 
 
 def build_profit_scenarios(
@@ -35,11 +97,23 @@ def build_profit_scenarios(
     activity_profit_usd: float,
     activity_profit_rate_on_cost: float | None,
     activity_rule_status: dict[str, Any] | None,
+    exchange_rate: float = 0.0,
+    applied_rule_ids: list[str] | None = None,
+    applied_rules: list[dict[str, Any]] | None = None,
+    selected_rule_id: str = "",
+    legacy_compatible: bool = False,
 ) -> dict[str, Any]:
     """构建 ``profit_scenarios`` 字段。
 
     ``driver`` 取值：``profit_rate`` / ``no_activity_price`` /
     ``no_activity_profit`` / ``activity_profit``。
+
+    记录快照附加字段（验收修正轮新增）：
+    - ``exchange_rate``：保存时汇率，重开时用它而非当前设置；
+    - ``applied_rule_ids``：实际应用的规则 ID 集合；
+    - ``applied_rules``：完整应用规则快照（含未命中规则，重开时据此还原）；
+    - ``selected_rule_id``：保存时规则下拉选择（可为 ``__all_enabled__``）；
+    - ``legacy_compatible``：是否为旧记录兼容映射（新记录恒为 False）。
     """
     return {
         "schema_version": SCHEMA_VERSION,
@@ -47,6 +121,11 @@ def build_profit_scenarios(
         "calculation_total_cost_rmb": calculation_total_cost_rmb,
         "shein_quote_usd": shein_quote_usd,
         "reserve_percent": reserve_percent,
+        "exchange_rate": exchange_rate,
+        "applied_rule_ids": list(applied_rule_ids or []),
+        "applied_rules": list(applied_rules or []),
+        "selected_rule_id": selected_rule_id,
+        "legacy_compatible": legacy_compatible,
         "no_activity": {
             "sale_price_usd": no_activity_price_usd,
             "sale_price_rmb": no_activity_price_rmb,
@@ -77,6 +156,15 @@ def extract_profit_scenarios(record: dict[str, Any]) -> dict[str, Any] | None:
         # 确保新记录的 schema_version 标记存在
         result = dict(scenarios)
         result.setdefault("schema_version", SCHEMA_VERSION)
+        # 验收修正轮新增字段：旧版本保存的记录缺失时安全回填
+        layers = record.get("layers", {})
+        calculated = layers.get("calculated", {}) if isinstance(layers, dict) else {}
+        if not result.get("exchange_rate"):
+            result["exchange_rate"] = float(calculated.get("exchange_rate", 7.2) or 7.2)
+        result.setdefault("applied_rule_ids", [])
+        result.setdefault("applied_rules", [])
+        result.setdefault("selected_rule_id", "")
+        result.setdefault("legacy_compatible", bool(result.get("_legacy_compatible", False)))
         return result
 
     # 旧记录兼容：从 layers.calculated 读取单一售价/利润
@@ -106,6 +194,11 @@ def extract_profit_scenarios(record: dict[str, Any]) -> dict[str, Any] | None:
         "calculation_total_cost_rmb": float(calculated.get("calculation_cost_rmb", 0) or 0),
         "shein_quote_usd": old_shein,
         "reserve_percent": old_reserve,
+        "exchange_rate": exchange_rate,
+        "applied_rule_ids": [],
+        "applied_rules": [],
+        "selected_rule_id": str(calculated.get("selected_profit_rule_id") or ""),
+        "legacy_compatible": True,
         "no_activity": {
             "sale_price_usd": old_sale_price,
             "sale_price_rmb": no_activity_price_rmb,
@@ -129,4 +222,4 @@ def is_legacy_record(scenarios: dict[str, Any] | None) -> bool:
     """判断是否为旧记录兼容映射（非真实双场景历史）。"""
     if scenarios is None:
         return True
-    return bool(scenarios.get("_legacy_compatible"))
+    return bool(scenarios.get("legacy_compatible") or scenarios.get("_legacy_compatible"))

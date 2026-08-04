@@ -50,7 +50,6 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.context = context
         self.settings = context.settings_service.load()
-        self.setWindowTitle("微智能利润管理软件 2.6")
         self.setMinimumSize(1280, 800)
         self.setStyleSheet(APP_STYLE)
 
@@ -62,7 +61,8 @@ class MainWindow(QMainWindow):
         loaded_central = loaded_ui.centralWidget()
         loaded_central.setParent(self)
         self.setCentralWidget(loaded_central)
-        # 保留显式设置的窗口标题（不覆盖为 .ui 的标题，保持与现有测试一致）
+        # 窗口标题使用 .ui 中的 windowTitle（运行时为 2.6.1），不硬编码旧版本
+        self.setWindowTitle(loaded_ui.windowTitle())
         self.resize(loaded_ui.size())
         if loaded_ui.minimumSize().width() > 0:
             self.setMinimumSize(loaded_ui.minimumSize())
