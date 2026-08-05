@@ -248,12 +248,15 @@ def test_jump_aware_reverse_solve():
 # 场景 11: 防递归
 # ---------------------------------------------------------------------------
 
-def test_anti_recursion():
-    """CalculationBinder 防递归标志在刷新后正确复位。"""
+def test_anti_recursion(qapp):
+    """CalculationBinder 防递归标志在刷新后正确复位。
+
+    使用全局统一 qapp fixture（tests/conftest.py）；禁止在测试函数内
+    创建临时 QApplication——整个测试会话只允许一个 QApplication。
+    """
     import os
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
-    from PySide6.QtWidgets import QApplication, QWidget
-    app = QApplication.instance() or QApplication([])
+    from PySide6.QtWidgets import QWidget
     from profit_accounting_26.ui.ui_loader import load_main_window
     from profit_accounting_26.ui.binders.calculation_binder import CalculationBinder
 

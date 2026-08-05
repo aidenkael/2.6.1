@@ -8,7 +8,9 @@ pytest.importorskip("PySide6")
 from profit_accounting_26.ui.app import NAV_ITEMS, build_window
 
 
-def test_six_navigation_items_are_visible_in_fixed_order():
+def test_six_navigation_items_are_visible_in_fixed_order(qapp):
+    # qapp 来自 tests/conftest.py 会话级 fixture；build_window() 复用
+    # QApplication.instance()，整个测试会话只存在一个 QApplication。
     assert NAV_ITEMS == [
         "以图搜图",
         "新商品测算",

@@ -15,8 +15,6 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication
-
 from profit_accounting_26.domain.rules import (
     AdjustmentDirection,
     AdjustmentRule,
@@ -25,10 +23,9 @@ from profit_accounting_26.domain.rules import (
 )
 from profit_accounting_26.engines.profit import calculate_profit_scenario
 
-
-@pytest.fixture(scope="module")
-def qapp():
-    return QApplication.instance() or QApplication([])
+# qapp 由 tests/conftest.py 的会话级 fixture 提供（整个测试会话共用一个
+# QApplication）。禁止在本文件内创建 QApplication——反复创建/销毁
+# QApplication 会在 Linux offscreen 平台下导致段错误。
 
 
 class MockSettingsService:
@@ -80,6 +77,8 @@ def binder(qapp):
     ui = load_main_window()
     page = ui.findChild(QWidget, "pageCalculation")
     b = CalculationBinder(page, MockContext())
+    # 防止 .ui 根节点被 GC，导致子控件 C++ 对象销毁
+    b._ui_root_ref = ui
     yield b
 
 

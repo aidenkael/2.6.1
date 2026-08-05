@@ -19,7 +19,6 @@ pytest.importorskip("PySide6")
 from dataclasses import asdict
 
 from PySide6.QtWidgets import (
-    QApplication,
     QComboBox,
     QDoubleSpinBox,
     QLabel,
@@ -33,10 +32,9 @@ from PySide6.QtWidgets import (
 
 from profit_accounting_26.application import ApiProfile, AppContext, SettingsService
 
-
-@pytest.fixture(scope="module")
-def qapp():
-    return QApplication.instance() or QApplication([])
+# qapp 由 tests/conftest.py 的会话级 fixture 提供（整个测试会话共用一个
+# QApplication）。禁止在本文件内创建 QApplication——反复创建/销毁
+# QApplication 会在 Linux offscreen 平台下导致段错误。
 
 
 @pytest.fixture

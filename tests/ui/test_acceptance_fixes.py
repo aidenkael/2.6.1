@@ -20,8 +20,6 @@ pytest.importorskip("PySide6")
 
 from dataclasses import asdict
 
-from PySide6.QtWidgets import QApplication
-
 from profit_accounting_26.application import AppContext, SettingsService
 from profit_accounting_26.domain.rules import (
     AdjustmentDirection,
@@ -39,10 +37,9 @@ from profit_accounting_26.ui.binders.calculation_binder import (
 
 RATE = 7.2
 
-
-@pytest.fixture(scope="module")
-def qapp():
-    return QApplication.instance() or QApplication([])
+# qapp 由 tests/conftest.py 的会话级 fixture 提供（整个测试会话共用一个
+# QApplication）。禁止在本文件内创建 QApplication——反复创建/销毁
+# QApplication 会在 Linux offscreen 平台下导致段错误。
 
 
 class MockSettingsService:

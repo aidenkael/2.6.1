@@ -151,12 +151,11 @@ class TestRuntimeLoading:
     """运行时加载 .ui 并验证冻结状态。"""
 
     @pytest.fixture(scope="class")
-    def qt_app(self):
+    def qt_app(self, qapp):
+        # 使用 tests/conftest.py 的会话级 qapp；不在测试内创建临时 QApplication
         import os
         os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
-        from PySide6.QtWidgets import QApplication
-        app = QApplication.instance() or QApplication([])
-        return app
+        return qapp
 
     @pytest.fixture(scope="class")
     def main_window_ui(self, qt_app):
@@ -185,11 +184,11 @@ class TestFrozenStates:
     """冻结状态验证（契约 §7）。"""
 
     @pytest.fixture  # function-scoped: 每个 test 独立加载，避免 C++ 对象被回收
-    def binder(self):
+    def binder(self, qapp):
+        # 使用 tests/conftest.py 的会话级 qapp；不在测试内创建临时 QApplication
         import os
         os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
-        from PySide6.QtWidgets import QApplication, QWidget
-        app = QApplication.instance() or QApplication([])
+        from PySide6.QtWidgets import QWidget
         from profit_accounting_26.ui.ui_loader import load_main_window
         from profit_accounting_26.ui.binders.calculation_binder import CalculationBinder
         # 保留 ui 引用防止垃圾回收
