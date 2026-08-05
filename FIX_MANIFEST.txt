@@ -5,10 +5,13 @@
 最终分支: ui/integrate-2.6.1-contract
 当前 HEAD（本清单生成时，定稿基准）: 50e2afd110f01a5211c762f4fe2f7cc091201b28
 真实提交总数（git rev-list --count 9436b970..HEAD 实测）: 13（定稿基准）
-分支最新 HEAD（含第六轮 CI 修复）: d8facad24bbec11ed51e6e6ca0f39d71dcd6b796（基线起共 19 个提交）
-远程分支 SHA: d8facad24bbec11ed51e6e6ca0f39d71dcd6b796（git ls-remote 核对与本地 HEAD 一致）
-GitHub Actions CI: 绿色 — run 31014461745（head d8facad24），209 passed, 1 warning in 13.92s，敏感扫描 0 findings，无段错误
-PR: #3 https://github.com/aidenkael/2.6.1/pull/3（base: main，head 最新 d8facad24bbec11ed51e6e6ca0f39d71dcd6b796，open，未合并）
+CI 绿色代码修复 HEAD（第六轮关键验证基准）: d8facad24bbec11ed51e6e6ca0f39d71dcd6b796
+分支最新 HEAD（推送后实际 head）: 本回填提交自身 SHA，以 git log 实测为准；
+  此前最近的测试/代码 head 为 d8facad（CI 绿色），其后均为纯文档回填提交
+真实提交总数: 基线 → 定稿基准 50e2afd 共 13 个；基线 → 本提交共 21 个
+远程分支 SHA: = 推送后分支实际 head，git ls-remote 与本地 HEAD 一致
+GitHub Actions CI: 绿色 — run 31014461745（head d8facad24），209 passed, 1 warning in 13.92s，敏感扫描 0 findings，无段错误；其后纯文档提交不改代码，不改变该结论
+PR: #3 https://github.com/aidenkael/2.6.1/pull/3（base: main，open，未合并；head 随纯文档回填提交推进）
 是否合并 main: 否（本地 main 与 origin/main 均保持 9436b970 未动）
 
 说明：
