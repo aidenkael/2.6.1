@@ -3,13 +3,17 @@
 仓库: https://github.com/aidenkael/2.6.1.git
 起始 main SHA: 9436b970ed4b9d6335ff243f3ae363dc36692c15
 最终分支: ui/integrate-2.6.1-contract
-当前 HEAD（本清单生成时）: 50e2afd110f01a5211c762f4fe2f7cc091201b28
+当前 HEAD（本清单生成时，定稿基准）: 50e2afd110f01a5211c762f4fe2f7cc091201b28
 真实提交总数（git rev-list --count 9436b970..HEAD 实测）: 13
+远程分支 SHA: a36c42fe9cea15aa2053cad59cf2cd77a69b93df（已推送，含定稿后的 2 个纯文档提交）
+PR: #3 https://github.com/aidenkael/2.6.1/pull/3（base: main，open，未合并）
+是否合并 main: 否（本地 main 与 origin/main 均保持 9436b970 未动）
 
 说明：
 - 本清单此前只写入桌面修正包 zip，现补入仓库根目录，内容与
   docs/REPORT_冻结UI接入与利润双场景_2026-08-04.md 完全一致。
-- c84fe4d 为第四轮功能代码提交；50e2afd 为第四轮报告更新提交。
+- c84fe4d 为第四轮功能代码提交；50e2afd 为第四轮报告更新提交（即定稿基准 HEAD）。
+- 定稿后另有 2 个纯文档提交：9ac1849（报告/本清单定稿）、a36c42f（工作日志，即远程分支 SHA）。
 
 冻结 UI 文件 SHA256（未修改，复核通过）:
   src/profit_accounting_26/ui/forms/main_window.ui
