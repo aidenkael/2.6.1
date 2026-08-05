@@ -1,0 +1,58 @@
+冻结 UI 接入与利润双场景 — 最终交付清单
+====================================================================
+仓库: https://github.com/aidenkael/2.6.1.git
+起始 main SHA: 9436b970ed4b9d6335ff243f3ae363dc36692c15
+最终分支: ui/integrate-2.6.1-contract
+当前 HEAD（本清单生成时）: 50e2afd110f01a5211c762f4fe2f7cc091201b28
+真实提交总数（git rev-list --count 9436b970..HEAD 实测）: 13
+
+说明：
+- 本清单此前只写入桌面修正包 zip，现补入仓库根目录，内容与
+  docs/REPORT_冻结UI接入与利润双场景_2026-08-04.md 完全一致。
+- c84fe4d 为第四轮功能代码提交；50e2afd 为第四轮报告更新提交。
+
+冻结 UI 文件 SHA256（未修改，复核通过）:
+  src/profit_accounting_26/ui/forms/main_window.ui
+    16dd9e85109285ccaaebdd63278015182002932c4841993410d4890d0506b41b
+  src/profit_accounting_26/ui/forms/settings_page.ui
+    a354a2f4a1e9fd63f6a7552d3951e42973703f159334415b75ac7489fb9cf8dd
+
+提交链（基线 9436b970 之后共 13 个，按时间从旧到新）:
+  1.  944c15fa158f9b1b640ba755b53c0e74f842b631 refactor: bind frozen ui and add dual profit scenarios (in progress)（代码）
+  2.  4fe97987773dd622e9594e8b3516c25eb6a727e2 refactor: rebind calculation/settings pages to frozen ui（代码）
+  3.  34dc5a9c4158abd97bf227d4cc736d3bd6e57dd8 fix: acceptance revision（代码）
+  4.  ab547ea11dc220f1aed024d85b76ba4c8a41bc86 docs: record acceptance revision commit in report（报告）
+  5.  706da402d1868617781b36f0bbe5169e9c5b1fb1 fix: blocking issues（代码）
+  6.  ad3079e4bfc608dd07d7e870f6cdefd5b161ed6a docs: report blocking fix round（报告）
+  7.  bdf781d859b52438e0c66b4efed85d473ae5b194 docs: list blocking-fix docs commit in report（报告）
+  8.  d06e3df379aa204ba643de5a4dc803e4b297ba3b fix: round-2 blocking issues（代码）
+  9.  61ad3ca163ec4da78fa9a16e81af88acecd4014d docs: report round-2（报告）
+  10. f174eed5e5c18d72da0b9a3b83c751232e33638d fix: round-3 blocking issues（代码）
+  11. 1326e54f32aec4e86234b402710dc0bbb1e5903f docs: report round-3（报告）
+  12. c84fe4d90ad9585e8eb4c8870c2ea78725ad37e5 fix: round-4 compatibility（代码，第四轮功能代码提交）
+  13. 50e2afd110f01a5211c762f4fe2f7cc091201b28 docs: report round-4（报告，第四轮报告更新提交）
+
+分类统计:
+  功能代码提交: 7 个（944c15f, 4fe9798, 34dc5a9, 706da40, d06e3df, f174eed, c84fe4d）
+  报告/文档提交: 6 个（ab547ea, ad3079e, bdf781d, 61ad3ca, 1326e54, 50e2afd）
+  合计 13 个。
+
+测试与扫描（最后代码提交 c84fe4d 的结果，本轮仅文档校正未改代码，不再重跑）:
+  QT_QPA_PLATFORM=offscreen python -m pytest -q  → 209 passed, 0 failed
+  python tools/sensitive_scan.py                 → 0 findings
+
+关键行为摘要（详见报告）:
+  - PySide6 QUiLoader 运行时加载冻结 .ui，不生成 Python 布局副本
+  - 利润双场景（无活动/活动）+ driver 状态机 + _profit_updating/QSignalBlocker 防递归
+  - 记录快照显示模式（_snapshot_display_mode），重开不静默按当前设置重算
+  - _loading_record 加载保护（try/finally），不依赖浮点成本相等判断
+  - _legacy_exited：旧记录仅 7 类明确操作才退出兼容状态
+  - _legacy_snapshot：旧记录原始利润快照 export 原样输出
+  - 快照成本为 0 保留（字段存在即原样使用）
+  - 旧记录成本多级兼容：system_cost_rmb > adopted.calculation_cost_rmb > calculated.calculation_cost_rmb > 0
+  - tooltip [利润区状态] 写入前去重
+
+已知问题:
+  - 设置页 1920×1080 下 settingsScrollArea 垂直滚动范围约 76px 溢出，
+    但所有功能按钮（利润规则新增/保存/启用/归档/删除）均在视口内可见，不需修改冻结 .ui
+  - 测试与验收全程未调用真实 API
