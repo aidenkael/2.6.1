@@ -987,3 +987,173 @@ class TestTooltipNoAccumulation:
         tip = binder.lbl_conclusion.toolTip()
         assert "旧记录兼容数据" not in tip
         assert "当前推算" in tip
+
+
+# ===========================================================================
+# 第四轮定点修正：快照成本为 0 保存 / 旧记录成本字段兼容
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# 修正 1：快照成本为 0 的保存
+# ---------------------------------------------------------------------------
+
+
+class TestSnapshotZeroCost:
+    """验证历史快照成本为 0 时不被替换为当前系统成本。"""
+
+    def test_zero_snapshot_cost_preserved(self, qapp, temp_context, monkeypatch):
+        """历史快照成本为 0、当前系统成本非 0，保存后仍必须为 0。"""
+        from profit_accounting_26.ui.pages import CalculationPage
+
+        page = CalculationPage(temp_context)
+        try:
+            b, rid = _fill_and_save_record(page, monkeypatch, na_price=30.0, cost=35.0)
+            # 手动构造一个快照成本为 0 的记录
+            record = page.context.record_service.load(rid)
+            record["profit_scenarios"]["calculation_total_cost_rmb"] = 0.0
+            record["profit_scenarios"]["no_activity"]["profit_rmb"] = 0.0
+            record["profit_scenarios"]["no_activity"]["profit_usd"] = 0.0
+            # 删除 id 以创建新记录
+            record.pop("id", None)
+            rid_zero = page.context.record_service.save(record, images=[])
+
+            # 当前系统成本非 0
+            assert page.current_system_cost is not None
+            assert page.current_system_cost > 0
+
+            # 打开零成本快照记录
+            page.load_record_payload(rid_zero)
+            b2 = page.profit_binder
+            assert b2.is_in_snapshot_mode() is True
+
+            # 直接 build_record_payload（模拟保存）
+            payload = page.build_record_payload()
+            ps = payload["profit_scenarios"]
+            calc = payload["layers"]["calculated"]
+            adopted = payload["layers"]["adopted"]
+
+            # 三处成本必须一致且为 0
+            assert ps["calculation_total_cost_rmb"] == 0.0
+            assert calc["system_cost_rmb"] == 0.0
+            assert adopted["calculation_cost_rmb"] == 0.0
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+
+# ---------------------------------------------------------------------------
+# 修正 2：旧记录成本字段兼容读取
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyCostFieldCompatibility:
+    """验证旧记录成本字段多级兼容读取。"""
+
+    def test_cost_from_calculated_system_cost_rmb(self, qapp, temp_context):
+        """只有 layers.calculated.system_cost_rmb 时成本正确。"""
+        legacy_record = {
+            "product_name": "旧记录-系统成本",
+            "layers": {
+                "calculated": {
+                    "sale_price_usd": 25.0,
+                    "exchange_rate": 7.0,
+                    "profit_rmb": 30.0,
+                    "system_cost_rmb": 180.0,
+                }
+            },
+            "shein_quote_usd": 22.0,
+        }
+        rid = temp_context.record_service.save(legacy_record, images=[])
+        from profit_accounting_26.ui.pages import CalculationPage
+        page = CalculationPage(temp_context)
+        try:
+            page.load_record_payload(rid)
+            b = page.profit_binder
+            assert b._calculation_total_cost_rmb == pytest.approx(180.0)
+            # 不修改直接保存
+            snap = b.export_profit_scenarios()
+            assert snap["calculation_total_cost_rmb"] == pytest.approx(180.0)
+            # 活动场景仍为空
+            act = snap.get("activity", {})
+            assert act["sale_price_usd"] == 0.0
+            assert act["profit_rmb"] == 0.0
+            # 旧利润原值不被重算
+            na = snap.get("no_activity", {})
+            assert na["profit_rmb"] == pytest.approx(30.0)
+            assert snap["legacy_compatible"] is True
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_cost_from_adopted_calculation_cost_rmb(self, qapp, temp_context):
+        """只有 layers.adopted.calculation_cost_rmb 时成本正确。"""
+        legacy_record = {
+            "product_name": "旧记录-adopted成本",
+            "layers": {
+                "calculated": {
+                    "sale_price_usd": 25.0,
+                    "exchange_rate": 7.0,
+                    "profit_rmb": 50.0,
+                },
+                "adopted": {
+                    "calculation_cost_rmb": 150.0,
+                },
+            },
+            "shein_quote_usd": 22.0,
+        }
+        rid = temp_context.record_service.save(legacy_record, images=[])
+        from profit_accounting_26.ui.pages import CalculationPage
+        page = CalculationPage(temp_context)
+        try:
+            page.load_record_payload(rid)
+            b = page.profit_binder
+            assert b._calculation_total_cost_rmb == pytest.approx(150.0)
+            snap = b.export_profit_scenarios()
+            assert snap["calculation_total_cost_rmb"] == pytest.approx(150.0)
+            act = snap.get("activity", {})
+            assert act["sale_price_usd"] == 0.0
+            assert act["profit_rmb"] == 0.0
+            na = snap.get("no_activity", {})
+            assert na["profit_rmb"] == pytest.approx(50.0)
+            assert snap["legacy_compatible"] is True
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_cost_priority_system_over_adopted(self, qapp, temp_context):
+        """两者同时存在时优先采用 layers.calculated.system_cost_rmb。"""
+        legacy_record = {
+            "product_name": "旧记录-优先级",
+            "layers": {
+                "calculated": {
+                    "sale_price_usd": 25.0,
+                    "exchange_rate": 7.0,
+                    "profit_rmb": 30.0,
+                    "system_cost_rmb": 200.0,
+                },
+                "adopted": {
+                    "calculation_cost_rmb": 150.0,
+                },
+            },
+            "shein_quote_usd": 22.0,
+        }
+        rid = temp_context.record_service.save(legacy_record, images=[])
+        from profit_accounting_26.ui.pages import CalculationPage
+        page = CalculationPage(temp_context)
+        try:
+            page.load_record_payload(rid)
+            b = page.profit_binder
+            # 优先 system_cost_rmb=200，不是 adopted 的 150
+            assert b._calculation_total_cost_rmb == pytest.approx(200.0)
+            snap = b.export_profit_scenarios()
+            assert snap["calculation_total_cost_rmb"] == pytest.approx(200.0)
+            act = snap.get("activity", {})
+            assert act["sale_price_usd"] == 0.0
+            assert act["profit_rmb"] == 0.0
+            na = snap.get("no_activity", {})
+            assert na["profit_rmb"] == pytest.approx(30.0)
+            assert snap["legacy_compatible"] is True
+        finally:
+            page.deleteLater()
+            qapp.processEvents()

@@ -1343,14 +1343,18 @@ class CalculationPage(QWidget):
         no_activity = profit_scenarios.get("no_activity", {})
         activity = profit_scenarios.get("activity", {})
         # 快照/旧记录兼容状态下，layers 中的汇率/成本/利润必须来自
-        # profit_scenarios 快照，不得混入当前 settings 或 current_system_cost
+        # profit_scenarios 快照，不得混入当前 settings 或 current_system_cost。
+        # 成本只要字段存在就原样使用（包括合法的 0），只有字段不存在/None 才回退。
         if self.profit_binder.is_in_snapshot_mode():
-            exchange_rate = float(profit_scenarios.get("exchange_rate", 0) or 0) or float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
-            snapshot_cost = float(profit_scenarios.get("calculation_total_cost_rmb", 0) or 0)
-            system_cost_for_record = snapshot_cost if snapshot_cost > 0 else self.current_system_cost
+            ps_rate = profit_scenarios.get("exchange_rate")
+            exchange_rate = float(ps_rate) if ps_rate is not None else float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
+            ps_cost = profit_scenarios.get("calculation_total_cost_rmb")
+            system_cost_for_record = float(ps_cost) if ps_cost is not None else (self.current_system_cost or 0.0)
+            adopted_cost = float(ps_cost) if ps_cost is not None else self.profit_binder._calculation_total_cost_rmb
         else:
             exchange_rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
             system_cost_for_record = self.current_system_cost
+            adopted_cost = self.profit_binder._calculation_total_cost_rmb
         return {
             "product_name": self.product_summary.text().strip(),
             "product_link": self.product_link.text().strip() if self.product_link else "",
@@ -1371,7 +1375,7 @@ class CalculationPage(QWidget):
                     "conservative": conservative.to_dict(),
                     "selected_packaging": scenario.label,
                     "selected_forwarder_id": self.selected_forwarder_id,
-                    "calculation_cost_rmb": float(profit_scenarios.get("calculation_total_cost_rmb", 0) or 0) if self.profit_binder.is_in_snapshot_mode() else self.profit_binder._calculation_total_cost_rmb,
+                    "calculation_cost_rmb": adopted_cost,
                     "packaging_estimate_stale": self.packaging_stale,
                 },
                 "calculated": {

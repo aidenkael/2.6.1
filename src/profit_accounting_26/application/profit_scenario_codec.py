@@ -170,6 +170,7 @@ def extract_profit_scenarios(record: dict[str, Any]) -> dict[str, Any] | None:
     # 旧记录兼容：从 layers.calculated 读取单一售价/利润
     layers = record.get("layers", {})
     calculated = layers.get("calculated", {}) if isinstance(layers, dict) else {}
+    adopted = layers.get("adopted", {}) if isinstance(layers, dict) else {}
     old_sale_price = calculated.get("sale_price_usd")
     if old_sale_price is None:
         # 也检查顶层旧字段
@@ -183,6 +184,18 @@ def extract_profit_scenarios(record: dict[str, Any]) -> dict[str, Any] | None:
     old_rate = calculated.get("profit_rate_percent")
     old_shein = float(record.get("shein_quote_usd", 0) or 0)
 
+    # 旧记录成本兼容读取优先级：
+    # 1. layers.calculated.system_cost_rmb（若已有）
+    # 2. layers.adopted.calculation_cost_rmb
+    # 3. layers.calculated.calculation_cost_rmb（异常旧数据兼容）
+    # 4. 0
+    old_cost = calculated.get("system_cost_rmb")
+    if old_cost is None:
+        old_cost = adopted.get("calculation_cost_rmb")
+    if old_cost is None:
+        old_cost = calculated.get("calculation_cost_rmb")
+    old_cost = float(old_cost) if old_cost is not None else 0.0
+
     old_sale_price = float(old_sale_price)
     no_activity_price_rmb = old_sale_price * exchange_rate
     no_activity_profit_usd = old_profit / exchange_rate if exchange_rate > 0 else 0.0
@@ -191,7 +204,7 @@ def extract_profit_scenarios(record: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "schema_version": SCHEMA_VERSION,
         "driver": "no_activity_price",  # 旧记录默认以无活动售价为基准
-        "calculation_total_cost_rmb": float(calculated.get("calculation_cost_rmb", 0) or 0),
+        "calculation_total_cost_rmb": old_cost,
         "shein_quote_usd": old_shein,
         "reserve_percent": old_reserve,
         "exchange_rate": exchange_rate,
