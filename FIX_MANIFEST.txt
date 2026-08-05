@@ -4,17 +4,23 @@
 起始 main SHA: 9436b970ed4b9d6335ff243f3ae363dc36692c15
 最终分支: ui/integrate-2.6.1-contract
 当前 HEAD（本清单生成时，定稿基准）: 50e2afd110f01a5211c762f4fe2f7cc091201b28
-真实提交总数（git rev-list --count 9436b970..HEAD 实测）: 13
-远程分支 SHA: 7fd087ee1ab5318be313985f6fbfb4a83a340805（已推送，含定稿后的纯文档提交）
-PR: #3 https://github.com/aidenkael/2.6.1/pull/3（base: main，open，未合并）
+真实提交总数（git rev-list --count 9436b970..HEAD 实测）: 13（定稿基准）
+分支最新 HEAD（含第六轮 CI 修复）: d8facad24bbec11ed51e6e6ca0f39d71dcd6b796（基线起共 19 个提交）
+远程分支 SHA: d8facad24bbec11ed51e6e6ca0f39d71dcd6b796（git ls-remote 核对与本地 HEAD 一致）
+GitHub Actions CI: 绿色 — run 31014461745（head d8facad24），209 passed, 1 warning in 13.92s，敏感扫描 0 findings，无段错误
+PR: #3 https://github.com/aidenkael/2.6.1/pull/3（base: main，head 最新 d8facad24bbec11ed51e6e6ca0f39d71dcd6b796，open，未合并）
 是否合并 main: 否（本地 main 与 origin/main 均保持 9436b970 未动）
 
 说明：
 - 本清单此前只写入桌面修正包 zip，现补入仓库根目录，内容与
   docs/REPORT_冻结UI接入与利润双场景_2026-08-04.md 完全一致。
 - c84fe4d 为第四轮功能代码提交；50e2afd 为第四轮报告更新提交（即定稿基准 HEAD）。
-- 定稿后另有 3 个纯文档提交：9ac1849（报告/本清单定稿）、a36c42f（工作日志）、
-  7fd087e（推送后回填远程 SHA 与 PR 编号）。
+- 定稿后另有 6 个提交：9ac1849（报告/本清单定稿）、a36c42f（工作日志）、
+  7fd087e（推送后回填远程 SHA 与 PR 编号）、875e41c（推送回填提交链记录）、
+  b277cd5（工作日志）——以上 5 个为纯文档提交；d8facad 为第六轮仅测试代码的
+  CI segfault 修复提交（新增 tests/conftest.py 会话级 qapp fixture + autouse
+  DeferredDelete 刷新，移除 6 个测试文件中的局部 QApplication 创建；不修改
+  任何业务代码、冻结 .ui、功能行为）。
 
 冻结 UI 文件 SHA256（未修改，复核通过）:
   src/profit_accounting_26/ui/forms/main_window.ui
@@ -42,9 +48,12 @@ PR: #3 https://github.com/aidenkael/2.6.1/pull/3（base: main，open，未合并
   报告/文档提交: 6 个（ab547ea, ad3079e, bdf781d, 61ad3ca, 1326e54, 50e2afd）
   合计 13 个。
 
-测试与扫描（最后代码提交 c84fe4d 的结果，本轮仅文档校正未改代码，不再重跑）:
+测试与扫描:
   QT_QPA_PLATFORM=offscreen python -m pytest -q  → 209 passed, 0 failed
   python tools/sensitive_scan.py                 → 0 findings
+  以上结果已在 GitHub Actions Ubuntu（Python 3.11 + offscreen）复核通过：
+  run 31014461745（head d8facad24）全部步骤 success，209 passed / 0 findings，
+  Linux 段错误（退出码 139）已消除。
 
 关键行为摘要（详见报告）:
   - PySide6 QUiLoader 运行时加载冻结 .ui，不生成 Python 布局副本
