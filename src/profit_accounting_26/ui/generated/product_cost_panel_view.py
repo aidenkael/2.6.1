@@ -18,7 +18,6 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
 from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QDoubleSpinBox, QFrame,
     QGridLayout, QHBoxLayout, QLabel, QSizePolicy,
     QWidget)
-
 class Ui_ProductCostPanel(object):
     def setupUi(self, productCostPanel):
         if not productCostPanel.objectName():

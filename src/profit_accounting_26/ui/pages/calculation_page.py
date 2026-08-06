@@ -271,7 +271,7 @@ class CalculationPage(QWidget):
         self._scroll_area = self._root.findChild(QWidget, "calculationScrollArea")
         self._scroll_contents = self._root.findChild(QWidget, "calculationScrollContents")
 
-        # 加载并挂载 5 个独立面板
+        # 加载并挂载 5 个独立面板（cost+packaging 共享 HBox 父布局）
         panel_specs = [
             ("image_ai", "imageAIPanelHost"),
             ("product_cost", "productCostPanelHost"),

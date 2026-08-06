@@ -17,15 +17,13 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QDoubleSpinBox, QFrame,
     QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QRadioButton, QSizePolicy, QTextEdit, QVBoxLayout,
-    QWidget)
-
+    QRadioButton, QSizePolicy, QTextEdit, QWidget)
 class Ui_PackagingPanel(object):
     def setupUi(self, packagingPanel):
         if not packagingPanel.objectName():
             packagingPanel.setObjectName(u"packagingPanel")
-        self.packagingPanelLayout = QVBoxLayout(packagingPanel)
-        self.packagingPanelLayout.setSpacing(0)
+        self.packagingPanelLayout = QHBoxLayout(packagingPanel)
+        self.packagingPanelLayout.setSpacing(8)
         self.packagingPanelLayout.setObjectName(u"packagingPanelLayout")
         self.packagingPanelLayout.setContentsMargins(0, 0, 0, 0)
         self.normalPackageCard = QFrame(packagingPanel)
@@ -424,6 +422,8 @@ class Ui_PackagingPanel(object):
 
         self.packagingPanelLayout.addWidget(self.conservativePackageCard)
 
+        self.packagingPanelLayout.setStretch(0, 27)
+        self.packagingPanelLayout.setStretch(1, 16)
 
         self.retranslateUi(packagingPanel)
 

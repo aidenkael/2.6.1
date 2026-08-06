@@ -2,7 +2,7 @@
 <ui version="4.0">
  <class>ImageAIPanel</class>
 <widget class="QWidget" name="imageAIPanel">
- <layout class="QVBoxLayout" name="imageAIPanelLayout" stretch="0,0">
+ <layout class="QVBoxLayout" name="imageAIPanelLayout">
   <property name="spacing"><number>0</number></property>
   <property name="leftMargin"><number>0</number></property>
   <property name="topMargin"><number>0</number></property>
@@ -965,6 +965,5 @@
   </item>
  </layout>
 </widget>
- <resources/>
- <connections/>
+
 </ui>

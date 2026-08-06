@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QDoubleSpinBox, Q
     QGridLayout, QHBoxLayout, QLabel, QPushButton,
     QRadioButton, QSizePolicy, QSpacerItem, QVBoxLayout,
     QWidget)
-
 class Ui_LogisticsPanel(object):
     def setupUi(self, logisticsPanel):
         if not logisticsPanel.objectName():
