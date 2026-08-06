@@ -23,7 +23,7 @@ class Ui_PackagingPanel(object):
         if not packagingPanel.objectName():
             packagingPanel.setObjectName(u"packagingPanel")
         self.packagingPanelLayout = QHBoxLayout(packagingPanel)
-        self.packagingPanelLayout.setSpacing(8)
+        self.packagingPanelLayout.setSpacing(0)
         self.packagingPanelLayout.setObjectName(u"packagingPanelLayout")
         self.packagingPanelLayout.setContentsMargins(0, 0, 0, 0)
         self.normalPackageCard = QFrame(packagingPanel)
@@ -422,8 +422,6 @@ class Ui_PackagingPanel(object):
 
         self.packagingPanelLayout.addWidget(self.conservativePackageCard)
 
-        self.packagingPanelLayout.setStretch(0, 27)
-        self.packagingPanelLayout.setStretch(1, 16)
 
         self.retranslateUi(packagingPanel)
 

@@ -2,8 +2,8 @@
 <ui version="4.0">
  <class>PackagingPanel</class>
 <widget class="QWidget" name="packagingPanel">
- <layout class="QHBoxLayout" name="packagingPanelLayout" stretch="27,16">
-  <property name="spacing"><number>8</number></property>
+ <layout class="QHBoxLayout" name="packagingPanelLayout">
+  <property name="spacing"><number>0</number></property>
   <property name="leftMargin"><number>0</number></property>
   <property name="topMargin"><number>0</number></property>
   <property name="rightMargin"><number>0</number></property>

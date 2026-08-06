@@ -387,12 +387,13 @@ class TestRealSplitVerification:
         assert isinstance(scroll, QScrollArea), f"应该是 QScrollArea，实际是 {type(scroll).__name__}"
 
     def test_panels_not_overlapping_in_layout(self, calc_page):
-        """内容布局包含正确的 Host 数量。"""
-        content = calc_page._scroll_contents
-        content_layout = content.layout()
-        assert content_layout is not None
-        # 5 个 host item + bottom
-        assert content_layout.count() >= 5, f"内容布局应至少 5 项，实际 {content_layout.count()}"
+        """5 个面板 root 都已挂载。"""
+        roots = calc_page._panel_roots
+        assert len(roots) == 5, f"应有 5 个面板，实际 {len(roots)}"
+        for name in ['image_ai','product_cost','packaging','logistics','profit']:
+            panel = roots.get(name)
+            assert panel is not None, f"缺少面板 {name}"
+            assert panel.parentWidget() is not None, f"{name} panel 未挂载"
 
     def test_panels_not_compressed_below_size_hint(self, calc_page):
         """每个面板的 sizeHint 大于 0（不是空面板）。"""
