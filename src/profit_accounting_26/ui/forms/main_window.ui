@@ -49,7 +49,7 @@ QLabel[dropZone="true"] { background: #fbfdff; border: 1px dashed #c9d7e8; borde
 QFrame#normalPackageCard[selected="true"], QFrame#forwarderCardShenzhen[selected="true"] { border: 2px solid #4d8dff; background: #f7fbff; }
 QLabel#lblSubsidyStatus { background: #ecfff4; color: #1b9a5a; border: 1px solid #bdebd1; border-radius: 6px; padding: 6px 10px; font-weight: 600; }
 QLabel#lblSaveStatus { background: #fff4df; color: #e27c12; border-radius: 6px; padding: 5px 10px; }
-QLabel[logoBadge="true"], QLabel[userBadge="true"] { background: #176ff2; color: white; border-radius: 8px; font-weight: 700; }
+QLabel[logoBadge="true"] { background: #176ff2; color: white; border-radius: 8px; font-weight: 700; }
 QLabel[totalValue="true"] { color: #176ff2; font-weight: 700; }
 QLabel[statusOk="true"] { color: #1b9a5a; font-weight: 600; }
 QLabel[conclusion="true"] { background: #eef5ff; border: 1px solid #cfe0f7; border-radius: 6px; padding: 7px; color: #33445d; }
@@ -556,33 +556,14 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
            <number>22</number>
           </property>
           <property name="topMargin">
-           <number>10</number>
+           <number>16</number>
           </property>
           <property name="rightMargin">
            <number>18</number>
           </property>
           <property name="bottomMargin">
-           <number>10</number>
+           <number>16</number>
           </property>
-          <item>
-           <widget class="QPushButton" name="btnRefreshGreeting">
-            <property name="minimumSize">
-             <size>
-              <width>34</width>
-              <height>34</height>
-             </size>
-            </property>
-            <property name="maximumSize">
-             <size>
-              <width>34</width>
-              <height>34</height>
-             </size>
-            </property>
-            <property name="text">
-             <string>↻</string>
-            </property>
-           </widget>
-          </item>
           <item>
            <layout class="QVBoxLayout" name="greetingLayout">
             <property name="spacing">
@@ -604,6 +585,9 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
              <widget class="QLabel" name="lblGreetingTitle">
               <property name="text">
                <string>Hi 用户，今天也要稳稳出单。</string>
+              </property>
+              <property name="textFormat">
+               <enum>Qt::RichText</enum>
               </property>
              </widget>
             </item>
@@ -643,27 +627,27 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
            </widget>
           </item>
           <item>
-           <widget class="QLabel" name="lblUserBadge">
+           <widget class="QPushButton" name="btnRefreshGreeting">
             <property name="minimumSize">
              <size>
-              <width>34</width>
-              <height>34</height>
+              <width>28</width>
+              <height>28</height>
              </size>
             </property>
             <property name="maximumSize">
              <size>
-              <width>34</width>
-              <height>34</height>
+              <width>28</width>
+              <height>28</height>
              </size>
             </property>
             <property name="text">
-             <string>用</string>
+             <string></string>
             </property>
-            <property name="alignment">
-             <set>Qt::AlignmentFlag::AlignCenter</set>
-            </property>
-            <property name="userBadge" stdset="0">
+            <property name="flat">
              <bool>true</bool>
+            </property>
+            <property name="cursor">
+             <cursorShape>PointingHandCursor</cursorShape>
             </property>
            </widget>
           </item>
@@ -4740,14 +4724,14 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                        <item row="0" column="2">
                         <widget class="QLabel" name="lblProfitRate">
                          <property name="text">
-                          <string>利润率（可编辑）</string>
+                          <string>利润率（活动后）</string>
                          </property>
                         </widget>
                        </item>
                        <item row="0" column="3">
                         <widget class="QLabel" name="lblNoActivityPrice">
                          <property name="text">
-                          <string>无活动售价</string>
+                          <string>SHEIN标价</string>
                          </property>
                         </widget>
                        </item>
@@ -4771,7 +4755,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          <item>
                           <widget class="QLabel" name="lblNoActivityProfit">
                            <property name="text">
-                            <string>无活动利润</string>
+                            <string>标价利润</string>
                            </property>
                           </widget>
                          </item>
@@ -5271,7 +5255,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                             </size>
                            </property>
                            <property name="toolTip">
-                            <string>按成本计算的目标利润率；编辑后反推活动后利润、活动后售价、无活动售价和无活动利润。</string>
+                            <string>按成本计算的目标利润率；编辑后反推活动后利润、活动后售价、SHEIN标价和标价利润。</string>
                            </property>
                            <property name="buttonSymbols">
                             <enum>QAbstractSpinBox::NoButtons</enum>
@@ -5469,7 +5453,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                             </size>
                            </property>
                            <property name="toolTip">
-                            <string>用户在 SHEIN 店铺填写的真实无活动售价；编辑后重算无活动利润、活动后售价、活动后利润和利润率。</string>
+                            <string>用户在 SHEIN 店铺填写的真实标价；编辑后重算标价利润、活动后售价、活动后利润和利润率。</string>
                            </property>
                            <property name="buttonSymbols">
                             <enum>QAbstractSpinBox::NoButtons</enum>
@@ -5568,7 +5552,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                             </size>
                            </property>
                            <property name="toolTip">
-                            <string>无活动场景人民币利润可编辑；编辑后反推无活动售价，并同步活动后场景与利润率。</string>
+                            <string>标价场景人民币利润可编辑；编辑后反推SHEIN标价，并同步活动后场景与利润率。</string>
                            </property>
                            <property name="readOnly">
                             <bool>false</bool>
@@ -6249,7 +6233,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                   <item>
                    <widget class="QLabel" name="lblProfitConclusion">
                     <property name="text">
-                     <string>SHEIN核价仅记录比较，不参与计算；计算总成本可在利润区覆写；利润率、无活动售价、无活动利润或活动后利润任一项编辑后同步其余结果；编辑活动后利润时保持活动预留不变，并分别更新两个售价、利润及补贴状态。</string>
+                     <string>SHEIN核价仅记录比较，不参与计算；计算总成本可在利润区覆写；利润率、SHEIN标价、标价利润或活动后利润任一项编辑后同步其余结果；编辑活动后利润时保持活动预留不变，并分别更新两个售价、利润及补贴状态。</string>
                     </property>
                     <property name="wordWrap">
                      <bool>true</bool>

@@ -83,7 +83,7 @@ class TestUIFileContract:
             "pageImportExport", "pageCalibration", "pageSettingsHost",
             "mainStack",
             # 问候
-            "btnRefreshGreeting", "lblGreetingTitle", "lblGreetingSubtitle", "lblUserBadge",
+            "btnRefreshGreeting", "lblGreetingTitle", "lblGreetingSubtitle",
             # 数据目录和汇率
             "lblDataDirectoryPath", "btnChangeDataDirectory",
             "spinExchangeRate", "btnRefreshExchangeRate", "lblExchangeRateUpdated",
@@ -134,8 +134,8 @@ class TestUIFileContract:
     def test_ui_sha256_matches_contract(self):
         """.ui SHA 与输入文件一致。"""
         expected = {
-            "main_window.ui": "16dd9e85109285ccaaebdd63278015182002932c4841993410d4890d0506b41b",
-            "settings_page.ui": "a354a2f4a1e9fd63f6a7552d3951e42973703f159334415b75ac7489fb9cf8dd",
+            "main_window.ui": "f2a234ca9a2ba57a45638b3a39c7c0e38914ca10ceb1bd3ab29f157a1c444aa2",
+            "settings_page.ui": "88a1422fa758e9eed835b2f422b9fcd070c2d69bb1eac025cbafb8aa0cb579ae",
         }
         for name, sha in expected.items():
             data = (FORMS_DIR / name).read_bytes()

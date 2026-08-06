@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
@@ -39,6 +40,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
+    QWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -95,6 +97,13 @@ class SettingsPage(QWidget):
         # 基础设置
         self.display_name = f(QLineEdit, "txtDisplayName")
         self.log_level = f(QComboBox, "cmbLogLevel")
+        if self.log_level:
+            self.log_level.setToolTip(
+                "DEBUG：最详细，仅开发排查时使用\n"
+                "INFO：记录正常运行信息，推荐日常使用\n"
+                "WARNING：只记录警告和错误\n"
+                "ERROR：只记录错误"
+            )
         self.log_retention_days = f(QDoubleSpinBox, "spinLogRetentionDays")
         self.log_directory = f(QLineEdit, "txtLogDirectory")
         self.btn_open_log_dir = f(QPushButton, "btnOpenLogDirectory")
@@ -137,11 +146,19 @@ class SettingsPage(QWidget):
         self.btn_delete_rule = f(QPushButton, "btnDeleteProfitRule")
 
     def _hide_preview_controls(self) -> None:
-        """契约 §13.2：隐藏 Designer 预览行与无真实业务的测试/删除按钮。"""
-        for name in ("btnTestApi1", "btnDeleteApi1"):
+        """契约 §13.2：隐藏 Designer 预览行与无真实业务的测试/删除按钮。
+        例外：btnDeleteApi1 改为可见删除按钮。"""
+        for name in ("btnTestApi1",):
             widget = self._root.findChild(QWidget, name)
             if widget:
                 widget.setVisible(False)
+        # btnDeleteApi1：改为可见并配置为删除按钮
+        self.btn_delete_api = self._root.findChild(QPushButton, "btnDeleteApi1")
+        if self.btn_delete_api:
+            self.btn_delete_api.setText("删除配置")
+            self.btn_delete_api.setVisible(True)
+            self.btn_delete_api.clicked.connect(self._delete_api_profile)
+            self.btn_delete_api.setEnabled(False)
         for suffix in ("2", "3"):
             for prefix in (
                 "txtApiConfigName", "cmbApiProvider", "txtApiEndpoint",
@@ -293,7 +310,8 @@ class SettingsPage(QWidget):
         public = self.context.api_profile_store.load_public()
         profiles = [item for item in public["profiles"] if isinstance(item, dict)]
         bindings = public["button_bindings"]
-        for combo in (self.api_profile_select, self.visual_binding, self.local_binding):
+        # 视觉识图 / 局部文字重估 下拉框保留"新建配置"
+        for combo in (self.visual_binding, self.local_binding):
             if combo is None:
                 continue
             combo.blockSignals(True)
@@ -302,19 +320,39 @@ class SettingsPage(QWidget):
             for item in profiles:
                 combo.addItem(str(item.get("display_name") or "未命名配置"), str(item.get("profile_id") or ""))
             combo.blockSignals(False)
+        # API profile 选择下拉框：只显示已有配置
+        if self.api_profile_select is not None:
+            self.api_profile_select.blockSignals(True)
+            self.api_profile_select.clear()
+            self.api_profile_select.addItem("选择已有配置", "")
+            for item in profiles:
+                self.api_profile_select.addItem(str(item.get("display_name") or "未命名配置"), str(item.get("profile_id") or ""))
+            self.api_profile_select.blockSignals(False)
         if self.visual_binding:
             self.visual_binding.setCurrentIndex(max(0, self.visual_binding.findData(bindings.get(VISUAL_AI))))
         if self.local_binding:
             self.local_binding.setCurrentIndex(max(0, self.local_binding.findData(bindings.get(LOCAL_REESTIMATE))))
 
     def _new_api_profile(self) -> None:
+        """新建配置：清空输入字段，进入新建模式。"""
         if self.api_profile_select:
             self.api_profile_select.setCurrentIndex(max(0, self.api_profile_select.findData("")))
+        # 清空输入字段
+        for field in (self.api_profile_name, self.vision_endpoint, self.vision_model, self.vision_key):
+            if field:
+                field.clear()
+        if self.api_provider:
+            self.api_provider.setCurrentText("自定义")
+        if self.btn_delete_api:
+            self.btn_delete_api.setEnabled(False)
 
     def _load_selected_api_profile(self, _index: int) -> None:
         if self.api_profile_select is None:
             return
         profile_id = str(self.api_profile_select.currentData() or "")
+        # 删除按钮状态：选中已保存配置时启用
+        if self.btn_delete_api:
+            self.btn_delete_api.setEnabled(bool(profile_id))
         if not profile_id:
             if self.api_profile_name:
                 self.api_profile_name.clear()
@@ -397,6 +435,45 @@ class SettingsPage(QWidget):
             self.api_profile_select.setCurrentIndex(max(0, self.api_profile_select.findData(profile.profile_id)))
         QMessageBox.information(self, "已保存", "API配置与私钥已保存到当前数据目录。")
 
+    def _delete_api_profile(self) -> None:
+        """删除当前选中的 API 配置，含二次确认与绑定清理。"""
+        if self.api_profile_select is None:
+            return
+        profile_id = str(self.api_profile_select.currentData() or "")
+        if not profile_id:
+            return
+        display_name = self.api_profile_select.currentText()
+        # 检查是否被视觉识图或局部文字重估使用
+        visual_id = str(self.visual_binding.currentData() or "") if self.visual_binding else ""
+        local_id = str(self.local_binding.currentData() or "") if self.local_binding else ""
+        in_use = []
+        if visual_id == profile_id:
+            in_use.append("视觉识图/整体识别")
+        if local_id == profile_id:
+            in_use.append("局部文字重估")
+        msg = f"确定永久删除配置「{display_name}」及其 API Key 吗？"
+        if in_use:
+            msg += f"\n\n该配置正在被以下功能使用：{', '.join(in_use)}\n删除后将清空对应绑定，需重新选择配置。"
+        answer = QMessageBox.question(
+            self, "删除配置", msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        # 删除配置和 key
+        stores = [self.context.api_profile_store]
+        pending_data_dir = ApplicationPaths.configured_data_dir()
+        if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
+            stores.append(ApiProfileStore(pending_data_dir))
+        for store in stores:
+            store.delete_profile(profile_id)
+            if in_use:
+                store.bind(VISUAL_AI, "")
+                store.bind(LOCAL_REESTIMATE, "")
+        self._refresh_api_profiles()
+        self._new_api_profile()
+
     # ------------------------------------------------------------------
     # 设置加载 / 保存
     # ------------------------------------------------------------------
@@ -471,11 +548,26 @@ class SettingsPage(QWidget):
         enabled_box.setEnabled(not is_archived)
         enabled_box.toggled.connect(lambda _checked: self._mark_dirty())
         self.forwarder_table.setCellWidget(row, 4, enabled_box)
-        operation = QPushButton("已归档" if data.get("archived", False) else "归档")
+
+        # 操作列：活动行=归档按钮，已归档行=恢复+永久删除
         identifier = str(data.get("id") or f"forwarder_{uuid4().hex}")
-        operation.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
-        operation.setEnabled(not bool(data.get("archived", False)))
-        self.forwarder_table.setCellWidget(row, 5, operation)
+        op_layout = QHBoxLayout()
+        op_layout.setContentsMargins(2, 2, 2, 2)
+        op_layout.setSpacing(4)
+        op_widget = QWidget()
+        if is_archived:
+            btn_restore = QPushButton("恢复")
+            btn_restore.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
+            op_layout.addWidget(btn_restore)
+            btn_delete = QPushButton("永久删除")
+            btn_delete.clicked.connect(lambda _checked=False, fid=identifier: self._delete_forwarder_permanently(fid))
+            op_layout.addWidget(btn_delete)
+        else:
+            btn_archive = QPushButton("归档")
+            btn_archive.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
+            op_layout.addWidget(btn_archive)
+        op_widget.setLayout(op_layout)
+        self.forwarder_table.setCellWidget(row, 5, op_widget)
         self.forwarder_table.setItem(row, 6, QTableWidgetItem(identifier))
         self.forwarder_table.setItem(row, 7, QTableWidgetItem("1" if data.get("archived", False) else "0"))
         if raw is None:
@@ -492,32 +584,94 @@ class SettingsPage(QWidget):
         row = self._find_forwarder_row(identifier)
         if row < 0:
             return
-        if self.forwarder_table.item(row, 7).text() == "1":
+        is_archived = self.forwarder_table.item(row, 7).text() == "1"
+        if is_archived:
+            # 恢复：无需确认
+            self.forwarder_table.item(row, 7).setText("0")
+            enabled_box = self.forwarder_table.cellWidget(row, 4)
+            if isinstance(enabled_box, QCheckBox):
+                enabled_box.setChecked(True)
+                enabled_box.setEnabled(True)
+            for col in range(4):
+                item = self.forwarder_table.item(row, col)
+                if item is not None:
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+            # 重建操作按钮（归档）
+            op_widget = self.forwarder_table.cellWidget(row, 5)
+            if isinstance(op_widget, QWidget):
+                old_layout = op_widget.layout()
+                while old_layout and old_layout.count():
+                    it = old_layout.takeAt(0)
+                    if it.widget():
+                        it.widget().deleteLater()
+                op_layout = QHBoxLayout()
+                op_layout.setContentsMargins(2, 2, 2, 2)
+                op_layout.setSpacing(4)
+                btn_archive = QPushButton("归档")
+                btn_archive.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
+                op_layout.addWidget(btn_archive)
+                op_widget.setLayout(op_layout)
+        else:
+            # 归档
+            answer = QMessageBox.question(
+                self,
+                "归档货代",
+                "归档后该货代将从当前测算与使用中列表移除，确定继续吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            self.forwarder_table.item(row, 7).setText("1")
+            enabled_box = self.forwarder_table.cellWidget(row, 4)
+            if isinstance(enabled_box, QCheckBox):
+                enabled_box.setChecked(False)
+                enabled_box.setEnabled(False)
+            for col in range(4):
+                item = self.forwarder_table.item(row, col)
+                if item is not None:
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            # 重建操作按钮（恢复+永久删除）
+            op_widget = self.forwarder_table.cellWidget(row, 5)
+            if isinstance(op_widget, QWidget):
+                old_layout = op_widget.layout()
+                while old_layout and old_layout.count():
+                    it = old_layout.takeAt(0)
+                    if it.widget():
+                        it.widget().deleteLater()
+                op_layout = QHBoxLayout()
+                op_layout.setContentsMargins(2, 2, 2, 2)
+                op_layout.setSpacing(4)
+                btn_restore = QPushButton("恢复")
+                btn_restore.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
+                op_layout.addWidget(btn_restore)
+                btn_delete = QPushButton("永久删除")
+                btn_delete.clicked.connect(lambda _checked=False, fid=identifier: self._delete_forwarder_permanently(fid))
+                op_layout.addWidget(btn_delete)
+                op_widget.setLayout(op_layout)
+        self._mark_dirty()
+        self.filter_forwarders(self._show_archived_forwarders)
+
+    def _delete_forwarder_permanently(self, identifier: str) -> None:
+        """永久删除已归档货代。"""
+        row = self._find_forwarder_row(identifier)
+        if row < 0:
             return
+        if self.forwarder_table.item(row, 7).text() != "1":
+            QMessageBox.warning(self, "无法删除", "只能删除已归档的货代，使用中的货代请先归档。")
+            return
+        name = self.forwarder_table.item(row, 0).text()
         answer = QMessageBox.question(
-            self,
-            "归档货代",
-            "归档后该货代将从当前测算与使用中列表移除，确定继续吗？",
+            self, "永久删除",
+            f"确定永久删除货代「{name}」吗？\n\n历史记录将继续使用其保存的物流快照，不会被修改。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.forwarder_table.item(row, 7).setText("1")
-        enabled_box = self.forwarder_table.cellWidget(row, 4)
-        if isinstance(enabled_box, QCheckBox):
-            enabled_box.setChecked(False)
-            enabled_box.setEnabled(False)
-        operation = self.forwarder_table.cellWidget(row, 5)
-        if isinstance(operation, QPushButton):
-            operation.setText("已归档")
-            operation.setEnabled(False)
-        for col in range(4):
-            item = self.forwarder_table.item(row, col)
-            if item is not None:
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.forwarder_table.removeRow(row)
         self._mark_dirty()
-        self.filter_forwarders(self._show_archived_forwarders)
+        self._update_forwarder_counts()
 
     def filter_forwarders(self, archived: bool) -> None:
         self._show_archived_forwarders = archived
@@ -528,6 +682,21 @@ class SettingsPage(QWidget):
         for row in range(self.forwarder_table.rowCount()):
             is_archived = self.forwarder_table.item(row, 7).text() == "1"
             self.forwarder_table.setRowHidden(row, is_archived != archived)
+        self._update_forwarder_counts()
+
+    def _update_forwarder_counts(self) -> None:
+        """实时统计使用中 / 已归档货代数并更新按钮文本。"""
+        active_count = 0
+        archived_count = 0
+        for row in range(self.forwarder_table.rowCount()):
+            if self.forwarder_table.item(row, 7).text() == "1":
+                archived_count += 1
+            else:
+                active_count += 1
+        if self.show_active:
+            self.show_active.setText(f"使用中的货代({active_count})")
+        if self.show_archived:
+            self.show_archived.setText(f"已归档({archived_count})")
 
     def collect_forwarders(self) -> list[dict]:
         output = []
@@ -740,6 +909,21 @@ class SettingsPage(QWidget):
             QMessageBox.warning(self, "无法保存", str(exc))
             return
         latest = self.context.settings_service.load()
+
+        # 验证显示名称：去除首尾空格后 Unicode 可见字符 1-8 个
+        if self.display_name:
+            raw_name = self.display_name.text().strip()
+            visible_len = sum(1 for ch in raw_name if not ch.isspace())
+            if visible_len > 8:
+                QMessageBox.warning(
+                    self, "名称过长",
+                    f"显示名称最多 8 个字符，当前共 {visible_len} 个字符。\n请缩短后保存。",
+                )
+                return
+            display_name_val = raw_name if visible_len >= 1 else "用户"
+        else:
+            display_name_val = "用户"
+
         if self.log_level:
             latest["log_level"] = self.log_level.currentText()
         if self.log_retention_days:
@@ -758,7 +942,7 @@ class SettingsPage(QWidget):
             selected_rule = enabled_rule_ids[0] if enabled_rule_ids else ""
         latest.update(
             {
-                "display_name": (self.display_name.text().strip() or "用户") if self.display_name else "用户",
+                "display_name": display_name_val,
                 "forwarders": forwarders,
                 "selected_forwarder_id": selected_forwarder,
                 "profit_rules": self.rules_data,

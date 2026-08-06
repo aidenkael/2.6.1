@@ -1,7 +1,7 @@
 """主窗口 Binder。
 
 在 ``MainWindow`` 加载 ``main_window.ui`` 后，按 ``objectName`` 绑定：
-- 顶部问候（btnRefreshGreeting / lblGreetingTitle / lblGreetingSubtitle / lblUserBadge）
+- 顶部问候（btnRefreshGreeting / lblGreetingTitle / lblGreetingSubtitle）
 - 左侧六导航（btnNav*）与 mainStack 页面切换
 - 数据目录（lblDataDirectoryPath / btnChangeDataDirectory）
 - 汇率（spinExchangeRate / btnRefreshExchangeRate / lblExchangeRateUpdated）
@@ -91,7 +91,6 @@ class MainWindowBinder:
         btn_refresh = self.window.findChild(QPushButton, "btnRefreshGreeting")
         lbl_title = self.window.findChild(QLabel, "lblGreetingTitle")
         lbl_subtitle = self.window.findChild(QLabel, "lblGreetingSubtitle")
-        self.lbl_user_badge = self.window.findChild(QLabel, "lblUserBadge")
 
         self.greeting_header = GreetingHeaderController(
             lambda: str(self.settings.get("display_name") or "用户"), self.window
@@ -102,12 +101,6 @@ class MainWindowBinder:
                 subtitle_label=lbl_subtitle,
                 shuffle_button=btn_refresh,
             )
-        self._refresh_user_badge()
-
-    def _refresh_user_badge(self) -> None:
-        display_name = str(self.settings.get("display_name") or "用户")
-        if self.lbl_user_badge:
-            self.lbl_user_badge.setText(display_name[:1])
 
     # ------------------------------------------------------------------
     # 导航与页面
@@ -271,14 +264,15 @@ class MainWindowBinder:
         updated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
         self.settings["exchange_rate_usd_to_rmb"] = value
         self.settings["exchange_rate_updated_at"] = updated_at
-        self.settings["default_tail_fee_usd"] = float(
-            self.settings.get("default_tail_fee_rmb", 40.0)
-        ) / value
+        # 尾程 RMB = USD × 汇率（USD 为主字段）
+        self.settings["default_tail_fee_rmb"] = float(
+            self.settings.get("default_tail_fee_usd", 5.56)
+        ) * value
         self.context.settings_service.save(self.settings)
         self.spin_rate.setValue(value)
         if self.lbl_rate_updated:
             self.lbl_rate_updated.setText(f"最后修改：{updated_at}")
-        # 通知计算页刷新利润区冻结换算值
+        # 通知计算页刷新利润区冻结换算值（含尾程 RMB）
         if self.calculation_page and hasattr(self.calculation_page, "refresh_settings"):
             self.calculation_page.refresh_settings()
         self.settingsSaved.emit()
@@ -310,7 +304,6 @@ class MainWindowBinder:
 
     def on_settings_saved(self) -> None:
         self.settings = self.context.settings_service.load()
-        self._refresh_user_badge()
         if self.greeting_header:
             self.greeting_header.refresh_display_name()
         if self.spin_rate:

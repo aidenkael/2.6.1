@@ -117,15 +117,17 @@ class TestDynamicRegions:
             combo = page.api_profile_select
             listed = {combo.itemData(i) for i in range(combo.count()) if combo.itemData(i)}
             assert set(profile_ids) <= listed
-            assert combo.count() == len(profile_ids) + 1  # 含“新建配置”
+            assert combo.count() == len(profile_ids) + 1  # 含“选择已有配置”
             # 视觉/局部重估绑定下拉同样列出全部 Profile
             assert page.visual_binding.count() == len(profile_ids) + 1
             assert page.local_binding.count() == len(profile_ids) + 1
-            # Designer 预览测试/删除按钮运行时隐藏
-            for name in ("btnTestApi1", "btnDeleteApi1"):
-                widget = page._root.findChild(QWidget, name)
-                assert widget is not None
-                assert not widget.isVisibleTo(page._root)
+            # Designer 预览测试按钮运行时隐藏；删除按钮可见
+            widget = page._root.findChild(QWidget, "btnTestApi1")
+            assert widget is not None
+            assert not widget.isVisibleTo(page._root)
+            del_widget = page._root.findChild(QWidget, "btnDeleteApi1")
+            assert del_widget is not None
+            assert del_widget.isVisibleTo(page._root)  # 现为删除配置按钮
         finally:
             page.deleteLater()
             qapp.processEvents()
