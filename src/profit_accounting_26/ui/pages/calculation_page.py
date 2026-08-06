@@ -55,7 +55,7 @@ from profit_accounting_26.domain.models import (
     PackagingScenario,
 )
 from profit_accounting_26.ui.binders.calculation_binder import CalculationBinder
-from profit_accounting_26.ui.ui_loader import load_main_window
+from profit_accounting_26.ui.ui_loader import load_page_module
 from profit_accounting_26.ui.widgets import Card, ImageSlotWidget, QuoteCard
 from profit_accounting_26.ui.input_editing import install_blank_click_focus_filter
 
@@ -253,18 +253,16 @@ class CalculationPage(QWidget):
     # ------------------------------------------------------------------
 
     def _load_ui_widgets(self) -> None:
-        """加载冻结 main_window.ui，取 pageCalculation 并接管为本页布局。"""
-        self._ui_root = load_main_window()
-        root = self._ui_root.findChild(QWidget, "pageCalculation")
-        if root is None:
-            raise RuntimeError("main_window.ui 缺少 pageCalculation")
+        """从 pages/calculation_page.ui 加载测算页布局。"""
+        self._ui_root = load_page_module("calculation_page.ui")
+        root = self._ui_root
+        self._root = root
         root.setParent(self)
-        root.setVisible(True)  # setParent 会清除可见标记，必须显式恢复
+        root.setVisible(True)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(root)
-        self._root = root
 
         f = root.findChild
         # 图片区

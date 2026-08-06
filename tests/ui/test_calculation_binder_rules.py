@@ -70,14 +70,11 @@ def _cost_rule(rule_id, name, threshold, amount, currency="RMB"):
 
 @pytest.fixture
 def binder(qapp):
-    from profit_accounting_26.ui.ui_loader import load_main_window
+    from profit_accounting_26.ui.ui_loader import load_page_module
     from profit_accounting_26.ui.binders.calculation_binder import CalculationBinder
-    from PySide6.QtWidgets import QWidget
 
-    ui = load_main_window()
-    page = ui.findChild(QWidget, "pageCalculation")
-    b = CalculationBinder(page, MockContext())
-    # 防止 .ui 根节点被 GC，导致子控件 C++ 对象销毁
+    ui = load_page_module("calculation_page.ui")
+    b = CalculationBinder(ui, MockContext())
     b._ui_root_ref = ui
     yield b
 
