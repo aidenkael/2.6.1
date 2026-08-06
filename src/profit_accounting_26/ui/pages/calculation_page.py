@@ -281,8 +281,9 @@ class CalculationPage(QWidget):
             self._panel_roots[panel_name] = panel_w
             host = root.findChild(QWidget, host_name)
             if host is not None:
-                host_layout = host.layout() or QVBoxLayout(host)
-                if host.layout() is None:
+                host_layout = host.layout()
+                if host_layout is None:
+                    host_layout = QVBoxLayout(host)
                     host.setLayout(host_layout)
                 host_layout.setContentsMargins(0, 0, 0, 0)
                 host_layout.setSpacing(0)
