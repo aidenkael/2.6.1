@@ -55,10 +55,7 @@ from profit_accounting_26.domain.models import (
     PackagingScenario,
 )
 from profit_accounting_26.ui.binders.calculation_binder import CalculationBinder
-from profit_accounting_26.ui.ui_loader import load_page_module
-from profit_accounting_26.ui.panels.calculation_panels import (
-    ImageAIPanel, ProductCostPanel, PackagingPanel, LogisticsPanel, ProfitPanel,
-)
+from profit_accounting_26.ui.ui_loader import load_page_module, load_calculation_panel
 from profit_accounting_26.ui.widgets import Card, ImageSlotWidget, QuoteCard
 from profit_accounting_26.ui.input_editing import install_blank_click_focus_filter
 
@@ -234,8 +231,8 @@ class CalculationPage(QWidget):
         self._build_dynamic_regions()
         self._connect_calculation_signals()
 
-        # 利润区委托 CalculationBinder（双场景 driver 状态机）
-        self.profit_binder = CalculationBinder(self._root, context)
+        # 利润区委托 CalculationBinder（使用利润面板 root，非页面壳 root）
+        self.profit_binder = CalculationBinder(self._panel_roots["profit"], context)
         self.profit_binder.set_exchange_rate(float(self.settings.get("exchange_rate_usd_to_rmb", 7.2)))
         self.profit_binder.set_selected_rule_id(self.selected_profit_rule_id)
         self.profit_binder.set_rules(tuple(
@@ -244,13 +241,7 @@ class CalculationPage(QWidget):
         ))
         self.profit_binder.selectedRuleChanged.connect(self._persist_selected_rule)
 
-        # 五个面板包装器（提供清晰的模块边界，不跨面板 findChild）
-        self.image_ai_panel = ImageAIPanel(self._root, self)
-        self.product_cost_panel = ProductCostPanel(self._root, self)
-        self.packaging_ui_panel = PackagingPanel(self._root, self)
-        self.logistics_ui_panel = LogisticsPanel(self._root, self)
-        self.profit_ui_panel = ProfitPanel(self._root, self)
-        self.profit_ui_panel.binder = self.profit_binder  # 注入已有 binder
+        # 面板 root 引用（各自独立的 .ui 加载结果）
 
         self.rebuild_image_slots(int(self.settings.get("image_slot_count", 5)))
         self.rebuild_quote_cards()
@@ -264,9 +255,9 @@ class CalculationPage(QWidget):
     # ------------------------------------------------------------------
 
     def _load_ui_widgets(self) -> None:
-        """从 pages/calculation_page.ui 加载测算页布局。"""
+        """加载页面壳 + 5 个独立面板 .ui 文件，各面板持有自己的 root。"""
         self._ui_root = load_page_module("calculation_page.ui")
-        root = self._ui_root
+        root = self._ui_root  # 壳
         self._root = root
         root.setParent(self)
         root.setVisible(True)
@@ -275,19 +266,49 @@ class CalculationPage(QWidget):
         layout.setSpacing(0)
         layout.addWidget(root)
 
-        f = root.findChild
+        # 加载并挂载 5 个独立面板
+        panel_specs = [
+            ("image_ai", "imageAIPanelHost"),
+            ("product_cost", "productCostPanelHost"),
+            ("packaging", "packagingPanelHost"),
+            ("logistics", "logisticsPanelHost"),
+            ("profit", "profitPanelHost"),
+        ]
+        self._panel_roots: dict[str, QWidget] = {}
+        for panel_name, host_name in panel_specs:
+            panel_w = load_calculation_panel(panel_name)
+            self._panel_roots[panel_name] = panel_w
+            host = root.findChild(QWidget, host_name)
+            if host is not None:
+                host_layout = host.layout() or QVBoxLayout(host)
+                if host.layout() is None:
+                    host.setLayout(host_layout)
+                host_layout.setContentsMargins(0, 0, 0, 0)
+                host_layout.setSpacing(0)
+                host_layout.addWidget(panel_w)
+
+        # 从各面板 root 查找控件
+        ai_root = self._panel_roots["image_ai"]
+        cost_root = self._panel_roots["product_cost"]
+        pkg_root = self._panel_roots["packaging"]
+        log_root = self._panel_roots["logistics"]
+        prof_root = self._panel_roots["profit"]
+
+        def f(root, cls, name):
+            return root.findChild(cls, name) if root else None
+
         # 图片区
-        self.btn_decrease_slots = f(QPushButton, "btnDecreaseImageSlots")
-        self.slot_count_label = f(QLabel, "lblImageSlotCount")
-        self.btn_increase_slots = f(QPushButton, "btnIncreaseImageSlots")
-        self.btn_save_image_layout = f(QPushButton, "btnSaveImageLayout")
-        self.ai_button = f(QPushButton, "btnAiRecognize")
-        self.image_slots_layout = f(QHBoxLayout, "imageSlotsLayout")
+        self.btn_decrease_slots = f(ai_root, QPushButton, "btnDecreaseImageSlots")
+        self.slot_count_label = f(ai_root, QLabel, "lblImageSlotCount")
+        self.btn_increase_slots = f(ai_root, QPushButton, "btnIncreaseImageSlots")
+        self.btn_save_image_layout = f(ai_root, QPushButton, "btnSaveImageLayout")
+        self.ai_button = f(ai_root, QPushButton, "btnAiRecognize")
+        self.image_slots_layout = f(ai_root, QHBoxLayout, "imageSlotsLayout")
         # AI 摘要区
-        self.product_summary = _TextAdapter(f(QLineEdit, "txtAiSummary"))
-        self.structure_summary = _TextAdapter(f(QLineEdit, "txtPackingState"))
-        self.btn_partial_reestimate = f(QPushButton, "btnPartialReestimate")
-        ai_layout = f(QGridLayout, "aiSummaryLayout")
+        self.product_summary = _TextAdapter(f(ai_root, QLineEdit, "txtAiSummary"))
+        self.structure_summary = _TextAdapter(f(ai_root, QLineEdit, "txtPackingState"))
+        self.btn_partial_reestimate = f(ai_root, QPushButton, "btnPartialReestimate")
+        ai_layout = f(ai_root, QGridLayout, "aiSummaryLayout")
         self.material_summary = QLineEdit()
         self.material_summary.setVisible(False)
         self.review_badge = QLabel("待识别")
@@ -295,76 +316,88 @@ class CalculationPage(QWidget):
         if ai_layout is not None:
             ai_layout.addWidget(self.material_summary, 1, 0)
             ai_layout.addWidget(self.review_badge, 1, 1, 1, 4)
+
         # 成本与裸尺寸
-        self.product_cost = self._cost_spin("spinProductCostRmb", maximum=1_000_000)
-        self.domestic_shipping = self._cost_spin("spinDomesticFreightRmb", maximum=1_000_000)
-        self.bare_length = self._dim_spin("spinBareLengthCm")
-        self.bare_width = self._dim_spin("spinBareWidthCm")
-        self.bare_height = self._dim_spin("spinBareHeightCm")
-        self.bare_weight = self._weight_spin("spinBareWeightG")
-        # 正常档包装（方式由 AI/CAL 生成，只读）
+        self.product_cost = self._cost_in(cost_root, "spinProductCostRmb", maximum=1_000_000)
+        self.domestic_shipping = self._cost_in(cost_root, "spinDomesticFreightRmb", maximum=1_000_000)
+        self.bare_length = self._dim_in(cost_root, "spinBareLengthCm")
+        self.bare_width = self._dim_in(cost_root, "spinBareWidthCm")
+        self.bare_height = self._dim_in(cost_root, "spinBareHeightCm")
+        self.bare_weight = self._weight_in(cost_root, "spinBareWeightG")
+
+        # 正常档包装
         self.normal_fields: dict[str, Any] = {
             "name": "正常档",
-            "card": f(QWidget, "normalPackageCard"),
-            "radio": f(QRadioButton, "radioNormalPackage"),
-            "method": _TextAdapter(f(QTextEdit, "txtNormalReminder")),
-            "length": self._dim_spin("spinNormalLengthCm"),
-            "width": self._dim_spin("spinNormalWidthCm"),
-            "height": self._dim_spin("spinNormalHeightCm"),
-            "weight": self._weight_spin("spinNormalWeightG"),
+            "card": f(pkg_root, QWidget, "normalPackageCard"),
+            "radio": f(pkg_root, QRadioButton, "radioNormalPackage"),
+            "method": _TextAdapter(f(pkg_root, QTextEdit, "txtNormalReminder")),
+            "length": self._dim_in(pkg_root, "spinNormalLengthCm"),
+            "width": self._dim_in(pkg_root, "spinNormalWidthCm"),
+            "height": self._dim_in(pkg_root, "spinNormalHeightCm"),
+            "weight": self._weight_in(pkg_root, "spinNormalWeightG"),
         }
-        # 保守档包装（方式与尺寸均可编辑）
+        # 保守档包装
         self.conservative_fields: dict[str, Any] = {
             "name": "保守档",
-            "card": f(QWidget, "conservativePackageCard"),
-            "radio": f(QRadioButton, "radioConservativePackage"),
-            "method": _TextAdapter(f(QLineEdit, "txtConservativeMethod")),
-            "length": self._dim_spin("spinConservativeLengthCm"),
-            "width": self._dim_spin("spinConservativeWidthCm"),
-            "height": self._dim_spin("spinConservativeHeightCm"),
-            "weight": self._weight_spin("spinConservativeWeightG"),
+            "card": f(pkg_root, QWidget, "conservativePackageCard"),
+            "radio": f(pkg_root, QRadioButton, "radioConservativePackage"),
+            "method": _TextAdapter(f(pkg_root, QLineEdit, "txtConservativeMethod")),
+            "length": self._dim_in(pkg_root, "spinConservativeLengthCm"),
+            "width": self._dim_in(pkg_root, "spinConservativeWidthCm"),
+            "height": self._dim_in(pkg_root, "spinConservativeHeightCm"),
+            "weight": self._weight_in(pkg_root, "spinConservativeWeightG"),
         }
+
         # 尾程费用
-        self.tail_fee_usd = self._cost_spin("spinTailFreightUsd", maximum=100_000)
-        self.tail_fee_rmb = self._cost_spin("spinTailFreightRmb", maximum=1_000_000)
+        self.tail_fee_usd = self._cost_in(log_root, "spinTailFreightUsd", maximum=100_000)
+        self.tail_fee_rmb = self._cost_in(log_root, "spinTailFreightRmb", maximum=1_000_000)
         self.tail_fee_usd.setValue(float(self.settings.get("default_tail_fee_usd", 5.56)))
         self.tail_fee_rmb.setValue(float(self.settings.get("default_tail_fee_rmb", 40.0)))
-        self.forwarder_cards_layout = f(QHBoxLayout, "forwarderCardsLayout")
+        self.forwarder_cards_layout = f(log_root, QHBoxLayout, "forwarderCardsLayout")
         # 系统成本
-        self.btn_system_calculate = f(QPushButton, "btnSystemCalculate")
+        self.btn_system_calculate = f(log_root, QPushButton, "btnSystemCalculate")
         self.system_rows: dict[str, QLabel] = {
-            "package": f(QLabel, "lblSystemCostValue0"),
-            "forwarder": f(QLabel, "lblSystemCostValue1"),
-            "actual": f(QLabel, "lblSystemCostValue2"),
-            "volume": f(QLabel, "lblSystemCostValue3"),
-            "chargeable": f(QLabel, "lblSystemCostValue4"),
-            "logistics": f(QLabel, "lblSystemCostValue5"),
-            "tail": f(QLabel, "lblSystemCostValue6"),
+            "package": f(log_root, QLabel, "lblSystemCostValue0"),
+            "forwarder": f(log_root, QLabel, "lblSystemCostValue1"),
+            "actual": f(log_root, QLabel, "lblSystemCostValue2"),
+            "volume": f(log_root, QLabel, "lblSystemCostValue3"),
+            "chargeable": f(log_root, QLabel, "lblSystemCostValue4"),
+            "logistics": f(log_root, QLabel, "lblSystemCostValue5"),
+            "tail": f(log_root, QLabel, "lblSystemCostValue6"),
         }
-        self.system_total = f(QLabel, "lblSystemTotalRmb")
-        self.system_total_usd = f(QLabel, "lblSystemTotalUsd")
+        self.system_total = f(log_root, QLabel, "lblSystemTotalRmb")
+        self.system_total_usd = f(log_root, QLabel, "lblSystemTotalUsd")
         # 底部
-        self.product_link = f(QLineEdit, "txtProductLink")
-        self.btn_save_record = f(QPushButton, "btnSaveCurrentRecord")
-        self.btn_clear_new = f(QPushButton, "btnClearAndNew")
+        self.product_link = f(prof_root, QLineEdit, "txtProductLink")
+        self.btn_save_record = f(prof_root, QPushButton, "btnSaveCurrentRecord")
+        self.btn_clear_new = f(prof_root, QPushButton, "btnClearAndNew")
 
-    def _cost_spin(self, name: str, *, maximum: float) -> _SpinAdapter:
-        spin = self._root.findChild(QDoubleSpinBox, name)
+    def _cost_in(self, root, name: str, *, maximum: float) -> _SpinAdapter:
+        spin = root.findChild(QDoubleSpinBox, name) if root else None
         spin.setRange(0.0, maximum)
         spin.setDecimals(2)
         return _SpinAdapter(spin)
 
-    def _dim_spin(self, name: str) -> _SpinAdapter:
-        spin = self._root.findChild(QDoubleSpinBox, name)
+    def _dim_in(self, root, name: str) -> _SpinAdapter:
+        spin = root.findChild(QDoubleSpinBox, name) if root else None
         spin.setRange(0.0, 500.0)
         spin.setDecimals(1)
         return _SpinAdapter(spin)
 
-    def _weight_spin(self, name: str) -> _SpinAdapter:
-        spin = self._root.findChild(QDoubleSpinBox, name)
+    def _weight_in(self, root, name: str) -> _SpinAdapter:
+        spin = root.findChild(QDoubleSpinBox, name) if root else None
         spin.setRange(0.0, 100_000.0)
         spin.setDecimals(1)
         return _SpinAdapter(spin)
+
+    def _cost_spin(self, name: str, *, maximum: float) -> _SpinAdapter:
+        return self._cost_in(self._root, name, maximum=maximum)
+
+    def _dim_spin(self, name: str) -> _SpinAdapter:
+        return self._dim_in(self._root, name)
+
+    def _weight_spin(self, name: str) -> _SpinAdapter:
+        return self._weight_in(self._root, name)
 
     def _build_dynamic_regions(self) -> None:
         """清除 Designer 预览控件，准备动态图片框与货代卡片容器。"""

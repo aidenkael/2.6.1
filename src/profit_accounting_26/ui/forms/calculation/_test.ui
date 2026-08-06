@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <widget class="QWidget" name="testPanel">
+  <layout class="QVBoxLayout" name="testLayout">
+   <item>
+    <widget class="QLabel" name="testLabel">
+     <property name="text"><string>Hello</string></property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+</ui>

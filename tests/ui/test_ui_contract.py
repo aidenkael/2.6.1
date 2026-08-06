@@ -88,43 +88,47 @@ class TestUIFileContract:
         assert not missing, f"main_window.ui 缺少 objectName: {missing}"
 
     def test_calculation_page_key_objectnames_exist(self, calculation_page_tree):
-        """测算页模块 UI 中关键 objectName 全部存在。"""
+        """calculation_page.ui 壳中仅保留宿主容器 objectName。"""
         names = _collect_names(calculation_page_tree)
         required = [
-            # 利润区
-            "txtSheinPriceRmb", "txtSheinPriceUsd",
-            "txtCalculatedCostRmb", "txtCalculatedCostUsd",
-            "spinProfitRate",
-            "txtNoActivityPriceRmb", "txtNoActivityPriceUsd",
-            "txtNoActivityProfitRmb", "txtNoActivityProfitUsd",
-            "spinPromotionReserve",
-            "txtActivityPriceRmb", "txtActivityPriceUsd",
-            "txtActivityProfitRmb", "txtActivityProfitUsd",
-            "lblNoActivitySubsidyStatus", "lblActivitySubsidyStatus",
-            "lblListPriceProfitRateTitle", "txtListPriceProfitRate",
-            "cmbProfitRule", "lblProfitConclusion",
-            # 图片
-            "imageSlotsLayout", "btnDecreaseImageSlots", "lblImageSlotCount",
-            "btnIncreaseImageSlots", "btnSaveImageLayout", "btnAiRecognize",
-            # 包装
-            "radioNormalPackage", "txtNormalReminder",
-            "spinNormalLengthCm", "spinNormalWidthCm", "spinNormalHeightCm", "spinNormalWeightG",
-            "radioConservativePackage", "txtConservativeMethod",
-            "spinConservativeLengthCm", "spinConservativeWidthCm", "spinConservativeHeightCm", "spinConservativeWeightG",
-            # 货代
-            "forwarderCardsLayout",
-            # 尾程
-            "spinTailFreightUsd", "spinTailFreightRmb",
-            # 系统成本
-            "btnSystemCalculate",
-            # 商品
-            "spinProductCostRmb", "spinDomesticFreightRmb",
-            "spinBareLengthCm", "spinBareWidthCm", "spinBareHeightCm", "spinBareWeightG",
-            # 底部
-            "txtProductLink", "btnSaveCurrentRecord", "btnClearAndNew",
+            "pageCalculation", "calculationPageLayout",
+            "imageAIPanelHost", "productCostPanelHost", "packagingPanelHost",
+            "logisticsPanelHost", "profitPanelHost",
         ]
         missing = [n for n in required if n not in names]
-        assert not missing, f"calculation_page.ui 缺少 objectName: {missing}"
+        assert not missing, f"calculation_page.ui 壳缺少 objectName: {missing}"
+
+    def test_calculation_panels_key_objectnames_exist(self):
+        """5 个独立面板 .ui 中关键 objectName 全部存在。"""
+        panel_checks = {
+            "calculation/product_cost_panel.ui": [
+                "bareProductCard", "spinProductCostRmb", "spinDomesticFreightRmb",
+                "spinBareLengthCm", "spinBareWidthCm", "spinBareHeightCm", "spinBareWeightG",
+            ],
+            "calculation/packaging_panel.ui": [
+                "packagingPanel", "normalPackageCard", "radioNormalPackage",
+                "conservativePackageCard", "radioConservativePackage",
+            ],
+            "calculation/logistics_panel.ui": [
+                "logisticsPanel", "spinTailFreightUsd", "spinTailFreightRmb",
+                "forwarderCardsLayout", "lblSystemTotalRmb",
+            ],
+            "calculation/profit_panel.ui": [
+                "profitSection", "txtSheinPriceRmb", "txtCalculatedCostRmb",
+                "spinProfitRate", "txtNoActivityPriceRmb",
+                "txtListPriceProfitRate", "cmbProfitRule",
+            ],
+            "calculation/image_ai_panel.ui": [
+                "imageAIPanel", "btnAiRecognize", "imageSlotsLayout",
+                "btnPartialReestimate",
+            ],
+        }
+        base = FORMS_DIR
+        for rel_path, required in panel_checks.items():
+            tree = ET.parse(base / rel_path)
+            names = _collect_names(tree)
+            missing = [n for n in required if n not in names]
+            assert not missing, f"{rel_path} 缺少 objectName: {missing}"
 
     def test_settings_page_key_objectnames_exist(self, settings_page_tree):
         """settings_page.ui 中关键 objectName 全部存在。"""
@@ -192,15 +196,18 @@ class TestRuntimeLoading:
         assert stack.count() == 6
 
     def test_calculation_page_has_key_fields(self, calc_page_ui):
-        """验算页模块独立加载后关键字段可访问。"""
-        from PySide6.QtWidgets import QDoubleSpinBox, QLabel
-        fields = ["txtSheinPriceRmb", "txtCalculatedCostRmb", "spinProfitRate",
-                   "txtNoActivityPriceUsd", "txtActivityProfitRmb"]
-        for name in fields:
-            w = calc_page_ui.findChild(QDoubleSpinBox, name)
-            assert w is not None, f"利润区字段 {name} 不可访问"
-        label = calc_page_ui.findChild(QLabel, "txtListPriceProfitRate")
-        assert label is not None
+        """验算页壳独立加载后仅含 Host 容器。"""
+        from PySide6.QtWidgets import QWidget
+        for host_name in ['imageAIPanelHost','productCostPanelHost','packagingPanelHost','logisticsPanelHost','profitPanelHost']:
+            w = calc_page_ui.findChild(QWidget, host_name)
+            assert w is not None, f"{host_name} 不存在"
+
+    def test_calculation_panels_load_independently(self):
+        """5 个测算面板各自独立加载。"""
+        from profit_accounting_26.ui.ui_loader import load_calculation_panel
+        for name in ['image_ai','product_cost','packaging','logistics','profit']:
+            w = load_calculation_panel(name)
+            assert w is not None, f"{name} panel 加载失败"
 
 
 class TestFrozenStates:
@@ -209,9 +216,9 @@ class TestFrozenStates:
     @pytest.fixture
     def binder(self, qapp):
         os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
-        from PySide6.QtWidgets import QWidget
         from profit_accounting_26.ui.binders.calculation_binder import CalculationBinder
-        self._ui = _load_page("calculation_page.ui")
+        from profit_accounting_26.ui.ui_loader import load_calculation_panel
+        self._ui = load_calculation_panel("profit")
         page = self._ui
 
         class MockContext:

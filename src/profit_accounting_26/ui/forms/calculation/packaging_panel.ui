@@ -1,0 +1,1069 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<ui version='4.0'>
+<widget class="QWidget" name="packagingPanel">
+ <layout class="QVBoxLayout" name="packagingPanelLayout" stretch="0,0">
+  <item>
+  <widget class="QFrame" name="normalPackageCard">
+                        <property name="sizePolicy">
+                         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+                          <horstretch>1</horstretch>
+                          <verstretch>0</verstretch>
+                         </sizepolicy>
+                        </property>
+                        <property name="minimumSize">
+                         <size>
+                          <width>205</width>
+                          <height>0</height>
+                         </size>
+                        </property>
+                        <property name="selected" stdset="0">
+                         <bool>true</bool>
+                        </property>
+                        <layout class="QGridLayout" name="normalPackageLayout" columnstretch="1,1,1">
+                         <property name="leftMargin">
+                          <number>8</number>
+                         </property>
+                         <property name="topMargin">
+                          <number>8</number>
+                         </property>
+                         <property name="rightMargin">
+                          <number>8</number>
+                         </property>
+                         <property name="bottomMargin">
+                          <number>8</number>
+                         </property>
+                         <property name="spacing">
+                          <number>5</number>
+                         </property>
+                         <item row="0" column="0" colspan="3">
+                          <widget class="QRadioButton" name="radioNormalPackage">
+                           <property name="text">
+                            <string>正常档（当前采用）</string>
+                           </property>
+                           <property name="checked">
+                            <bool>true</bool>
+                           </property>
+                          </widget>
+                         </item>
+                         <item row="1" column="0" colspan="3">
+                          <widget class="QTextEdit" name="txtNormalReminder">
+                           <property name="sizePolicy">
+                            <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                             <horstretch>0</horstretch>
+                             <verstretch>0</verstretch>
+                            </sizepolicy>
+                           </property>
+                           <property name="minimumSize">
+                            <size>
+                             <width>90</width>
+                             <height>52</height>
+                            </size>
+                           </property>
+                           <property name="maximumSize">
+                            <size>
+                             <width>16777215</width>
+                             <height>52</height>
+                            </size>
+                           </property>
+                           <property name="verticalScrollBarPolicy">
+                            <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
+                           </property>
+                           <property name="horizontalScrollBarPolicy">
+                            <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
+                           </property>
+                           <property name="lineWrapMode">
+                            <enum>QTextEdit::LineWrapMode::WidgetWidth</enum>
+                           </property>
+                           <property name="acceptRichText">
+                            <bool>false</bool>
+                           </property>
+                           <property name="placeholderText">
+                            <string>正常档包装方式（由 AI / CAL 生成）</string>
+                           </property>
+                           <property name="readOnly">
+                            <bool>true</bool>
+                           </property>
+                           <property name="preview" stdset="0">
+                            <bool>true</bool>
+                           </property>
+                           <property name="toolTip">
+                            <string>正常档包装方式为系统生成结果，不在此处直接编辑；预留两行显示空间</string>
+                           </property>
+                          </widget>
+                         </item>
+                         <item row="2" column="0" colspan="3">
+                          <widget class="QLabel" name="lblNormalDims">
+                           <property name="text">
+                            <string>包装尺寸（默认 cm）</string>
+                           </property>
+                          </widget>
+                         </item>
+                         <item row="3" column="0">
+                          <layout class="QHBoxLayout" name="layout_spinNormalLengthCm">
+                           <property name="spacing">
+                            <number>0</number>
+                           </property>
+                           <property name="leftMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="topMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="rightMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="bottomMargin">
+                            <number>0</number>
+                           </property>
+                           <item>
+                            <widget class="QLabel" name="lblNormalLengthCm">
+                             <property name="sizePolicy">
+                              <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                               <horstretch>0</horstretch>
+                               <verstretch>0</verstretch>
+                              </sizepolicy>
+                             </property>
+                             <property name="minimumSize">
+                              <size>
+                               <width>20</width>
+                               <height>0</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>24</width>
+                               <height>16777215</height>
+                              </size>
+                             </property>
+                             <property name="text">
+                              <string>长</string>
+                             </property>
+                             <property name="alignment">
+                              <set>Qt::AlignmentFlag::AlignCenter</set>
+                             </property>
+                            </widget>
+                           </item>
+                           <item>
+                            <widget class="QDoubleSpinBox" name="spinNormalLengthCm">
+                             <property name="sizePolicy">
+                              <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                               <horstretch>0</horstretch>
+                               <verstretch>0</verstretch>
+                              </sizepolicy>
+                             </property>
+                             <property name="minimumSize">
+                              <size>
+                               <width>45</width>
+                               <height>28</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>72</width>
+                               <height>30</height>
+                              </size>
+                             </property>
+                             <property name="buttonSymbols">
+                              <enum>QAbstractSpinBox::NoButtons</enum>
+                             </property>
+                             <property name="decimals">
+                              <number>1</number>
+                             </property>
+                             <property name="minimum">
+                              <double>0.000000000000000</double>
+                             </property>
+                             <property name="maximum">
+                              <double>999.000000000000000</double>
+                             </property>
+                             <property name="singleStep">
+                              <double>1.000000000000000</double>
+                             </property>
+                             <property name="value">
+                              <double>47.000000000000000</double>
+                             </property>
+                            </widget>
+                           </item>
+                           <item>
+                            <widget class="QLabel" name="unit_spinNormalLengthCm">
+                             <property name="minimumSize">
+                              <size>
+                               <width>22</width>
+                               <height>0</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>28</width>
+                               <height>16777215</height>
+                              </size>
+                             </property>
+                             <property name="visible">
+                              <bool>false</bool>
+                             </property>
+                             <property name="text">
+                              <string />
+                             </property>
+                             <property name="alignment">
+                              <set>Qt::AlignmentFlag::AlignCenter</set>
+                             </property>
+                             <property name="unitLabel" stdset="0">
+                              <bool>true</bool>
+                             </property>
+                            </widget>
+                           </item>
+                          </layout>
+                         </item>
+                         <item row="3" column="1">
+                          <layout class="QHBoxLayout" name="layout_spinNormalWidthCm">
+                           <property name="spacing">
+                            <number>0</number>
+                           </property>
+                           <property name="leftMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="topMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="rightMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="bottomMargin">
+                            <number>0</number>
+                           </property>
+                           <item>
+                            <widget class="QLabel" name="lblNormalWidthCm">
+                             <property name="sizePolicy">
+                              <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                               <horstretch>0</horstretch>
+                               <verstretch>0</verstretch>
+                              </sizepolicy>
+                             </property>
+                             <property name="minimumSize">
+                              <size>
+                               <width>20</width>
+                               <height>0</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>24</width>
+                               <height>16777215</height>
+                              </size>
+                             </property>
+                             <property name="text">
+                              <string>宽</string>
+                             </property>
+                             <property name="alignment">
+                              <set>Qt::AlignmentFlag::AlignCenter</set>
+                             </property>
+                            </widget>
+                           </item>
+                           <item>
+                            <widget class="QDoubleSpinBox" name="spinNormalWidthCm">
+                             <property name="sizePolicy">
+                              <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                               <horstretch>0</horstretch>
+                               <verstretch>0</verstretch>
+                              </sizepolicy>
+                             </property>
+                             <property name="minimumSize">
+                              <size>
+                               <width>45</width>
+                               <height>28</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>72</width>
+                               <height>30</height>
+                              </size>
+                             </property>
+                             <property name="buttonSymbols">
+                              <enum>QAbstractSpinBox::NoButtons</enum>
+                             </property>
+                             <property name="decimals">
+                              <number>1</number>
+                             </property>
+                             <property name="minimum">
+                              <double>0.000000000000000</double>
+                             </property>
+                             <property name="maximum">
+                              <double>999.000000000000000</double>
+                             </property>
+                             <property name="singleStep">
+                              <double>1.000000000000000</double>
+                             </property>
+                             <property name="value">
+                              <double>32.000000000000000</double>
+                             </property>
+                            </widget>
+                           </item>
+                           <item>
+                            <widget class="QLabel" name="unit_spinNormalWidthCm">
+                             <property name="minimumSize">
+                              <size>
+                               <width>22</width>
+                               <height>0</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>28</width>
+                               <height>16777215</height>
+                              </size>
+                             </property>
+                             <property name="visible">
+                              <bool>false</bool>
+                             </property>
+                             <property name="text">
+                              <string />
+                             </property>
+                             <property name="alignment">
+                              <set>Qt::AlignmentFlag::AlignCenter</set>
+                             </property>
+                             <property name="unitLabel" stdset="0">
+                              <bool>true</bool>
+                             </property>
+                            </widget>
+                           </item>
+                          </layout>
+                         </item>
+                         <item row="3" column="2">
+                          <layout class="QHBoxLayout" name="layout_spinNormalHeightCm">
+                           <property name="spacing">
+                            <number>0</number>
+                           </property>
+                           <property name="leftMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="topMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="rightMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="bottomMargin">
+                            <number>0</number>
+                           </property>
+                           <item>
+                            <widget class="QLabel" name="lblNormalHeightCm">
+                             <property name="sizePolicy">
+                              <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                               <horstretch>0</horstretch>
+                               <verstretch>0</verstretch>
+                              </sizepolicy>
+                             </property>
+                             <property name="minimumSize">
+                              <size>
+                               <width>20</width>
+                               <height>0</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>24</width>
+                               <height>16777215</height>
+                              </size>
+                             </property>
+                             <property name="text">
+                              <string>高</string>
+                             </property>
+                             <property name="alignment">
+                              <set>Qt::AlignmentFlag::AlignCenter</set>
+                             </property>
+                            </widget>
+                           </item>
+                           <item>
+                            <widget class="QDoubleSpinBox" name="spinNormalHeightCm">
+                             <property name="sizePolicy">
+                              <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                               <horstretch>0</horstretch>
+                               <verstretch>0</verstretch>
+                              </sizepolicy>
+                             </property>
+                             <property name="minimumSize">
+                              <size>
+                               <width>45</width>
+                               <height>28</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>72</width>
+                               <height>30</height>
+                              </size>
+                             </property>
+                             <property name="buttonSymbols">
+                              <enum>QAbstractSpinBox::NoButtons</enum>
+                             </property>
+                             <property name="decimals">
+                              <number>1</number>
+                             </property>
+                             <property name="minimum">
+                              <double>0.000000000000000</double>
+                             </property>
+                             <property name="maximum">
+                              <double>999.000000000000000</double>
+                             </property>
+                             <property name="singleStep">
+                              <double>1.000000000000000</double>
+                             </property>
+                             <property name="value">
+                              <double>17.000000000000000</double>
+                             </property>
+                            </widget>
+                           </item>
+                           <item>
+                            <widget class="QLabel" name="unit_spinNormalHeightCm">
+                             <property name="minimumSize">
+                              <size>
+                               <width>22</width>
+                               <height>0</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>28</width>
+                               <height>16777215</height>
+                              </size>
+                             </property>
+                             <property name="visible">
+                              <bool>false</bool>
+                             </property>
+                             <property name="text">
+                              <string />
+                             </property>
+                             <property name="alignment">
+                              <set>Qt::AlignmentFlag::AlignCenter</set>
+                             </property>
+                             <property name="unitLabel" stdset="0">
+                              <bool>true</bool>
+                             </property>
+                            </widget>
+                           </item>
+                          </layout>
+                         </item>
+                         <item row="4" column="0">
+                          <widget class="QLabel" name="lblNormalWeight">
+                           <property name="text">
+                            <string>包装后重量</string>
+                           </property>
+                          </widget>
+                         </item>
+                         <item row="4" column="1" colspan="2">
+                          <layout class="QHBoxLayout" name="layout_spinNormalWeightG">
+                           <property name="spacing">
+                            <number>6</number>
+                           </property>
+                           <property name="leftMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="topMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="rightMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="bottomMargin">
+                            <number>0</number>
+                           </property>
+                           <item>
+                            <widget class="QDoubleSpinBox" name="spinNormalWeightG">
+                             <property name="minimumSize">
+                              <size>
+                               <width>110</width>
+                               <height>28</height>
+                              </size>
+                             </property>
+                             <property name="buttonSymbols">
+                              <enum>QAbstractSpinBox::NoButtons</enum>
+                             </property>
+                             <property name="decimals">
+                              <number>0</number>
+                             </property>
+                             <property name="minimum">
+                              <double>0.000000000000000</double>
+                             </property>
+                             <property name="maximum">
+                              <double>999999.000000000000000</double>
+                             </property>
+                             <property name="singleStep">
+                              <double>1.000000000000000</double>
+                             </property>
+                             <property name="value">
+                              <double>720.000000000000000</double>
+                             </property>
+                            </widget>
+                           </item>
+                           <item>
+                            <widget class="QLabel" name="unit_spinNormalWeightG">
+                             <property name="minimumSize">
+                              <size>
+                               <width>28</width>
+                               <height>0</height>
+                              </size>
+                             </property>
+                             <property name="text">
+                              <string>g</string>
+                             </property>
+                             <property name="alignment">
+                              <set>Qt::AlignmentFlag::AlignCenter</set>
+                             </property>
+                             <property name="unitLabel" stdset="0">
+                              <bool>true</bool>
+                             </property>
+                            </widget>
+                           </item>
+                          </layout>
+                         </item>
+                        </layout>
+                        <property name="methodFrozen" stdset="0">
+                         <bool>true</bool>
+                        </property>
+                       </widget>
+  </item>
+  <item>
+  <widget class="QFrame" name="conservativePackageCard">
+                        <property name="sizePolicy">
+                         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+                          <horstretch>1</horstretch>
+                          <verstretch>0</verstretch>
+                         </sizepolicy>
+                        </property>
+                        <property name="minimumSize">
+                         <size>
+                          <width>205</width>
+                          <height>0</height>
+                         </size>
+                        </property>
+                        <layout class="QGridLayout" name="conservativePackageLayout" columnstretch="1,1,1">
+                         <property name="leftMargin">
+                          <number>8</number>
+                         </property>
+                         <property name="topMargin">
+                          <number>8</number>
+                         </property>
+                         <property name="rightMargin">
+                          <number>8</number>
+                         </property>
+                         <property name="bottomMargin">
+                          <number>8</number>
+                         </property>
+                         <property name="spacing">
+                          <number>5</number>
+                         </property>
+                         <item row="0" column="0" colspan="3">
+                          <widget class="QRadioButton" name="radioConservativePackage">
+                           <property name="text">
+                            <string>保守档</string>
+                           </property>
+                          </widget>
+                         </item>
+                         <item row="1" column="0">
+                          <widget class="QLabel" name="lblConservativeMethod">
+                           <property name="text">
+                            <string>包装方式（冻结）</string>
+                           </property>
+                          </widget>
+                         </item>
+                         <item row="1" column="1" colspan="2">
+                          <widget class="QLineEdit" name="txtConservativeMethod">
+                           <property name="sizePolicy">
+                            <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                             <horstretch>0</horstretch>
+                             <verstretch>0</verstretch>
+                            </sizepolicy>
+                           </property>
+                           <property name="minimumSize">
+                            <size>
+                             <width>90</width>
+                             <height>28</height>
+                            </size>
+                           </property>
+                           <property name="text">
+                            <string />
+                           </property>
+                           <property name="readOnly">
+                            <bool>true</bool>
+                           </property>
+                           <property name="preview" stdset="0">
+                            <bool>true</bool>
+                           </property>
+                           <property name="placeholderText">
+                            <string>保守档包装方式（由 AI / CAL 生成）</string>
+                           </property>
+                           <property name="toolTip">
+                            <string>保守档整体为冻结结果；可选择采用，但不可直接编辑字段</string>
+                           </property>
+                          </widget>
+                         </item>
+                         <item row="2" column="0" colspan="3">
+                          <widget class="QLabel" name="lblConservativeDims">
+                           <property name="text">
+                            <string>包装尺寸（默认 cm）</string>
+                           </property>
+                          </widget>
+                         </item>
+                         <item row="3" column="0">
+                          <layout class="QHBoxLayout" name="layout_spinConservativeLengthCm">
+                           <property name="spacing">
+                            <number>0</number>
+                           </property>
+                           <property name="leftMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="topMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="rightMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="bottomMargin">
+                            <number>0</number>
+                           </property>
+                           <item>
+                            <widget class="QLabel" name="lblConservativeLengthCm">
+                             <property name="sizePolicy">
+                              <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                               <horstretch>0</horstretch>
+                               <verstretch>0</verstretch>
+                              </sizepolicy>
+                             </property>
+                             <property name="minimumSize">
+                              <size>
+                               <width>20</width>
+                               <height>0</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>24</width>
+                               <height>16777215</height>
+                              </size>
+                             </property>
+                             <property name="text">
+                              <string>长</string>
+                             </property>
+                             <property name="alignment">
+                              <set>Qt::AlignmentFlag::AlignCenter</set>
+                             </property>
+                            </widget>
+                           </item>
+                           <item>
+                            <widget class="QDoubleSpinBox" name="spinConservativeLengthCm">
+                             <property name="sizePolicy">
+                              <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                               <horstretch>0</horstretch>
+                               <verstretch>0</verstretch>
+                              </sizepolicy>
+                             </property>
+                             <property name="minimumSize">
+                              <size>
+                               <width>45</width>
+                               <height>28</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>72</width>
+                               <height>30</height>
+                              </size>
+                             </property>
+                             <property name="readOnly">
+                              <bool>true</bool>
+                             </property>
+                             <property name="buttonSymbols">
+                              <enum>QAbstractSpinBox::NoButtons</enum>
+                             </property>
+                             <property name="decimals">
+                              <number>1</number>
+                             </property>
+                             <property name="minimum">
+                              <double>0.000000000000000</double>
+                             </property>
+                             <property name="maximum">
+                              <double>999.000000000000000</double>
+                             </property>
+                             <property name="singleStep">
+                              <double>1.000000000000000</double>
+                             </property>
+                             <property name="value">
+                              <double>49.000000000000000</double>
+                             </property>
+                             <property name="preview" stdset="0">
+                              <bool>true</bool>
+                             </property>
+                             <property name="toolTip">
+                              <string>保守档为冻结估算结果，不可直接编辑</string>
+                             </property>
+                            </widget>
+                           </item>
+                           <item>
+                            <widget class="QLabel" name="unit_spinConservativeLengthCm">
+                             <property name="minimumSize">
+                              <size>
+                               <width>22</width>
+                               <height>0</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>28</width>
+                               <height>16777215</height>
+                              </size>
+                             </property>
+                             <property name="visible">
+                              <bool>false</bool>
+                             </property>
+                             <property name="text">
+                              <string />
+                             </property>
+                             <property name="alignment">
+                              <set>Qt::AlignmentFlag::AlignCenter</set>
+                             </property>
+                             <property name="unitLabel" stdset="0">
+                              <bool>true</bool>
+                             </property>
+                            </widget>
+                           </item>
+                          </layout>
+                         </item>
+                         <item row="3" column="1">
+                          <layout class="QHBoxLayout" name="layout_spinConservativeWidthCm">
+                           <property name="spacing">
+                            <number>0</number>
+                           </property>
+                           <property name="leftMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="topMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="rightMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="bottomMargin">
+                            <number>0</number>
+                           </property>
+                           <item>
+                            <widget class="QLabel" name="lblConservativeWidthCm">
+                             <property name="sizePolicy">
+                              <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                               <horstretch>0</horstretch>
+                               <verstretch>0</verstretch>
+                              </sizepolicy>
+                             </property>
+                             <property name="minimumSize">
+                              <size>
+                               <width>20</width>
+                               <height>0</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>24</width>
+                               <height>16777215</height>
+                              </size>
+                             </property>
+                             <property name="text">
+                              <string>宽</string>
+                             </property>
+                             <property name="alignment">
+                              <set>Qt::AlignmentFlag::AlignCenter</set>
+                             </property>
+                            </widget>
+                           </item>
+                           <item>
+                            <widget class="QDoubleSpinBox" name="spinConservativeWidthCm">
+                             <property name="sizePolicy">
+                              <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                               <horstretch>0</horstretch>
+                               <verstretch>0</verstretch>
+                              </sizepolicy>
+                             </property>
+                             <property name="minimumSize">
+                              <size>
+                               <width>45</width>
+                               <height>28</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>72</width>
+                               <height>30</height>
+                              </size>
+                             </property>
+                             <property name="readOnly">
+                              <bool>true</bool>
+                             </property>
+                             <property name="buttonSymbols">
+                              <enum>QAbstractSpinBox::NoButtons</enum>
+                             </property>
+                             <property name="decimals">
+                              <number>1</number>
+                             </property>
+                             <property name="minimum">
+                              <double>0.000000000000000</double>
+                             </property>
+                             <property name="maximum">
+                              <double>999.000000000000000</double>
+                             </property>
+                             <property name="singleStep">
+                              <double>1.000000000000000</double>
+                             </property>
+                             <property name="value">
+                              <double>34.000000000000000</double>
+                             </property>
+                             <property name="preview" stdset="0">
+                              <bool>true</bool>
+                             </property>
+                             <property name="toolTip">
+                              <string>保守档为冻结估算结果，不可直接编辑</string>
+                             </property>
+                            </widget>
+                           </item>
+                           <item>
+                            <widget class="QLabel" name="unit_spinConservativeWidthCm">
+                             <property name="minimumSize">
+                              <size>
+                               <width>22</width>
+                               <height>0</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>28</width>
+                               <height>16777215</height>
+                              </size>
+                             </property>
+                             <property name="visible">
+                              <bool>false</bool>
+                             </property>
+                             <property name="text">
+                              <string />
+                             </property>
+                             <property name="alignment">
+                              <set>Qt::AlignmentFlag::AlignCenter</set>
+                             </property>
+                             <property name="unitLabel" stdset="0">
+                              <bool>true</bool>
+                             </property>
+                            </widget>
+                           </item>
+                          </layout>
+                         </item>
+                         <item row="3" column="2">
+                          <layout class="QHBoxLayout" name="layout_spinConservativeHeightCm">
+                           <property name="spacing">
+                            <number>0</number>
+                           </property>
+                           <property name="leftMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="topMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="rightMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="bottomMargin">
+                            <number>0</number>
+                           </property>
+                           <item>
+                            <widget class="QLabel" name="lblConservativeHeightCm">
+                             <property name="sizePolicy">
+                              <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                               <horstretch>0</horstretch>
+                               <verstretch>0</verstretch>
+                              </sizepolicy>
+                             </property>
+                             <property name="minimumSize">
+                              <size>
+                               <width>20</width>
+                               <height>0</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>24</width>
+                               <height>16777215</height>
+                              </size>
+                             </property>
+                             <property name="text">
+                              <string>高</string>
+                             </property>
+                             <property name="alignment">
+                              <set>Qt::AlignmentFlag::AlignCenter</set>
+                             </property>
+                            </widget>
+                           </item>
+                           <item>
+                            <widget class="QDoubleSpinBox" name="spinConservativeHeightCm">
+                             <property name="sizePolicy">
+                              <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                               <horstretch>0</horstretch>
+                               <verstretch>0</verstretch>
+                              </sizepolicy>
+                             </property>
+                             <property name="minimumSize">
+                              <size>
+                               <width>45</width>
+                               <height>28</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>72</width>
+                               <height>30</height>
+                              </size>
+                             </property>
+                             <property name="readOnly">
+                              <bool>true</bool>
+                             </property>
+                             <property name="buttonSymbols">
+                              <enum>QAbstractSpinBox::NoButtons</enum>
+                             </property>
+                             <property name="decimals">
+                              <number>1</number>
+                             </property>
+                             <property name="minimum">
+                              <double>0.000000000000000</double>
+                             </property>
+                             <property name="maximum">
+                              <double>999.000000000000000</double>
+                             </property>
+                             <property name="singleStep">
+                              <double>1.000000000000000</double>
+                             </property>
+                             <property name="value">
+                              <double>19.000000000000000</double>
+                             </property>
+                             <property name="preview" stdset="0">
+                              <bool>true</bool>
+                             </property>
+                             <property name="toolTip">
+                              <string>保守档为冻结估算结果，不可直接编辑</string>
+                             </property>
+                            </widget>
+                           </item>
+                           <item>
+                            <widget class="QLabel" name="unit_spinConservativeHeightCm">
+                             <property name="minimumSize">
+                              <size>
+                               <width>22</width>
+                               <height>0</height>
+                              </size>
+                             </property>
+                             <property name="maximumSize">
+                              <size>
+                               <width>28</width>
+                               <height>16777215</height>
+                              </size>
+                             </property>
+                             <property name="visible">
+                              <bool>false</bool>
+                             </property>
+                             <property name="text">
+                              <string />
+                             </property>
+                             <property name="alignment">
+                              <set>Qt::AlignmentFlag::AlignCenter</set>
+                             </property>
+                             <property name="unitLabel" stdset="0">
+                              <bool>true</bool>
+                             </property>
+                            </widget>
+                           </item>
+                          </layout>
+                         </item>
+                         <item row="4" column="0">
+                          <widget class="QLabel" name="lblConservativeWeight">
+                           <property name="text">
+                            <string>包装后重量</string>
+                           </property>
+                          </widget>
+                         </item>
+                         <item row="4" column="1" colspan="2">
+                          <layout class="QHBoxLayout" name="layout_spinConservativeWeightG">
+                           <property name="spacing">
+                            <number>6</number>
+                           </property>
+                           <property name="leftMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="topMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="rightMargin">
+                            <number>0</number>
+                           </property>
+                           <property name="bottomMargin">
+                            <number>0</number>
+                           </property>
+                           <item>
+                            <widget class="QDoubleSpinBox" name="spinConservativeWeightG">
+                             <property name="minimumSize">
+                              <size>
+                               <width>110</width>
+                               <height>28</height>
+                              </size>
+                             </property>
+                             <property name="readOnly">
+                              <bool>true</bool>
+                             </property>
+                             <property name="buttonSymbols">
+                              <enum>QAbstractSpinBox::NoButtons</enum>
+                             </property>
+                             <property name="decimals">
+                              <number>0</number>
+                             </property>
+                             <property name="minimum">
+                              <double>0.000000000000000</double>
+                             </property>
+                             <property name="maximum">
+                              <double>999999.000000000000000</double>
+                             </property>
+                             <property name="singleStep">
+                              <double>1.000000000000000</double>
+                             </property>
+                             <property name="value">
+                              <double>820.000000000000000</double>
+                             </property>
+                             <property name="preview" stdset="0">
+                              <bool>true</bool>
+                             </property>
+                             <property name="toolTip">
+                              <string>保守档为冻结估算结果，不可直接编辑</string>
+                             </property>
+                            </widget>
+                           </item>
+                           <item>
+                            <widget class="QLabel" name="unit_spinConservativeWeightG">
+                             <property name="minimumSize">
+                              <size>
+                               <width>28</width>
+                               <height>0</height>
+                              </size>
+                             </property>
+                             <property name="text">
+                              <string>g</string>
+                             </property>
+                             <property name="alignment">
+                              <set>Qt::AlignmentFlag::AlignCenter</set>
+                             </property>
+                             <property name="unitLabel" stdset="0">
+                              <bool>true</bool>
+                             </property>
+                            </widget>
+                           </item>
+                          </layout>
+                         </item>
+                        </layout>
+                        <property name="frozen" stdset="0">
+                         <bool>true</bool>
+                        </property>
+                       </widget>
+  </item>
+ </layout>
+</widget>
+</ui>
