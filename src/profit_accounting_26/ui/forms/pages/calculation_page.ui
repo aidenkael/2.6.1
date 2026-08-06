@@ -89,7 +89,11 @@
                      <width>690</width>
                      <height>0</height>
                     </size>
-                   </property>                   <layout class="QVBoxLayout" name="costPackingLayout">
+                   </property>
+                   <property name="card" stdset="0">
+                    <bool>true</bool>
+                   </property>
+                   <layout class="QVBoxLayout" name="costPackingLayout">
                     <property name="spacing">
                      <number>6</number>
                     </property>
@@ -138,7 +142,11 @@
                         </property>
                         <property name="text">
                          <string>成本与规格</string>
-                        </property>                       </widget>
+                        </property>
+                        <property name="sectionTitle" stdset="0">
+                         <bool>true</bool>
+                        </property>
+                       </widget>
                       </item>
                       <item>
                        <widget class="QLabel" name="lblCostPackingHint">
@@ -156,7 +164,11 @@
                         </property>
                         <property name="text">
                          <string>当前功能基线：用户确认事实优先，AI/CAL 生成唯一包装方案</string>
-                        </property>                       </widget>
+                        </property>
+                        <property name="hint" stdset="0">
+                         <bool>true</bool>
+                        </property>
+                       </widget>
                       </item>
                       <item>
                        <spacer name="costPackingHeaderSpacer">
@@ -165,7 +177,14 @@
                         </property>
                         <property name="sizeType">
                          <enum>QSizePolicy::Policy::Expanding</enum>
-                        </property>                       </spacer>
+                        </property>
+                        <property name="sizeHint" stdset="0">
+                         <size>
+                          <width>20</width>
+                          <height>20</height>
+                         </size>
+                        </property>
+                       </spacer>
                       </item>
                      </layout>
                     </item>
@@ -240,7 +259,11 @@
                        </widget>
                       </item>
                <item>
-                <widget class="QFrame" name="bottomActionSection">                 <layout class="QHBoxLayout" name="bottomActionLayout">
+                <widget class="QFrame" name="bottomActionSection">
+                 <property name="card" stdset="0">
+                  <bool>true</bool>
+                 </property>
+                 <layout class="QHBoxLayout" name="bottomActionLayout">
                   <property name="spacing">
                    <number>10</number>
                   </property>
@@ -283,7 +306,11 @@
                     </property>
                     <property name="text">
                      <string>保存本次记录</string>
-                    </property>                   </widget>
+                    </property>
+                    <property name="primary" stdset="0">
+                     <bool>true</bool>
+                    </property>
+                   </widget>
                   </item>
                   <item>
                    <widget class="QPushButton" name="btnClearAndNew">
@@ -308,7 +335,14 @@
                  </property>
                  <property name="sizeType">
                   <enum>QSizePolicy::Policy::Expanding</enum>
-                 </property>                </spacer>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>1</width>
+                   <height>1</height>
+                  </size>
+                 </property>
+                </spacer>
                </item>
               </layout>
              </widget>
