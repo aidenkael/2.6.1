@@ -1,3 +1,15 @@
+"""新商品测算页 —— 冻结 UI 绑定版（2.6.1-dual-profit）。
+
+架构：
+- 布局完全来自 ``forms/main_window.ui`` 的 ``pageCalculation``（QUiLoader 运行时加载，
+  不生成 Python 布局副本）；
+- 控件按 ``objectName`` 用 ``findChild`` 获取；
+- 图片框（3–6 个）与货代报价卡片为运行时动态生成，分别挂到
+  ``imageSlotsLayout`` / ``forwarderCardsLayout``（Designer 预览卡片被清除）；
+- 利润双场景（无活动 / 活动后）委托 ``CalculationBinder`` 的 driver 状态机；
+- AI 识图、局部重估、包装估算、货代报价、记录保存逻辑与旧版完全一致。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -6,20 +18,22 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QObject, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QObject, QThread, Qt, QSignalBlocker, Signal, Slot
 from PySide6.QtGui import QCursor, QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
-    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QRadioButton,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -40,15 +54,9 @@ from profit_accounting_26.domain.models import (
     PackagingProposal,
     PackagingScenario,
 )
-from profit_accounting_26.domain.rules import evaluate_rule
-from profit_accounting_26.ui.widgets import (
-    Card,
-    ImageSlotWidget,
-    LabeledSpin,
-    QuickLineEdit,
-    QuoteCard,
-    SectionHeader,
-)
+from profit_accounting_26.ui.binders.calculation_binder import CalculationBinder
+from profit_accounting_26.ui.ui_loader import load_main_window
+from profit_accounting_26.ui.widgets import Card, ImageSlotWidget, QuoteCard
 from profit_accounting_26.ui.input_editing import install_blank_click_focus_filter
 
 
@@ -106,6 +114,81 @@ class LocalReestimateWorker(QObject):
             self.failed.emit("failed", str(exc))
 
 
+class _SpinAdapter(QObject):
+    """让 .ui 的 QDoubleSpinBox 复用旧 LabeledSpin 的最小接口。
+
+    提供 ``value()`` / ``setValue()`` / ``valueChanged`` / ``editingFinished``；
+    程序化 ``setValue`` 不发射任何信号（等价旧版 _updating 保护）。
+    """
+
+    valueChanged = Signal(float)
+    editingFinished = Signal()
+
+    def __init__(self, spin: QDoubleSpinBox) -> None:
+        super().__init__(spin)
+        self.spin = spin
+        self._programmatic = False
+        spin.valueChanged.connect(self._on_value_changed)
+        editor = spin.lineEdit()
+        editor.installEventFilter(self)
+
+    def _on_value_changed(self, value: float) -> None:
+        if not self._programmatic:
+            self.valueChanged.emit(value)
+
+    def value(self) -> float:
+        return float(self.spin.value())
+
+    def setValue(self, value: float) -> None:
+        self._programmatic = True
+        try:
+            self.spin.setValue(float(value))
+        finally:
+            self._programmatic = False
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if event.type() == QEvent.Type.FocusOut and not self._programmatic:
+            self.editingFinished.emit()
+        return False
+
+
+class _TextAdapter(QObject):
+    """QLineEdit / QTextEdit 统一文本接口（text/setText/clear/textChanged）。"""
+
+    textChanged = Signal(str)
+
+    def __init__(self, widget) -> None:
+        super().__init__(widget)
+        self._widget = widget
+        self._programmatic = False
+        if isinstance(widget, QTextEdit):
+            widget.textChanged.connect(self._on_changed)
+        else:
+            widget.textChanged.connect(self._on_changed)
+
+    def _on_changed(self, *args) -> None:
+        if not self._programmatic:
+            self.textChanged.emit(self.text())
+
+    def text(self) -> str:
+        if isinstance(self._widget, QTextEdit):
+            return self._widget.toPlainText()
+        return self._widget.text()
+
+    def setText(self, value: str) -> None:
+        self._programmatic = True
+        try:
+            if isinstance(self._widget, QTextEdit):
+                self._widget.setPlainText(value)
+            else:
+                self._widget.setText(value)
+        finally:
+            self._programmatic = False
+
+    def clear(self) -> None:
+        self.setText("")
+
+
 class CalculationPage(QWidget):
     dirtyChanged = Signal(bool)
     saved = Signal(str)
@@ -144,96 +227,157 @@ class CalculationPage(QWidget):
         self._accepted_bare_fields: set[str] = set()
         self._pending_confirmed_normal: dict[str, Any] = {}
 
-        self.content_layout = QVBoxLayout(self)
-        self.content_layout.setContentsMargins(12, 10, 12, 12)
-        self.content_layout.setSpacing(8)
-
-        self._build_image_section()
-        self._build_ai_section()
-        self._build_cost_section()
-        self._build_profit_section()
-        self._build_bottom_actions()
+        self._load_ui_widgets()
+        self._build_dynamic_regions()
         self._connect_calculation_signals()
+
+        # 利润区委托 CalculationBinder（双场景 driver 状态机）
+        self.profit_binder = CalculationBinder(self._root, context)
+        self.profit_binder.set_exchange_rate(float(self.settings.get("exchange_rate_usd_to_rmb", 7.2)))
+        self.profit_binder.set_selected_rule_id(self.selected_profit_rule_id)
+        self.profit_binder.set_rules(tuple(
+            rule for rule in self.context.settings_service.rules_from_settings(self.settings)
+            if rule.enabled and not rule.archived
+        ))
+        self.profit_binder.selectedRuleChanged.connect(self._persist_selected_rule)
+
         self.rebuild_image_slots(int(self.settings.get("image_slot_count", 5)))
-        self.rebuild_profit_rules()
+        self.rebuild_quote_cards()
+        # 页面初始化：执行一次 USD → RMB 同步（RMB=USD×汇率）
+        self._sync_tail_rmb_from_usd(recalculate=False)
         self.recalculate()
         self._blank_focus_guard = install_blank_click_focus_filter(self)
 
-    def _mark_dirty(self) -> None:
-        if not self.dirty:
-            self.dirty = True
-            self.dirtyChanged.emit(True)
+    # ------------------------------------------------------------------
+    # .ui 加载与控件绑定
+    # ------------------------------------------------------------------
 
-    def _adopt_packaging(self, proposal: PackagingProposal) -> None:
-        """Keep one packaging authority for page, calculation, persistence and logs."""
-        self.proposal = proposal  # legacy UI alias; never independently calculated
-        self.session.adopt(proposal)
+    def _load_ui_widgets(self) -> None:
+        """加载冻结 main_window.ui，取 pageCalculation 并接管为本页布局。"""
+        self._ui_root = load_main_window()
+        root = self._ui_root.findChild(QWidget, "pageCalculation")
+        if root is None:
+            raise RuntimeError("main_window.ui 缺少 pageCalculation")
+        root.setParent(self)
+        root.setVisible(True)  # setParent 会清除可见标记，必须显式恢复
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(root)
+        self._root = root
 
-    def _adopted_packaging(self) -> PackagingProposal | None:
-        return self.session.adopted_packaging or self.proposal
-
-    def mark_saved(self) -> None:
-        self.dirty = False
-        self.dirtyChanged.emit(False)
-
-    def _build_image_section(self) -> None:
-        card = Card()
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(10, 7, 10, 8)
-        layout.setSpacing(6)
-        header = SectionHeader("图片输入")
-        minus = QPushButton("−")
-        minus.setFixedWidth(32)
-        plus = QPushButton("+")
-        plus.setFixedWidth(32)
-        self.slot_count_label = QLabel("5")
-        self.slot_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.slot_count_label.setFixedWidth(22)
-        save_config = QPushButton("保存图片框配置")
-        self.ai_button = QPushButton("AI识图")
-        self.ai_button.setProperty("primary", True)
-        minus.clicked.connect(lambda: self.change_slot_count(-1))
-        plus.clicked.connect(lambda: self.change_slot_count(1))
-        save_config.clicked.connect(self.save_image_config)
-        self.ai_button.clicked.connect(self.run_recognition)
-        for widget in (minus, self.slot_count_label, plus, save_config, self.ai_button):
-            header.right_layout.addWidget(widget)
-        layout.addWidget(header)
-        self.image_slots_layout = QHBoxLayout()
-        self.image_slots_layout.setSpacing(7)
-        layout.addLayout(self.image_slots_layout)
-        self.content_layout.addWidget(card)
-
-    def _build_ai_section(self) -> None:
-        card = Card()
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(10, 7, 10, 8)
-        layout.setSpacing(5)
-        first = QHBoxLayout()
-        title = QLabel("AI识别摘要")
-        title.setProperty("sectionTitle", True)
-        first.addWidget(title)
+        f = root.findChild
+        # 图片区
+        self.btn_decrease_slots = f(QPushButton, "btnDecreaseImageSlots")
+        self.slot_count_label = f(QLabel, "lblImageSlotCount")
+        self.btn_increase_slots = f(QPushButton, "btnIncreaseImageSlots")
+        self.btn_save_image_layout = f(QPushButton, "btnSaveImageLayout")
+        self.ai_button = f(QPushButton, "btnAiRecognize")
+        self.image_slots_layout = f(QHBoxLayout, "imageSlotsLayout")
+        # AI 摘要区
+        self.product_summary = _TextAdapter(f(QLineEdit, "txtAiSummary"))
+        self.structure_summary = _TextAdapter(f(QLineEdit, "txtPackingState"))
+        self.btn_partial_reestimate = f(QPushButton, "btnPartialReestimate")
+        ai_layout = f(QGridLayout, "aiSummaryLayout")
+        self.material_summary = QLineEdit()
+        self.material_summary.setVisible(False)
         self.review_badge = QLabel("待识别")
         self.review_badge.setProperty("warning", True)
-        first.addWidget(self.review_badge)
-        self.product_summary = QuickLineEdit()
-        self.product_summary.setPlaceholderText("商品结构摘要")
-        self.material_summary = QuickLineEdit()
-        self.material_summary.setVisible(False)
-        self.structure_summary = QuickLineEdit()
-        self.structure_summary.setPlaceholderText("包装意见")
-        reestimate = QPushButton("局部重估")
-        reestimate.clicked.connect(self.reestimate_packaging)
-        first.addWidget(self.product_summary, 3)
-        first.addWidget(self.structure_summary, 4)
-        first.addWidget(reestimate)
-        layout.addLayout(first)
+        if ai_layout is not None:
+            ai_layout.addWidget(self.material_summary, 1, 0)
+            ai_layout.addWidget(self.review_badge, 1, 1, 1, 4)
+        # 成本与裸尺寸
+        self.product_cost = self._cost_spin("spinProductCostRmb", maximum=1_000_000)
+        self.domestic_shipping = self._cost_spin("spinDomesticFreightRmb", maximum=1_000_000)
+        self.bare_length = self._dim_spin("spinBareLengthCm")
+        self.bare_width = self._dim_spin("spinBareWidthCm")
+        self.bare_height = self._dim_spin("spinBareHeightCm")
+        self.bare_weight = self._weight_spin("spinBareWeightG")
+        # 正常档包装（方式由 AI/CAL 生成，只读）
+        self.normal_fields: dict[str, Any] = {
+            "name": "正常档",
+            "card": f(QWidget, "normalPackageCard"),
+            "radio": f(QRadioButton, "radioNormalPackage"),
+            "method": _TextAdapter(f(QTextEdit, "txtNormalReminder")),
+            "length": self._dim_spin("spinNormalLengthCm"),
+            "width": self._dim_spin("spinNormalWidthCm"),
+            "height": self._dim_spin("spinNormalHeightCm"),
+            "weight": self._weight_spin("spinNormalWeightG"),
+        }
+        # 保守档包装（方式与尺寸均可编辑）
+        self.conservative_fields: dict[str, Any] = {
+            "name": "保守档",
+            "card": f(QWidget, "conservativePackageCard"),
+            "radio": f(QRadioButton, "radioConservativePackage"),
+            "method": _TextAdapter(f(QLineEdit, "txtConservativeMethod")),
+            "length": self._dim_spin("spinConservativeLengthCm"),
+            "width": self._dim_spin("spinConservativeWidthCm"),
+            "height": self._dim_spin("spinConservativeHeightCm"),
+            "weight": self._weight_spin("spinConservativeWeightG"),
+        }
+        # 尾程费用
+        self.tail_fee_usd = self._cost_spin("spinTailFreightUsd", maximum=100_000)
+        self.tail_fee_rmb = self._cost_spin("spinTailFreightRmb", maximum=1_000_000)
+        self.tail_fee_usd.setValue(float(self.settings.get("default_tail_fee_usd", 5.56)))
+        self.tail_fee_rmb.setValue(float(self.settings.get("default_tail_fee_rmb", 40.0)))
+        self.forwarder_cards_layout = f(QHBoxLayout, "forwarderCardsLayout")
+        # 系统成本
+        self.btn_system_calculate = f(QPushButton, "btnSystemCalculate")
+        self.system_rows: dict[str, QLabel] = {
+            "package": f(QLabel, "lblSystemCostValue0"),
+            "forwarder": f(QLabel, "lblSystemCostValue1"),
+            "actual": f(QLabel, "lblSystemCostValue2"),
+            "volume": f(QLabel, "lblSystemCostValue3"),
+            "chargeable": f(QLabel, "lblSystemCostValue4"),
+            "logistics": f(QLabel, "lblSystemCostValue5"),
+            "tail": f(QLabel, "lblSystemCostValue6"),
+        }
+        self.system_total = f(QLabel, "lblSystemTotalRmb")
+        self.system_total_usd = f(QLabel, "lblSystemTotalUsd")
+        # 底部
+        self.product_link = f(QLineEdit, "txtProductLink")
+        self.btn_save_record = f(QPushButton, "btnSaveCurrentRecord")
+        self.btn_clear_new = f(QPushButton, "btnClearAndNew")
 
-        # Structured values stay internal for deterministic packaging rules.
-        # Users edit the two natural-language summaries instead of a row of
-        # specialist switches; text AI normalizes their edit on local reestimate.
-        second = QHBoxLayout()
-        second.setSpacing(7)
+    def _cost_spin(self, name: str, *, maximum: float) -> _SpinAdapter:
+        spin = self._root.findChild(QDoubleSpinBox, name)
+        spin.setRange(0.0, maximum)
+        spin.setDecimals(2)
+        return _SpinAdapter(spin)
+
+    def _dim_spin(self, name: str) -> _SpinAdapter:
+        spin = self._root.findChild(QDoubleSpinBox, name)
+        spin.setRange(0.0, 500.0)
+        spin.setDecimals(1)
+        return _SpinAdapter(spin)
+
+    def _weight_spin(self, name: str) -> _SpinAdapter:
+        spin = self._root.findChild(QDoubleSpinBox, name)
+        spin.setRange(0.0, 100_000.0)
+        spin.setDecimals(1)
+        return _SpinAdapter(spin)
+
+    def _build_dynamic_regions(self) -> None:
+        """清除 Designer 预览控件，准备动态图片框与货代卡片容器。"""
+        # 图片预览卡片（imageCard1..5）
+        for index in range(1, 6):
+            card = self._root.findChild(QWidget, f"imageCard{index}")
+            if card is not None:
+                card.setParent(None)
+                card.deleteLater()
+        # 货代预览卡片（深圳 / 义乌）
+        for name in ("forwarderCardShenzhen", "forwarderCardYiwu"):
+            card = self._root.findChild(QWidget, name)
+            if card is not None:
+                card.setParent(None)
+                card.deleteLater()
+        # 动态货代卡片插在保守档之后、系统成本卡之前（0:裸尺寸 1:正常 2:保守 [3..]:货代 末:系统）
+        self.quote_insert_index = 3
+        # 隐藏的内部结构选项（确定性包装规则仍需要）
+        self._build_hidden_structure_widgets()
+
+    def _build_hidden_structure_widgets(self) -> None:
+        """软硬/折叠/压缩与硬结构选项不直接展示，仅作为观察数据结构。"""
         self.rigidity_combo = QComboBox()
         self.rigidity_combo.addItem("软硬：未知", "unknown")
         self.rigidity_combo.addItem("柔软", "soft")
@@ -249,9 +393,6 @@ class CalculationPage(QWidget):
         self.compressibility_combo.addItem("不可压缩", "none")
         self.compressibility_combo.addItem("有限压缩", "limited")
         self.compressibility_combo.addItem("可压缩", "good")
-        second.addWidget(self.rigidity_combo)
-        second.addWidget(self.foldability_combo)
-        second.addWidget(self.compressibility_combo)
         self.structure_checks: dict[str, QCheckBox] = {}
         for key, text in (
             ("no_hard_structure", "无硬结构"),
@@ -263,234 +404,30 @@ class CalculationPage(QWidget):
             ("retail_box_visible", "原盒"),
             ("hard_card_visible", "硬卡"),
         ):
-            box = QCheckBox(text)
-            self.structure_checks[key] = box
-            second.addWidget(box)
-        second.addStretch(1)
-        for index in range(second.count()):
-            item = second.itemAt(index)
-            if item.widget():
-                item.widget().hide()
-        self.content_layout.addWidget(card)
-
-    def _package_card(self, title: str, *, selected: bool = False, frozen_reminder: bool = False) -> tuple[Card, dict[str, Any]]:
-        card = Card(soft=True)
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(8, 7, 8, 8)
-        layout.setSpacing(4)
-        title_row = QHBoxLayout()
-        radio = QRadioButton(title)
-        radio.setChecked(selected)
-        title_row.addWidget(radio)
-        title_row.addStretch(1)
-        changed = QLabel("")
-        changed.setProperty("primary", True)
-        title_row.addWidget(changed)
-        layout.addLayout(title_row)
-        reason = QLabel("待估算")
-        reason.setWordWrap(True)
-        reason.setProperty("muted", True)
-        reason.setMaximumHeight(34)
-        if frozen_reminder:
-            reason.setProperty("frozen", True)
-            layout.addWidget(reason)
-        method = None
-        if not frozen_reminder:
-            method = QuickLineEdit()
-            method.setPlaceholderText("包装方式")
-            layout.addWidget(method)
-        dims = QHBoxLayout()
-        dims.setSpacing(3)
-        length = LabeledSpin("长", suffix="cm", decimals=1, maximum=500, input_width=62, special_text="—")
-        width = LabeledSpin("宽", suffix="cm", decimals=1, maximum=500, input_width=62, special_text="—")
-        height = LabeledSpin("高", suffix="cm", decimals=1, maximum=500, input_width=62, special_text="—")
-        for widget in (length, width, height):
-            dims.addWidget(widget)
-        layout.addLayout(dims)
-        weight = LabeledSpin("包装后重量", suffix="g", decimals=1, maximum=100000, input_width=84, special_text="—")
-        layout.addWidget(weight)
-        if not frozen_reminder:
-            layout.addWidget(reason)
-        fields = {
-            "name": title,
-            "card": card,
-            "radio": radio,
-            "changed": changed,
-            "length": length,
-            "width": width,
-            "height": height,
-            "weight": weight,
-            "reason": reason,
-        }
-        if method is not None:
-            fields["method"] = method
-        return card, fields
-
-    def _build_cost_section(self) -> None:
-        container = Card()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(10, 7, 10, 8)
-        layout.setSpacing(6)
-        header = SectionHeader("成本与规格")
-        self.product_cost = LabeledSpin("商品成本", suffix="RMB", input_width=92, special_text="未填写")
-        self.domestic_shipping = LabeledSpin("国内运费", suffix="RMB", input_width=82)
-        self.tail_fee_usd = LabeledSpin("尾程费用", suffix="USD", input_width=74, value=float(self.settings.get("default_tail_fee_usd", 5.56)))
-        self.tail_fee_rmb = LabeledSpin("", suffix="RMB", input_width=74, value=float(self.settings.get("default_tail_fee_rmb", 40.0)))
-        for widget in (self.product_cost, self.domestic_shipping, self.tail_fee_usd, self.tail_fee_rmb):
-            header.right_layout.addWidget(widget)
-        layout.addWidget(header)
-
-        self.decision_layout = QHBoxLayout()
-        self.decision_layout.setSpacing(7)
-
-        bare_card = Card()
-        bare_layout = QVBoxLayout(bare_card)
-        bare_layout.setContentsMargins(8, 7, 8, 8)
-        bare_layout.setSpacing(4)
-        bare_title = QLabel("裸尺寸")
-        bare_title.setProperty("sectionTitle", True)
-        bare_layout.addWidget(bare_title)
-        bare_dims = QHBoxLayout()
-        bare_dims.setSpacing(3)
-        self.bare_length = LabeledSpin("长", suffix="cm", decimals=1, maximum=500, input_width=62, special_text="—")
-        self.bare_width = LabeledSpin("宽", suffix="cm", decimals=1, maximum=500, input_width=62, special_text="—")
-        self.bare_height = LabeledSpin("高", suffix="cm", decimals=1, maximum=500, input_width=62, special_text="—")
-        for widget in (self.bare_length, self.bare_width, self.bare_height):
-            bare_dims.addWidget(widget)
-        bare_layout.addLayout(bare_dims)
-        self.bare_weight = LabeledSpin("裸重", suffix="g", decimals=1, maximum=100000, input_width=84, special_text="—")
-        bare_layout.addWidget(self.bare_weight)
-        bare_layout.addStretch(1)
-
-        normal_card, self.normal_fields = self._package_card("正常档", selected=True, frozen_reminder=True)
-        conservative_card, self.conservative_fields = self._package_card("保守档")
-        self.package_group = QButtonGroup(self)
-        self.package_group.setExclusive(True)
-        self.package_group.addButton(self.normal_fields["radio"], 0)
-        self.package_group.addButton(self.conservative_fields["radio"], 1)
-        self.normal_fields["radio"].clicked.connect(lambda: self._select_package("正常档", user=True))
-        self.conservative_fields["radio"].clicked.connect(lambda: self._select_package("保守档", user=True))
-
-        self.system_card = Card()
-        system_layout = QVBoxLayout(self.system_card)
-        system_layout.setContentsMargins(8, 7, 8, 8)
-        system_layout.setSpacing(3)
-        title = QLabel("当前总成本")
-        title.setProperty("sectionTitle", True)
-        system_layout.addWidget(title)
-        self.system_rows: dict[str, QLabel] = {}
-        for key, label in (
-            ("package", "包装档"),
-            ("forwarder", "货代"),
-            ("actual", "实际重"),
-            ("volume", "体积重"),
-            ("chargeable", "计费重"),
-            ("logistics", "物流总价"),
+            self.structure_checks[key] = QCheckBox(text)
+        container = QWidget()
+        container.setVisible(False)
+        holder_layout = QHBoxLayout(container)
+        holder_layout.setContentsMargins(0, 0, 0, 0)
+        for widget in (
+            self.rigidity_combo,
+            self.foldability_combo,
+            self.compressibility_combo,
+            *self.structure_checks.values(),
         ):
-            row = QHBoxLayout()
-            row.setSpacing(3)
-            row.addWidget(QLabel(label))
-            row.addStretch(1)
-            value = QLabel("—")
-            row.addWidget(value)
-            self.system_rows[key] = value
-            system_layout.addLayout(row)
-        self.system_total = QLabel("—")
-        self.system_total.setProperty("primary", True)
-        self.system_total.setStyleSheet("font-size:22px;")
-        system_layout.addWidget(self.system_total)
-
-        self.decision_layout.addWidget(bare_card, 1)
-        self.decision_layout.addWidget(normal_card, 1)
-        self.decision_layout.addWidget(conservative_card, 1)
-        self.quote_insert_index = 3
-        self.decision_layout.addWidget(self.system_card, 1)
-        layout.addLayout(self.decision_layout)
-        self.content_layout.addWidget(container)
-        self._select_package("正常档", user=False)
-        self.rebuild_quote_cards()
-
-    def _build_profit_section(self) -> None:
-        card = Card()
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(10, 7, 10, 8)
-        layout.setSpacing(5)
-        header = SectionHeader("利润测算")
-        self.shein_quote = LabeledSpin("SHEIN核价", suffix="USD", input_width=90)
-        self.rule_combo = QComboBox()
-        self.rule_combo.setMinimumWidth(230)
-        self.rule_badge = QLabel("无利润规则")
-        header.right_layout.addWidget(self.shein_quote)
-        header.right_layout.addWidget(QLabel("利润规则"))
-        header.right_layout.addWidget(self.rule_combo)
-        header.right_layout.addWidget(self.rule_badge)
-        layout.addWidget(header)
-
-        row = QHBoxLayout()
-        row.setSpacing(10)
-        self.adopted_cost = LabeledSpin("计算采用总成本", suffix="RMB", maximum=1_000_000, input_width=100, special_text="—")
-        self.adopted_cost.setReadOnly(True)
-        self.sale_price = LabeledSpin("售价", suffix="USD", maximum=1_000_000, input_width=94)
-        self.reserve_percent = LabeledSpin("活动/降价预留", suffix="%", maximum=99, value=0, input_width=72)
-        self.profit_value = LabeledSpin("预测利润", suffix="RMB", minimum=-1_000_000, maximum=1_000_000, input_width=104, special_text="—")
-        self.profit_value.setReadOnly(True)
-        self.profit_rate = LabeledSpin("预计利润率", suffix="%", minimum=-10000, maximum=10000, input_width=92, special_text="—")
-        self.profit_rate.setReadOnly(True)
-        for widget in (self.adopted_cost, self.sale_price, self.reserve_percent, self.profit_value, self.profit_rate):
-            row.addWidget(widget)
-        row.addStretch(1)
-        self.profit_state = QLabel("等待有效数据")
-        self.profit_state.setProperty("warning", True)
-        row.addWidget(self.profit_state)
-        layout.addLayout(row)
-        self.profit_explanation = QLabel("请补全成本、包装和货代数据。")
-        self.profit_explanation.setWordWrap(True)
-        self.profit_explanation.setProperty("muted", True)
-        layout.addWidget(self.profit_explanation)
-        self.profit_currency_detail = QLabel("总成本 — RMB / — USD\n预计利润 — RMB / — USD")
-        self.profit_currency_detail.setProperty("muted", True)
-        self.profit_currency_detail.setStyleSheet("background:#F4F7FB;border:1px solid #E1E8F1;border-radius:5px;padding:4px 7px;")
-        layout.addWidget(self.profit_currency_detail)
-        self.content_layout.addWidget(card)
-
-    def _build_bottom_actions(self) -> None:
-        card = Card()
-        layout = QHBoxLayout(card)
-        layout.setContentsMargins(10, 6, 10, 6)
-        link_label = QLabel("商品链接")
-        self.product_link = QuickLineEdit()
-        self.product_link.setPlaceholderText("粘贴1688或其他商品链接，随记录保存")
-        layout.addWidget(link_label)
-        layout.addWidget(self.product_link, 1)
-        layout.addSpacing(22)
-        save = QPushButton("保存本次记录")
-        save.setProperty("primary", True)
-        save.setMinimumWidth(150)
-        clear = QPushButton("清空并新建")
-        clear.setMinimumWidth(140)
-        save.clicked.connect(self.save_record)
-        clear.clicked.connect(self.clear_new)
-        layout.addWidget(save)
-        layout.addSpacing(18)
-        layout.addWidget(clear)
-        self.content_layout.addWidget(card)
+            widget.setParent(container)
+            holder_layout.addWidget(widget)
+        ai_layout = self._root.findChild(QGridLayout, "aiSummaryLayout")
+        if ai_layout is not None:
+            ai_layout.addWidget(container, 2, 0, 1, 5)
 
     def _connect_calculation_signals(self) -> None:
-        for widget in (
-            self.product_cost,
-            self.domestic_shipping,
-            self.tail_fee_usd,
-            self.tail_fee_rmb,
-            self.shein_quote,
-            self.sale_price,
-            self.reserve_percent,
-        ):
+        for widget in (self.product_cost, self.domestic_shipping, self.tail_fee_usd, self.tail_fee_rmb):
             widget.valueChanged.connect(lambda _value: self._mark_dirty())
         self.product_link.textChanged.connect(lambda _text: self._mark_dirty())
 
         for name, fields in (("正常档", self.normal_fields), ("保守档", self.conservative_fields)):
-            if "method" in fields:
-                fields["method"].textEdited.connect(lambda _text, n=name: self._scenario_manually_changed(n))
+            fields["method"].textChanged.connect(lambda _text, n=name: self._scenario_manually_changed(n))
             for key in ("length", "width", "height", "weight"):
                 fields[key].valueChanged.connect(lambda _value, n=name: self._scenario_manually_changed(n))
 
@@ -512,9 +449,19 @@ class CalculationPage(QWidget):
                 box.toggled.connect(lambda checked, k=key: self._on_structure_toggled(k, checked))
         self.tail_fee_rmb.editingFinished.connect(self._tail_rmb_changed)
         self.tail_fee_usd.editingFinished.connect(self._tail_usd_changed)
-        self.sale_price.editingFinished.connect(self._forward_profit)
-        self.reserve_percent.editingFinished.connect(self._forward_profit)
-        self.rule_combo.currentIndexChanged.connect(self._profit_rule_changed)
+        # 尾程 USD 实时联动：直接连接真实 USD 控件的 valueChanged，不等待编辑完成
+        self.tail_fee_usd.valueChanged.connect(self._tail_usd_live_changed)
+
+        self.btn_decrease_slots.clicked.connect(lambda: self.change_slot_count(-1))
+        self.btn_increase_slots.clicked.connect(lambda: self.change_slot_count(1))
+        self.btn_save_image_layout.clicked.connect(self.save_image_config)
+        self.ai_button.clicked.connect(self.run_recognition)
+        self.btn_partial_reestimate.clicked.connect(self.reestimate_packaging)
+        self.btn_system_calculate.clicked.connect(self.recalculate)
+        self.btn_save_record.clicked.connect(self.save_record)
+        self.btn_clear_new.clicked.connect(self.clear_new)
+        self.normal_fields["radio"].clicked.connect(lambda: self._select_package("正常档", user=True))
+        self.conservative_fields["radio"].clicked.connect(lambda: self._select_package("保守档", user=True))
 
     def _on_no_structure_toggled(self, checked: bool) -> None:
         if self._updating:
@@ -535,6 +482,42 @@ class CalculationPage(QWidget):
             self.structure_checks["no_hard_structure"].setChecked(False)
             self._updating = False
         self._upstream_changed()
+
+    # ------------------------------------------------------------------
+    # 状态辅助
+    # ------------------------------------------------------------------
+
+    def _mark_dirty(self) -> None:
+        if not self.dirty:
+            self.dirty = True
+            self.dirtyChanged.emit(True)
+
+    def _adopt_packaging(self, proposal: PackagingProposal) -> None:
+        """Keep one packaging authority for page, calculation, persistence and logs."""
+        self.proposal = proposal  # legacy UI alias; never independently calculated
+        self.session.adopt(proposal)
+
+    def _adopted_packaging(self) -> PackagingProposal | None:
+        return self.session.adopted_packaging or self.proposal
+
+    def mark_saved(self) -> None:
+        self.dirty = False
+        self.dirtyChanged.emit(False)
+
+    def _persist_selected_rule(self, rule_id: str) -> None:
+        self.selected_profit_rule_id = str(rule_id or "")
+        self.settings["selected_profit_rule_id"] = self.selected_profit_rule_id
+        self.context.settings_service.save(self.settings)
+        self._mark_dirty()
+
+    def set_exchange_rate(self, rate: float) -> None:
+        """主窗口汇率保存后同步利润区冻结换算。"""
+        self.settings = self.context.settings_service.load()
+        self.profit_binder.set_exchange_rate(float(rate))
+
+    # ------------------------------------------------------------------
+    # 图片框
+    # ------------------------------------------------------------------
 
     def rebuild_image_slots(self, count: int) -> None:
         while self.image_slots_layout.count():
@@ -635,6 +618,10 @@ class CalculationPage(QWidget):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    # ------------------------------------------------------------------
+    # 观察数据
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _set_combo_data(combo: QComboBox, value: str) -> None:
@@ -744,6 +731,10 @@ class CalculationPage(QWidget):
         self.product_summary.setText(product_summary(observation))
         self.structure_summary.setText(packaging_summary(observation, proposal))
         self._updating = previous_updating
+
+    # ------------------------------------------------------------------
+    # AI 识图
+    # ------------------------------------------------------------------
 
     def run_recognition(self) -> None:
         if self._recognition_thread is not None:
@@ -936,6 +927,10 @@ class CalculationPage(QWidget):
         observation.domestic_shipping_rmb = self.domestic_shipping.value()
         return observation
 
+    # ------------------------------------------------------------------
+    # 局部重估
+    # ------------------------------------------------------------------
+
     def reestimate_packaging(self) -> None:
         if self._local_thread is not None:
             return
@@ -1048,7 +1043,6 @@ class CalculationPage(QWidget):
                                ("weight_g", self.normal_fields["weight"])):
                 value = confirmed_normal.get(key)
                 field.setValue(float(value or 0))
-            self.normal_fields["reason"].setText(normal_reminder(self.observation, self._adopted_packaging(), user_modified=True))
             self._updating = False
         self._refresh_display_summaries(self.observation, self._adopted_packaging())
         if not changed:
@@ -1091,21 +1085,19 @@ class CalculationPage(QWidget):
         if thread is not None:
             thread.deleteLater()
 
+    # ------------------------------------------------------------------
+    # 包装应用与选择
+    # ------------------------------------------------------------------
+
     def apply_proposal(self, proposal: PackagingProposal) -> None:
         previous_updating = self._updating
         self._updating = True
         for scenario, fields in ((proposal.normal, self.normal_fields), (proposal.conservative, self.conservative_fields)):
-            if "method" in fields:
-                fields["method"].setText(scenario.packaging_method)
+            fields["method"].setText(scenario.packaging_method)
             fields["length"].setValue(scenario.length_cm or 0)
             fields["width"].setValue(scenario.width_cm or 0)
             fields["height"].setValue(scenario.height_cm or 0)
             fields["weight"].setValue(scenario.weight_g or 0)
-            if fields is self.normal_fields:
-                fields["reason"].setText(normal_reminder(self.observation, proposal))
-            else:
-                fields["reason"].setText(scenario.reasoning_summary or "待人工补充")
-            fields["changed"].setText("")
         self._updating = previous_updating
         if proposal.needs_review:
             self.review_badge.setText("需要复核")
@@ -1137,12 +1129,6 @@ class CalculationPage(QWidget):
         if self._updating:
             return
         self.manual_scenarios.add(name)
-        fields = self.normal_fields if name == "正常档" else self.conservative_fields
-        if name == "正常档" and self._adopted_packaging():
-            fields["reason"].setText(normal_reminder(self.observation, self._adopted_packaging(), user_modified=True))
-        else:
-            fields["reason"].setText("人工修改 · 需要复核")
-        fields["changed"].setText("✓")
         self.review_badge.setText("人工修改 · 需要复核")
         self.review_badge.setProperty("warning", True)
         self.review_badge.setProperty("success", False)
@@ -1157,18 +1143,20 @@ class CalculationPage(QWidget):
         if user:
             self.package_selection_changed = True
             self._mark_dirty()
-        for fields, selected in ((self.normal_fields, normal_selected), (self.conservative_fields, not normal_selected)):
-            fields["card"].set_choice_state(selected=selected, frozen=not selected)
-            # Normal packaging is the editable adopted proposal.  Conservative
-            # packaging is generated by the local rule and is selectable only.
-            editable = fields is self.normal_fields
-            if "method" in fields:
-                fields["method"].setEnabled(editable)
-            for key in ("length", "width", "height", "weight"):
-                fields[key].setEnabled(editable)
-            fields["changed"].setText("✓" if selected and self.package_selection_changed else "")
-        if hasattr(self, "profit_explanation"):
-            self.recalculate()
+        self._style_card(self.normal_fields, selected=normal_selected)
+        self._style_card(self.conservative_fields, selected=not normal_selected)
+        self.recalculate()
+
+    @staticmethod
+    def _style_card(fields: dict[str, Any], *, selected: bool) -> None:
+        card = fields.get("card")
+        if card is None:
+            return
+        card.setProperty("choiceSelected", selected)
+        card.setProperty("choiceFrozen", not selected)
+        card.style().unpolish(card)
+        card.style().polish(card)
+        card.update()
 
     def current_scenario(self) -> PackagingScenario:
         fields = self.normal_fields if self.normal_fields["radio"].isChecked() else self.conservative_fields
@@ -1185,7 +1173,7 @@ class CalculationPage(QWidget):
             width_cm=fields["width"].value() or None,
             height_cm=fields["height"].value() or None,
             weight_g=fields["weight"].value() or None,
-            reasoning_summary=fields["reason"].text(),
+            reasoning_summary=self._adopted_packaging().normal.reasoning_summary if (source and label == "正常档") else (fields["method"].text() if fields.get("method") else ""),
             confidence="low" if manual else (source.confidence if source else "low"),
             needs_review=True if manual else (source.needs_review if source else True),
             default_fields_used=list(source.default_fields_used) if source else [],
@@ -1195,9 +1183,15 @@ class CalculationPage(QWidget):
         from profit_accounting_26.domain.models import PackagingState
         return PackagingState.UNKNOWN
 
+    # ------------------------------------------------------------------
+    # 货代与成本
+    # ------------------------------------------------------------------
+
     def rebuild_quote_cards(self) -> None:
+        if self.forwarder_cards_layout is None:
+            return
         for card in self.quote_cards.values():
-            self.decision_layout.removeWidget(card)
+            self.forwarder_cards_layout.removeWidget(card)
             card.deleteLater()
         self.quote_cards = {}
         forwarders = self.context.settings_service.forwarders_from_settings(self.settings)
@@ -1214,7 +1208,7 @@ class CalculationPage(QWidget):
                 user_changed=self.forwarder_selection_changed,
             )
             self.quote_cards[forwarder.id] = card
-            self.decision_layout.insertWidget(self.quote_insert_index + offset, card, 1)
+            self.forwarder_cards_layout.insertWidget(self.quote_insert_index + offset, card, 1)
 
     def select_forwarder(self, forwarder_id: str) -> None:
         self.selected_forwarder_id = forwarder_id
@@ -1246,6 +1240,42 @@ class CalculationPage(QWidget):
         self.context.settings_service.save(self.settings)
         self.recalculate()
 
+    # ------------------------------------------------------------------
+    # 尾程 USD → RMB 实时联动（直连 valueChanged；遵守 _loading_record）
+    # ------------------------------------------------------------------
+
+    def _tail_usd_live_changed(self, _value: float) -> None:
+        """主页尾程 USD 实时变化：读取当前有效汇率 → 更新冻结 RMB → 立即全链路重算。
+
+        不等待用户点击保存汇率；不要求再次点击系统计算；不修改 settings.json；
+        修改当前 CalculationPage 的实时状态。
+        记录加载 / 快照保护期间（_loading_record）不触发实时重算。
+        """
+        if self._updating:
+            return
+        if getattr(self.profit_binder, '_loading_record', False):
+            return
+        self._sync_tail_rmb_from_usd(recalculate=True)
+
+    def _sync_tail_rmb_from_usd(self, *, recalculate: bool) -> None:
+        """USD → RMB 单向同步：RMB = USD × 当前有效汇率，使用 QSignalBlocker 更新冻结 RMB。
+
+        用于：
+        - 页面初始化（recalculate=False）
+        - 尾程 USD 编辑器实时联动（recalculate=True）
+        - refresh_settings / 汇率变化后同步（通常结合立即 recalculate）
+        """
+        rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
+        if rate <= 0:
+            rate = 7.2
+        usd = self.tail_fee_usd.value()
+        rmb = round(usd * rate, 2)
+        # 使用 QSignalBlocker 更新冻结 RMB，避免信号递归
+        with QSignalBlocker(self.tail_fee_rmb.spin):
+            self.tail_fee_rmb.spin.setValue(rmb)
+        if recalculate:
+            self.recalculate()
+
     def _clear_calculation(self, message: str) -> None:
         self.current_quote = None
         self.current_forwarder = None
@@ -1253,23 +1283,14 @@ class CalculationPage(QWidget):
         for card in self.quote_cards.values():
             card.update_quote(None)
         for value in self.system_rows.values():
-            value.setText("—")
-        self.system_total.setText("—")
-        self._updating = True
-        self.adopted_cost.setValue(0)
-        self.profit_value.setValue(0)
-        self.profit_rate.setValue(0)
-        self._updating = False
-        self.profit_value.spin.setStyleSheet("")
-        self.profit_rate.spin.setStyleSheet("")
-        self.profit_state.setText("等待有效数据")
-        self.profit_state.setProperty("warning", True)
-        self.profit_state.setProperty("success", False)
-        self.profit_state.setProperty("danger", False)
-        self._refresh_profit_style()
-        self.profit_explanation.setText(message)
-        if hasattr(self, "profit_currency_detail"):
-            self.profit_currency_detail.setText("总成本 — RMB / — USD\n预计利润 — RMB / — USD")
+            if value is not None:
+                value.setText("—")
+        if self.system_total is not None:
+            self.system_total.setText("—")
+        if self.system_total_usd is not None:
+            self.system_total_usd.setText("—")
+        self.profit_binder.set_calculation_cost(0.0)
+        del message  # 提示文案由利润区与复核徽标承载
 
     def recalculate(self) -> None:
         if self._updating:
@@ -1308,127 +1329,29 @@ class CalculationPage(QWidget):
         self.current_forwarder = selected_forwarder
         system_cost = self.product_cost.value() + self.domestic_shipping.value() + selected_quote.total_logistics_rmb
         self.current_system_cost = system_cost
-        self._updating = True
-        self.adopted_cost.setValue(system_cost)
-        self._updating = False
-        self.system_rows["package"].setText(scenario.label)
-        self.system_rows["forwarder"].setText(selected_forwarder.name)
-        self.system_rows["actual"].setText(f"{selected_quote.actual_weight_kg:.3f} kg")
-        self.system_rows["volume"].setText(f"{selected_quote.volume_weight_kg:.3f} kg")
-        self.system_rows["chargeable"].setText(f"{selected_quote.chargeable_weight_kg:.3f} kg")
-        self.system_rows["logistics"].setText(f"¥{selected_quote.total_logistics_rmb:.2f}")
-        self.system_total.setText(f"¥{system_cost:.2f}")
-        self._forward_profit()
+        self._set_system_row("package", scenario.label)
+        self._set_system_row("forwarder", selected_forwarder.name)
+        self._set_system_row("actual", f"{selected_quote.actual_weight_kg:.3f} kg")
+        self._set_system_row("volume", f"{selected_quote.volume_weight_kg:.3f} kg")
+        self._set_system_row("chargeable", f"{selected_quote.chargeable_weight_kg:.3f} kg")
+        self._set_system_row("logistics", f"¥{selected_quote.total_logistics_rmb:.2f}")
+        self._set_system_row("tail", f"¥{self.tail_fee_rmb.value():.2f}")
+        rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
+        if self.system_total is not None:
+            self.system_total.setText(f"¥{system_cost:.2f}")
+        if self.system_total_usd is not None:
+            self.system_total_usd.setText(f"${system_cost / rate:.2f}" if rate > 0 else "—")
+        self.profit_binder.set_calculation_cost(system_cost)
         self.context.diagnostic_logger.event("forwarder_calculated", package=scenario.to_dict(), forwarder_id=selected_forwarder.id, quote=asdict(selected_quote), system_cost=system_cost)
 
-    def rebuild_profit_rules(self) -> None:
-        self.rule_combo.blockSignals(True)
-        self.rule_combo.clear()
-        rules = [rule for rule in self.context.settings_service.rules_from_settings(self.settings) if rule.enabled and not rule.archived]
-        if not rules:
-            self.rule_combo.addItem("无利润规则", "")
-            self.selected_profit_rule_id = ""
-        else:
-            for rule in rules:
-                self.rule_combo.addItem(rule.name, rule.id)
-            ids = [rule.id for rule in rules]
-            if self.selected_profit_rule_id not in ids:
-                self.selected_profit_rule_id = ids[0]
-            index = self.rule_combo.findData(self.selected_profit_rule_id)
-            self.rule_combo.setCurrentIndex(max(0, index))
-        self.rule_combo.blockSignals(False)
+    def _set_system_row(self, key: str, text: str) -> None:
+        label = self.system_rows.get(key)
+        if label is not None:
+            label.setText(text)
 
-    def _profit_rule_changed(self, _index: int) -> None:
-        if self._updating:
-            return
-        self.selected_profit_rule_id = str(self.rule_combo.currentData() or "")
-        self.settings["selected_profit_rule_id"] = self.selected_profit_rule_id
-        self.context.settings_service.save(self.settings)
-        self._mark_dirty()
-        self._forward_profit()
-
-    def _active_rules(self):
-        return [
-            rule
-            for rule in self.context.settings_service.rules_from_settings(self.settings)
-            if rule.enabled and not rule.archived and rule.id == self.selected_profit_rule_id
-        ]
-
-    def _refresh_profit_style(self) -> None:
-        self.profit_state.style().unpolish(self.profit_state)
-        self.profit_state.style().polish(self.profit_state)
-
-    def _forward_profit(self) -> None:
-        if self._updating:
-            return
-        if self.current_system_cost is None or self.packaging_stale:
-            self._clear_calculation("等待有效成本、包装和货代数据。")
-            return
-        rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
-        if self.sale_price.value() <= 0 or rate <= 0:
-            self._updating = True
-            self.profit_value.setValue(0)
-            self.profit_rate.setValue(0)
-            self._updating = False
-            self.profit_state.setText("等待售价")
-            self.profit_state.setProperty("warning", True)
-            self.profit_state.setProperty("success", False)
-            self.profit_state.setProperty("danger", False)
-            self._refresh_profit_style()
-            self.profit_explanation.setText("填写售价后计算预测利润。")
-            return
-        try:
-            from profit_accounting_26.engines.profit import calculate_profit
-            result = calculate_profit(
-                total_cost_rmb=self.adopted_cost.value(),
-                sale_price_usd=self.sale_price.value(),
-                exchange_rate=rate,
-                reserve_rate=self.reserve_percent.value() / 100.0,
-                rules=self._active_rules(),
-            )
-        except ValueError as exc:
-            self.profit_explanation.setText(str(exc))
-            return
-        self._updating = True
-        self.profit_value.setValue(result.profit_rmb)
-        self.profit_rate.setValue((result.profit_rate_on_cost or 0.0) * 100.0)
-        self._updating = False
-        applied = []
-        context = {
-            "sale_price_usd": result.sale_price_usd,
-            "sale_price_rmb": result.sale_price_rmb,
-            "revenue_after_reserve_rmb": result.revenue_after_reserve_rmb,
-            "total_cost_rmb": result.total_cost_rmb,
-        }
-        for rule in self._active_rules():
-            income, cost = evaluate_rule(rule, context, exchange_rate=rate)
-            if income or cost:
-                applied.append(f"{rule.name} {'+' if income else '-'}¥{income or cost:.2f}")
-        self.rule_badge.setText("；".join(applied) if applied else "未触发调整")
-        if result.profit_rmb >= 0:
-            self.profit_state.setText("盈利")
-            self.profit_state.setProperty("success", True)
-            self.profit_state.setProperty("danger", False)
-            self.profit_state.setProperty("warning", False)
-            self.profit_value.spin.setStyleSheet("color:#219B68;font-weight:600;")
-            self.profit_rate.spin.setStyleSheet("color:#219B68;font-weight:600;")
-        else:
-            self.profit_state.setText("亏损")
-            self.profit_state.setProperty("danger", True)
-            self.profit_state.setProperty("success", False)
-            self.profit_state.setProperty("warning", False)
-            self.profit_value.spin.setStyleSheet("color:#D94A4A;font-weight:600;")
-            self.profit_rate.spin.setStyleSheet("color:#D94A4A;font-weight:600;")
-        self._refresh_profit_style()
-        reduced_price = result.sale_price_usd * (1 - self.reserve_percent.value() / 100.0)
-        self.profit_explanation.setText(
-            f"售价 ${result.sale_price_usd:.2f}，预留后 ${reduced_price:.2f}；"
-            f"采用成本 ¥{result.total_cost_rmb:.2f}，预测利润 ¥{result.profit_rmb:.2f}。"
-        )
-        self.profit_currency_detail.setText(
-            f"总成本 ¥{result.total_cost_rmb:.2f} / ${result.total_cost_rmb / rate:.2f}\n"
-            f"预计利润 ¥{result.profit_rmb:.2f} / ${result.profit_rmb / rate:.2f}"
-        )
+    # ------------------------------------------------------------------
+    # 记录
+    # ------------------------------------------------------------------
 
     def build_record_payload(self) -> dict[str, Any]:
         scenario = self.current_scenario()
@@ -1440,7 +1363,7 @@ class CalculationPage(QWidget):
             width_cm=self.normal_fields["width"].value() or None,
             height_cm=self.normal_fields["height"].value() or None,
             weight_g=self.normal_fields["weight"].value() or None,
-            reasoning_summary=self.normal_fields["reason"].text(),
+            reasoning_summary=self._adopted_packaging().normal.reasoning_summary if self._adopted_packaging() else "",
             confidence="low" if "正常档" in self.manual_scenarios else "medium",
             needs_review="正常档" in self.manual_scenarios,
         )
@@ -1452,13 +1375,29 @@ class CalculationPage(QWidget):
             width_cm=self.conservative_fields["width"].value() or None,
             height_cm=self.conservative_fields["height"].value() or None,
             weight_g=self.conservative_fields["weight"].value() or None,
-            reasoning_summary=self.conservative_fields["reason"].text(),
+            reasoning_summary=self._adopted_packaging().conservative.reasoning_summary if self._adopted_packaging() else "",
             confidence="low" if "保守档" in self.manual_scenarios else "medium",
             needs_review="保守档" in self.manual_scenarios,
         )
+        profit_scenarios = self.profit_binder.export_profit_scenarios()
+        no_activity = profit_scenarios.get("no_activity", {})
+        activity = profit_scenarios.get("activity", {})
+        # 快照/旧记录兼容状态下，layers 中的汇率/成本/利润必须来自
+        # profit_scenarios 快照，不得混入当前 settings 或 current_system_cost。
+        # 成本只要字段存在就原样使用（包括合法的 0），只有字段不存在/None 才回退。
+        if self.profit_binder.is_in_snapshot_mode():
+            ps_rate = profit_scenarios.get("exchange_rate")
+            exchange_rate = float(ps_rate) if ps_rate is not None else float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
+            ps_cost = profit_scenarios.get("calculation_total_cost_rmb")
+            system_cost_for_record = float(ps_cost) if ps_cost is not None else (self.current_system_cost or 0.0)
+            adopted_cost = float(ps_cost) if ps_cost is not None else self.profit_binder._calculation_total_cost_rmb
+        else:
+            exchange_rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
+            system_cost_for_record = self.current_system_cost
+            adopted_cost = self.profit_binder._calculation_total_cost_rmb
         return {
             "product_name": self.product_summary.text().strip(),
-            "product_link": self.product_link.text().strip(),
+            "product_link": self.product_link.text().strip() if self.product_link else "",
             "status": "active",
             "layers": {
                 "ai_raw": {
@@ -1476,18 +1415,18 @@ class CalculationPage(QWidget):
                     "conservative": conservative.to_dict(),
                     "selected_packaging": scenario.label,
                     "selected_forwarder_id": self.selected_forwarder_id,
-                    "calculation_cost_rmb": self.adopted_cost.value(),
+                    "calculation_cost_rmb": adopted_cost,
                     "packaging_estimate_stale": self.packaging_stale,
                 },
                 "calculated": {
-                    "system_cost_rmb": self.current_system_cost,
-                    "sale_price_usd": self.sale_price.value(),
-                    "reserve_percent": self.reserve_percent.value(),
-                    "profit_rmb": self.profit_value.value(),
-                    "profit_rate_percent": self.profit_rate.value(),
-                    "exchange_rate": float(self.settings.get("exchange_rate_usd_to_rmb", 7.2)),
+                    "system_cost_rmb": system_cost_for_record,
+                    "sale_price_usd": no_activity.get("sale_price_usd", 0.0),
+                    "reserve_percent": profit_scenarios.get("reserve_percent", 0.0),
+                    "profit_rmb": no_activity.get("profit_rmb", 0.0),
+                    "profit_rate_percent": (activity.get("profit_rate_on_cost") or 0.0) * 100.0,
+                    "exchange_rate": exchange_rate,
                     "tail_fee_rmb": self.tail_fee_rmb.value(),
-                    "selected_profit_rule_id": self.selected_profit_rule_id,
+                    "selected_profit_rule_id": self.profit_binder.selected_rule_id,
                     "total_logistics_rmb": self.current_quote.total_logistics_rmb if self.current_quote else None,
                     "logistics_quote": asdict(self.current_quote) if self.current_quote else {},
                     "forwarder_name": self.current_forwarder.name if self.current_forwarder else "",
@@ -1500,7 +1439,8 @@ class CalculationPage(QWidget):
             },
             "product_cost_rmb": self.product_cost.value(),
             "domestic_shipping_rmb": self.domestic_shipping.value(),
-            "shein_quote_usd": self.shein_quote.value(),
+            "shein_quote_usd": profit_scenarios.get("shein_quote_usd", 0.0),
+            "profit_scenarios": profit_scenarios,
         }
 
     def save_record(self) -> None:
@@ -1558,7 +1498,8 @@ class CalculationPage(QWidget):
         self.product_summary.clear()
         self.material_summary.clear()
         self.structure_summary.clear()
-        self.product_link.clear()
+        if self.product_link is not None:
+            self.product_link.clear()
         for combo in (self.rigidity_combo, self.foldability_combo, self.compressibility_combo):
             combo.setCurrentIndex(0)
         for box in self.structure_checks.values():
@@ -1570,29 +1511,22 @@ class CalculationPage(QWidget):
             self.bare_width,
             self.bare_height,
             self.bare_weight,
-            self.adopted_cost,
-            self.shein_quote,
-            self.sale_price,
-            self.reserve_percent,
-            self.profit_value,
-            self.profit_rate,
         ):
             widget.setValue(0)
         for fields in (self.normal_fields, self.conservative_fields):
-            if "method" in fields:
-                fields["method"].clear()
+            fields["method"].setText("")
             for key in ("length", "width", "height", "weight"):
                 fields[key].setValue(0)
-            fields["reason"].setText("待估算")
-            fields["changed"].setText("")
         for slot in self.image_slots:
             slot.clear_image()
         self._updating = False
         self.package_selection_changed = False
         self.forwarder_selection_changed = False
         self._select_package("正常档", user=False)
+        self.profit_binder.reset()
         self.review_badge.setText("待识别")
         self.review_badge.setProperty("warning", True)
+        self._refresh_badge_style()
         self.mark_saved()
         self.recalculate()
 
@@ -1607,10 +1541,10 @@ class CalculationPage(QWidget):
         self.manual_scenarios.clear()
         self.record_id = record_id
         self.product_summary.setText(str(record.get("product_name") or ""))
-        self.product_link.setText(str(record.get("product_link") or ""))
+        if self.product_link is not None:
+            self.product_link.setText(str(record.get("product_link") or ""))
         self.product_cost.setValue(float(record.get("product_cost_rmb", 0)))
         self.domestic_shipping.setValue(float(record.get("domestic_shipping_rmb", 0)))
-        self.shein_quote.setValue(float(record.get("shein_quote_usd", 0)))
         layers = record.get("layers", {})
         ai_raw = layers.get("ai_raw", {})
         observation_raw = ai_raw.get("observation") or {}
@@ -1633,13 +1567,11 @@ class CalculationPage(QWidget):
         self.bare_weight.setValue(float(bare.get("weight_g") or 0))
         for key, fields in (("normal", self.normal_fields), ("conservative", self.conservative_fields)):
             raw = adopted.get(key, {})
-            if "method" in fields:
-                fields["method"].setText(str(raw.get("packaging_method") or ""))
+            fields["method"].setText(str(raw.get("packaging_method") or ""))
             fields["length"].setValue(float(raw.get("length_cm") or 0))
             fields["width"].setValue(float(raw.get("width_cm") or 0))
             fields["height"].setValue(float(raw.get("height_cm") or 0))
             fields["weight"].setValue(float(raw.get("weight_g") or 0))
-            fields["reason"].setText(str(raw.get("reasoning_summary") or ""))
             if raw.get("needs_review"):
                 self.manual_scenarios.add("正常档" if key == "normal" else "保守档")
             if key == "normal" and raw.get("needs_review") and not self.observation.display_packaging_summary:
@@ -1650,8 +1582,6 @@ class CalculationPage(QWidget):
         selected_package = str(adopted.get("selected_packaging") or "正常档")
         self.selected_forwarder_id = str(adopted.get("selected_forwarder_id") or self.selected_forwarder_id)
         calculated = layers.get("calculated", {})
-        self.sale_price.setValue(float(calculated.get("sale_price_usd") or 0))
-        self.reserve_percent.setValue(float(calculated.get("reserve_percent") or 0))
         self.selected_profit_rule_id = str(calculated.get("selected_profit_rule_id") or self.selected_profit_rule_id)
         for slot in self.image_slots:
             slot.clear_image()
@@ -1667,31 +1597,50 @@ class CalculationPage(QWidget):
                     pass
         self._updating = False
         self.rebuild_quote_cards()
-        self.rebuild_profit_rules()
-        self._select_package(selected_package, user=False)
-        if self.packaging_stale:
-            self.review_badge.setText("估算已过期 · 禁止保存")
-            self.review_badge.setProperty("warning", True)
-            self.review_badge.setProperty("success", False)
-        elif self.proposal is not None:
-            if self.proposal.needs_review or self.manual_scenarios:
-                self.review_badge.setText("需要复核")
+        # 打开记录前捕获当前设置（汇率/启用规则/选中规则），
+        # 供退出快照显示模式时恢复为当前推算依据。
+        # 直接读 settings_service 最新值，避免页面缓存过期。
+        current_settings = self.context.settings_service.load()
+        self.profit_binder.capture_current_settings(
+            exchange_rate=float(current_settings.get("exchange_rate_usd_to_rmb", 7.2)),
+            rules=tuple(
+                rule for rule in self.context.settings_service.rules_from_settings(current_settings)
+                if rule.enabled and not rule.archived
+            ),
+            selected_rule_id=str(current_settings.get("selected_profit_rule_id") or ""),
+        )
+        self.profit_binder.set_selected_rule_id(self.selected_profit_rule_id)
+        # 记录加载保护：内部 _select_package/recalculate/set_calculation_cost
+        # 期间不得退出历史快照；恢复结束后在 finally 中复位。
+        self.profit_binder._loading_record = True
+        try:
+            self.profit_binder.load_from_record(record)
+            self._select_package(selected_package, user=False)
+            if self.packaging_stale:
+                self.review_badge.setText("估算已过期 · 禁止保存")
                 self.review_badge.setProperty("warning", True)
                 self.review_badge.setProperty("success", False)
+            elif self.proposal is not None:
+                if self.proposal.needs_review or self.manual_scenarios:
+                    self.review_badge.setText("需要复核")
+                    self.review_badge.setProperty("warning", True)
+                    self.review_badge.setProperty("success", False)
+                else:
+                    self.review_badge.setText("已载入")
+                    self.review_badge.setProperty("success", True)
+                    self.review_badge.setProperty("warning", False)
             else:
-                self.review_badge.setText("已载入")
-                self.review_badge.setProperty("success", True)
-                self.review_badge.setProperty("warning", False)
-        else:
-            self.review_badge.setText("人工方案 · 需要复核")
-            self.review_badge.setProperty("warning", True)
-            self.review_badge.setProperty("success", False)
-        self._refresh_badge_style()
-        self.recalculate()
+                self.review_badge.setText("人工方案 · 需要复核")
+                self.review_badge.setProperty("warning", True)
+                self.review_badge.setProperty("success", False)
+            self._refresh_badge_style()
+            self.recalculate()
+        finally:
+            self.profit_binder._loading_record = False
         self.mark_saved()
 
     def set_product_link(self, link: str) -> None:
-        if link.strip():
+        if self.product_link is not None and link.strip():
             self.product_link.setText(link.strip())
 
     def refresh_settings(self) -> None:
@@ -1700,8 +1649,14 @@ class CalculationPage(QWidget):
         self.selected_profit_rule_id = str(self.settings.get("selected_profit_rule_id") or self.selected_profit_rule_id)
         self._updating = True
         self.tail_fee_usd.setValue(float(self.settings.get("default_tail_fee_usd", 5.56)))
-        self.tail_fee_rmb.setValue(float(self.settings.get("default_tail_fee_rmb", 40.0)))
         self._updating = False
+        # 重新同步 RMB = USD × 当前有效汇率，确保汇率变化后一致性
+        self._sync_tail_rmb_from_usd(recalculate=False)
         self.rebuild_quote_cards()
-        self.rebuild_profit_rules()
+        self.profit_binder.set_exchange_rate(float(self.settings.get("exchange_rate_usd_to_rmb", 7.2)))
+        self.profit_binder.set_selected_rule_id(self.selected_profit_rule_id)
+        self.profit_binder.set_rules(tuple(
+            rule for rule in self.context.settings_service.rules_from_settings(self.settings)
+            if rule.enabled and not rule.archived
+        ))
         self.recalculate()

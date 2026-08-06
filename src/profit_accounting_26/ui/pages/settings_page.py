@@ -1,3 +1,21 @@
+"""设置页 —— 冻结 UI 绑定版（2.6.1-dual-profit）。
+
+布局完全来自 ``forms/settings_page.ui``（QUiLoader 运行时加载，不生成 Python 布局副本）；
+控件按 ``objectName`` 用 ``findChild`` 获取。
+
+与旧版一致的业务能力：
+- 基础设置（显示名称、日志级别、日志保留天数、日志目录）；
+- API Profile 管理（新建/更新配置、私钥、视觉/局部重估绑定、供应商预设）；
+- 货代管理（新增、归档过滤、表格校验、独立保存）；
+- 利润调整规则（新增、编辑、启用/停用、归档、删除）；
+- 保存/放弃修改；跨目录镜像；三个信号保持不变。
+
+运行时处理（契约 §13.2）：
+- API 配置第 2、3 行 Designer 预览控件隐藏；``btnTestApi1``/``btnDeleteApi1`` 隐藏；
+- 下拉框的 Designer 预览项替换为真实运行时数据（供应商预设、API 配置、
+  规则引擎合法的条件字段/比较方式/调整方向/币种/百分比基数）。
+"""
+
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -11,8 +29,8 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
-    QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -22,6 +40,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
+    QWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -36,7 +55,7 @@ from profit_accounting_26.domain.rules import (
     CompareOp,
 )
 from profit_accounting_26.shared import ApplicationPaths
-from profit_accounting_26.ui.widgets import Card, QuickLineEdit, SectionHeader
+from profit_accounting_26.ui.ui_loader import load_settings_page
 
 
 class SettingsPage(QWidget):
@@ -52,15 +71,229 @@ class SettingsPage(QWidget):
         self._updating = False
         self._show_archived_forwarders = False
         self.visible_rule_indices: list[int] = []
+        self.rules_data: list[dict] = []
 
-        self.content_layout = QVBoxLayout(self)
-        self.content_layout.setContentsMargins(12, 10, 12, 12)
-        self.content_layout.setSpacing(8)
-        self._build_basic()
-        self._build_forwarders()
-        self._build_rules()
-        self._build_actions()
+        # 从冻结 .ui 加载整页布局
+        root = load_settings_page(self)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(root)
+        self._root = root
+
+        self._find_widgets()
+        self._hide_preview_controls()
+        self._init_runtime_items()
+        self._connect_signals()
+        self._setup_forwarder_table()
         self.load_settings()
+
+    # ------------------------------------------------------------------
+    # 控件查找
+    # ------------------------------------------------------------------
+
+    def _find_widgets(self) -> None:
+        f = self._root.findChild
+        # 基础设置
+        self.display_name = f(QLineEdit, "txtDisplayName")
+        self.log_level = f(QComboBox, "cmbLogLevel")
+        if self.log_level:
+            self.log_level.setToolTip(
+                "DEBUG：最详细，仅开发排查时使用\n"
+                "INFO：记录正常运行信息，推荐日常使用\n"
+                "WARNING：只记录警告和错误\n"
+                "ERROR：只记录错误"
+            )
+        self.log_retention_days = f(QDoubleSpinBox, "spinLogRetentionDays")
+        self.log_directory = f(QLineEdit, "txtLogDirectory")
+        self.btn_open_log_dir = f(QPushButton, "btnOpenLogDirectory")
+        self.btn_save = f(QPushButton, "btnSaveSettings")
+        self.btn_discard = f(QPushButton, "btnDiscardSettings")
+        # API Profile
+        self.api_profile_select = f(QComboBox, "cmbApiProfileSelect")
+        self.btn_add_api = f(QPushButton, "btnAddApiConfig")
+        self.visual_binding = f(QComboBox, "cmbVisionApiConfig")
+        self.local_binding = f(QComboBox, "cmbPartialEstimateApiConfig")
+        self.api_profile_name = f(QLineEdit, "txtApiProfileName")
+        self.api_provider = f(QComboBox, "cmbApiProvider")
+        self.vision_endpoint = f(QLineEdit, "txtApiEndpoint")
+        self.vision_model = f(QLineEdit, "txtApiModel")
+        self.vision_key = f(QLineEdit, "txtApiKey")
+        self.btn_show_key = f(QPushButton, "btnShowApiKey1")
+        self.btn_save_api = f(QPushButton, "btnSaveApiProfile")
+        # 货代
+        self.show_active = f(QPushButton, "btnShowActiveFreight")
+        self.show_archived = f(QPushButton, "btnShowArchivedFreight")
+        self.btn_add_forwarder = f(QPushButton, "btnAddFreightForwarder")
+        self.btn_save_forwarders = f(QPushButton, "btnSaveForwarders")
+        self.forwarder_table = f(QTableWidget, "tableForwarders")
+        # 利润规则
+        self.btn_add_rule = f(QPushButton, "btnAddProfitRule")
+        self.rule_list = f(QListWidget, "listProfitRules")
+        self.rule_name = f(QLineEdit, "txtRuleName")
+        self.rule_condition_field = f(QComboBox, "cmbRuleConditionField")
+        self.rule_compare = f(QComboBox, "cmbRuleCompareMode")
+        self.rule_condition_value = f(QDoubleSpinBox, "spinRuleConditionValue")
+        self.rule_direction = f(QComboBox, "cmbRuleAdjustmentDirection")
+        self.rule_type = f(QComboBox, "cmbRuleAdjustmentType")
+        self.rule_value = f(QDoubleSpinBox, "spinRuleAdjustmentValue")
+        self.rule_currency = f(QComboBox, "cmbRuleCurrency")
+        self.rule_percent_base = f(QComboBox, "cmbRulePercentBase")
+        self.rule_description = f(QTextEdit, "txtRuleDescription")
+        self.btn_save_rule = f(QPushButton, "btnSaveProfitRule")
+        self.btn_disable_rule = f(QPushButton, "btnDisableProfitRule")
+        self.btn_archive_rule = f(QPushButton, "btnArchiveProfitRule")
+        self.btn_delete_rule = f(QPushButton, "btnDeleteProfitRule")
+
+    def _hide_preview_controls(self) -> None:
+        """契约 §13.2：隐藏 Designer 预览行与无真实业务的测试/删除按钮。
+        例外：btnDeleteApi1 改为可见删除按钮。"""
+        for name in ("btnTestApi1",):
+            widget = self._root.findChild(QWidget, name)
+            if widget:
+                widget.setVisible(False)
+        # btnDeleteApi1：改为可见并配置为删除按钮
+        self.btn_delete_api = self._root.findChild(QPushButton, "btnDeleteApi1")
+        if self.btn_delete_api:
+            self.btn_delete_api.setText("删除配置")
+            self.btn_delete_api.setVisible(True)
+            self.btn_delete_api.clicked.connect(self._delete_api_profile)
+            self.btn_delete_api.setEnabled(False)
+        for suffix in ("2", "3"):
+            for prefix in (
+                "txtApiConfigName", "cmbApiProvider", "txtApiEndpoint",
+                "txtApiModel", "txtApiKey", "btnShowApiKey", "btnSaveApi",
+                "btnDeleteApi", "btnTestApi",
+            ):
+                widget = self._root.findChild(QWidget, f"{prefix}{suffix}")
+                if widget:
+                    widget.setVisible(False)
+
+    def _init_runtime_items(self) -> None:
+        """把 Designer 预览下拉项替换为与引擎/存储一致的真实取值。"""
+        # 供应商预设
+        self.api_provider.clear()
+        self.api_provider.addItems(PROVIDER_PRESETS.keys())
+        # 规则条件字段（与 calculate_profit 的 rule_context 键一致）
+        self.rule_condition_field.clear()
+        self.rule_condition_field.addItem("最终售价（美元）", "sale_price_usd")
+        self.rule_condition_field.addItem("最终售价（人民币）", "sale_price_rmb")
+        self.rule_condition_field.addItem("系统总成本（人民币）", "total_cost_rmb")
+        # 比较方式
+        self.rule_compare.clear()
+        for text, value in (("小于", "lt"), ("小于等于", "lte"), ("大于", "gt"), ("大于等于", "gte"), ("等于", "eq")):
+            self.rule_compare.addItem(text, value)
+        # 调整方向
+        self.rule_direction.clear()
+        self.rule_direction.addItem("增加收入", "income")
+        self.rule_direction.addItem("增加成本", "cost")
+        # 调整类型
+        self.rule_type.clear()
+        self.rule_type.addItem("固定金额", "fixed")
+        self.rule_type.addItem("百分比", "percent")
+        # 币种
+        self.rule_currency.clear()
+        self.rule_currency.addItems(["USD", "RMB"])
+        # 百分比基数（与 rule_context 键一致）
+        self.rule_percent_base.clear()
+        self.rule_percent_base.addItem("不适用", None)
+        self.rule_percent_base.addItem("最终售价人民币", "sale_price_rmb")
+        self.rule_percent_base.addItem("预留后收入", "revenue_after_reserve_rmb")
+        self.rule_percent_base.addItem("计算采用总成本", "total_cost_rmb")
+        # 数值范围
+        for spin in (self.rule_condition_value, self.rule_value):
+            spin.setRange(0, 1_000_000)
+            spin.setDecimals(4)
+            spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        if self.log_retention_days:
+            self.log_retention_days.setRange(1, 3650)
+            self.log_retention_days.setDecimals(0)
+        # 日志目录只读
+        if self.log_directory:
+            self.log_directory.setReadOnly(True)
+        # API Key 默认密文
+        if self.vision_key:
+            self.vision_key.setEchoMode(QLineEdit.EchoMode.Password)
+        # 过滤按钮为可切换状态
+        for button in (self.show_active, self.show_archived):
+            if button:
+                button.setCheckable(True)
+
+    def _connect_signals(self) -> None:
+        if self.btn_save:
+            self.btn_save.clicked.connect(self.save_settings)
+        if self.btn_discard:
+            self.btn_discard.clicked.connect(self.load_settings)
+        if self.btn_open_log_dir:
+            self.btn_open_log_dir.clicked.connect(
+                lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.context.paths.data_dir / "logs")))
+            )
+        if self.api_profile_select:
+            self.api_profile_select.currentIndexChanged.connect(self._load_selected_api_profile)
+        if self.btn_add_api:
+            self.btn_add_api.clicked.connect(self._new_api_profile)
+        if self.api_provider:
+            self.api_provider.currentTextChanged.connect(self._apply_provider_preset)
+        if self.btn_show_key:
+            self.btn_show_key.setCheckable(True)
+            self.btn_show_key.toggled.connect(self._toggle_api_key_visibility)
+        if self.btn_save_api:
+            self.btn_save_api.clicked.connect(self.save_api_profile)
+        if self.show_active:
+            self.show_active.clicked.connect(lambda: self.filter_forwarders(False))
+        if self.show_archived:
+            self.show_archived.clicked.connect(lambda: self.filter_forwarders(True))
+        if self.btn_add_forwarder:
+            self.btn_add_forwarder.clicked.connect(self.add_forwarder_row)
+        if self.btn_save_forwarders:
+            self.btn_save_forwarders.clicked.connect(self.save_forwarders_only)
+        if self.forwarder_table:
+            self.forwarder_table.itemChanged.connect(lambda _item: self._mark_dirty())
+        if self.btn_add_rule:
+            self.btn_add_rule.clicked.connect(self.add_rule)
+        if self.rule_list:
+            self.rule_list.currentRowChanged.connect(self.load_rule_editor)
+        if self.btn_save_rule:
+            self.btn_save_rule.clicked.connect(self.save_current_rule)
+        if self.btn_disable_rule:
+            self.btn_disable_rule.setCheckable(True)
+            self.btn_disable_rule.toggled.connect(self._update_rule_toggle_text)
+        if self.btn_archive_rule:
+            self.btn_archive_rule.clicked.connect(self.archive_current_rule)
+        if self.btn_delete_rule:
+            self.btn_delete_rule.clicked.connect(self.delete_current_rule)
+        # 脏标记
+        if self.display_name:
+            self.display_name.textChanged.connect(lambda _text: self._mark_dirty())
+        if self.log_level:
+            self.log_level.currentIndexChanged.connect(lambda _index: self._mark_dirty())
+        if self.log_retention_days:
+            self.log_retention_days.valueChanged.connect(lambda _value: self._mark_dirty())
+        if self.visual_binding:
+            self.visual_binding.currentIndexChanged.connect(lambda _index: self._mark_dirty())
+        if self.local_binding:
+            self.local_binding.currentIndexChanged.connect(lambda _index: self._mark_dirty())
+
+    def _setup_forwarder_table(self) -> None:
+        if self.forwarder_table is None:
+            return
+        self.forwarder_table.setHorizontalHeaderLabels(
+            ["名称", "头程单价（RMB/kg）", "固定服务费（RMB）", "体积重除数", "启用状态", "操作", "内部ID", "归档"]
+        )
+        self.forwarder_table.setAlternatingRowColors(True)
+        self.forwarder_table.verticalHeader().setVisible(False)
+        self.forwarder_table.horizontalHeader().setStretchLastSection(False)
+        self.forwarder_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for col in (1, 2, 3):
+            self.forwarder_table.setColumnWidth(col, 160)
+        self.forwarder_table.setColumnWidth(4, 110)
+        self.forwarder_table.setColumnWidth(5, 100)
+        self.forwarder_table.setColumnHidden(6, True)
+        self.forwarder_table.setColumnHidden(7, True)
+
+    # ------------------------------------------------------------------
+    # 脏标记
+    # ------------------------------------------------------------------
 
     def _mark_dirty(self) -> None:
         if self._updating:
@@ -69,253 +302,68 @@ class SettingsPage(QWidget):
             self.dirty = True
             self.dirtyChanged.emit(True)
 
-    def _build_basic(self) -> None:
-        card = Card()
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(10, 7, 10, 8)
-        layout.setSpacing(6)
-        layout.addWidget(SectionHeader("基础设置"))
-        grid = QGridLayout()
-        grid.setSpacing(8)
-        self.display_name = QuickLineEdit()
-        self.display_name.setMaximumWidth(300)
-        self.vision_endpoint = QuickLineEdit()
-        self.vision_endpoint.setPlaceholderText("例如：https://api.openai.com/v1")
-        self.vision_model = QuickLineEdit()
-        self.vision_model.setPlaceholderText("支持图片的模型名称")
-        self.vision_key = QuickLineEdit()
-        self.vision_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.vision_key.setPlaceholderText("API Key，仅保存在本机设置文件")
-        self.api_profile_select = QComboBox()
-        self.api_profile_name = QuickLineEdit()
-        self.api_profile_name.setPlaceholderText("配置名称")
-        self.api_provider = QComboBox()
-        self.api_provider.addItems(PROVIDER_PRESETS.keys())
-        self.visual_binding = QComboBox()
-        self.local_binding = QComboBox()
-        self.save_api_profile_button = QPushButton("保存 API 配置")
-        self.save_api_profile_button.setProperty("primary", True)
-        self.save_api_profile_button.clicked.connect(self.save_api_profile)
-        self.api_profile_select.currentIndexChanged.connect(self._load_selected_api_profile)
-        self.api_provider.currentTextChanged.connect(self._apply_provider_preset)
-        fields = [
-            ("展示名称", self.display_name),
-            ("AI API地址", self.vision_endpoint),
-            ("AI模型", self.vision_model),
-            ("AI API Key", self.vision_key),
-        ]
-        for index, (label_text, widget) in enumerate(fields):
-            box = QWidget()
-            box_layout = QVBoxLayout(box)
-            box_layout.setContentsMargins(0, 0, 0, 0)
-            box_layout.setSpacing(3)
-            label = QLabel(label_text)
-            label.setProperty("muted", True)
-            box_layout.addWidget(label)
-            box_layout.addWidget(widget)
-            grid.addWidget(box, 0, index)
-        grid.setColumnStretch(1, 2)
-        layout.addLayout(grid)
-        api_row = QHBoxLayout()
-        api_row.setSpacing(7)
-        for widget in (
-            QLabel("API配置"), self.api_profile_select, self.api_profile_name, self.api_provider,
-            QLabel("视觉/整体"), self.visual_binding, QLabel("局部文字"), self.local_binding,
-            self.save_api_profile_button,
-        ):
-            api_row.addWidget(widget)
-        layout.addLayout(api_row)
-        log_row = QHBoxLayout()
-        self.log_directory = QuickLineEdit(str(context_path := self.context.paths.data_dir / "logs"))
-        self.log_directory.setReadOnly(True)
-        self.log_level = QComboBox(); self.log_level.addItems(["ERROR", "WARNING", "INFO", "DEBUG"])
-        self.log_retention_days = QDoubleSpinBox(); self.log_retention_days.setRange(1, 3650); self.log_retention_days.setDecimals(0); self.log_retention_days.setFixedWidth(80)
-        open_logs = QPushButton("打开日志目录")
-        open_logs.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(context_path))))
-        for widget in (QLabel("日志目录"), self.log_directory, QLabel("日志级别"), self.log_level, QLabel("保留天数"), self.log_retention_days, open_logs): log_row.addWidget(widget)
-        layout.addLayout(log_row)
-        self.content_layout.addWidget(card)
-        for widget in (self.display_name, self.vision_endpoint, self.vision_model, self.vision_key):
-            widget.textChanged.connect(lambda _text: self._mark_dirty())
-        self.visual_binding.currentIndexChanged.connect(lambda _index: self._mark_dirty())
-        self.local_binding.currentIndexChanged.connect(lambda _index: self._mark_dirty())
-        self.log_level.currentIndexChanged.connect(lambda _index: self._mark_dirty())
-        self.log_retention_days.valueChanged.connect(lambda _value: self._mark_dirty())
-
-    def _build_forwarders(self) -> None:
-        card = Card()
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(10, 7, 10, 8)
-        layout.setSpacing(6)
-        header = SectionHeader("货代管理")
-        self.show_active = QPushButton("使用中的货代")
-        self.show_active.setCheckable(True)
-        self.show_active.setChecked(True)
-        self.show_archived = QPushButton("已归档")
-        self.show_archived.setCheckable(True)
-        add = QPushButton("新增货代")
-        save = QPushButton("保存货代设置")
-        save.setProperty("primary", True)
-        self.show_active.clicked.connect(lambda: self.filter_forwarders(False))
-        self.show_archived.clicked.connect(lambda: self.filter_forwarders(True))
-        add.clicked.connect(self.add_forwarder_row)
-        save.clicked.connect(self.save_forwarders_only)
-        for widget in (self.show_active, self.show_archived, add, save):
-            header.right_layout.addWidget(widget)
-        layout.addWidget(header)
-        self.forwarder_table = QTableWidget(0, 8)
-        self.forwarder_table.setHorizontalHeaderLabels(
-            ["名称", "头程单价（RMB/kg）", "固定服务费（RMB）", "体积重除数", "启用状态", "操作", "内部ID", "归档"]
-        )
-        self.forwarder_table.setAlternatingRowColors(True)
-        self.forwarder_table.verticalHeader().setVisible(False)
-        self.forwarder_table.horizontalHeader().setStretchLastSection(False)
-        from PySide6.QtWidgets import QHeaderView
-        self.forwarder_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for col in (1, 2, 3):
-            self.forwarder_table.setColumnWidth(col, 160)
-        self.forwarder_table.setColumnWidth(4, 110)
-        self.forwarder_table.setColumnWidth(5, 100)
-        self.forwarder_table.setColumnHidden(6, True)
-        self.forwarder_table.setColumnHidden(7, True)
-        self.forwarder_table.setFixedHeight(190)
-        self.forwarder_table.itemChanged.connect(lambda _item: self._mark_dirty())
-        layout.addWidget(self.forwarder_table)
-        self.content_layout.addWidget(card)
-
-    def _build_rules(self) -> None:
-        card = Card()
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(10, 7, 10, 8)
-        layout.setSpacing(6)
-        header = SectionHeader("利润调整规则")
-        add = QPushButton("新增规则")
-        add.clicked.connect(self.add_rule)
-        header.right_layout.addWidget(add)
-        layout.addWidget(header)
-        body = QHBoxLayout()
-        body.setSpacing(8)
-        self.rule_list = QListWidget()
-        self.rule_list.setMinimumWidth(300)
-        self.rule_list.setMaximumWidth(390)
-        self.rule_list.currentRowChanged.connect(self.load_rule_editor)
-        body.addWidget(self.rule_list, 1)
-
-        editor = Card(soft=True)
-        form = QGridLayout(editor)
-        form.setContentsMargins(9, 8, 9, 8)
-        form.setHorizontalSpacing(7)
-        form.setVerticalSpacing(5)
-        self.rule_name = QuickLineEdit()
-        self.rule_condition_field = QComboBox()
-        self.rule_condition_field.addItem("最终售价（美元）", "sale_price_usd")
-        self.rule_condition_field.addItem("最终售价（人民币）", "sale_price_rmb")
-        self.rule_compare = QComboBox()
-        for text, value in (("小于", "lt"), ("小于等于", "lte"), ("大于", "gt"), ("大于等于", "gte"), ("等于", "eq")):
-            self.rule_compare.addItem(text, value)
-        self.rule_condition_value = QDoubleSpinBox()
-        self.rule_condition_value.setRange(0, 1_000_000)
-        self.rule_condition_value.setDecimals(4)
-        self.rule_condition_value.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self.rule_direction = QComboBox()
-        self.rule_direction.addItem("增加收入", "income")
-        self.rule_direction.addItem("增加成本", "cost")
-        self.rule_type = QComboBox()
-        self.rule_type.addItem("固定金额", "fixed")
-        self.rule_type.addItem("百分比", "percent")
-        self.rule_value = QDoubleSpinBox()
-        self.rule_value.setRange(0, 1_000_000)
-        self.rule_value.setDecimals(4)
-        self.rule_value.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self.rule_currency = QComboBox()
-        self.rule_currency.addItems(["USD", "RMB"])
-        self.rule_percent_base = QComboBox()
-        self.rule_percent_base.addItem("不适用", None)
-        self.rule_percent_base.addItem("最终售价人民币", "sale_price_rmb")
-        self.rule_percent_base.addItem("预留后收入", "revenue_after_reserve_rmb")
-        self.rule_percent_base.addItem("计算采用总成本", "total_cost_rmb")
-        self.rule_description = QTextEdit()
-        self.rule_description.setFixedHeight(54)
-
-        fields = [
-            ("规则名称", self.rule_name),
-            ("条件字段", self.rule_condition_field),
-            ("比较方式", self.rule_compare),
-            ("条件值", self.rule_condition_value),
-            ("调整方向", self.rule_direction),
-            ("调整类型", self.rule_type),
-            ("调整值", self.rule_value),
-            ("币种", self.rule_currency),
-            ("百分比基数", self.rule_percent_base),
-        ]
-        for index, (label_text, widget) in enumerate(fields):
-            row = (index // 3) * 2
-            col = index % 3
-            label = QLabel(label_text)
-            label.setProperty("muted", True)
-            form.addWidget(label, row, col)
-            form.addWidget(widget, row + 1, col)
-        form.addWidget(QLabel("说明"), 6, 0)
-        form.addWidget(self.rule_description, 7, 0, 1, 3)
-
-        action_row = QHBoxLayout()
-        self.rule_enabled_toggle = QPushButton("停用")
-        self.rule_enabled_toggle.setCheckable(True)
-        self.rule_enabled_toggle.toggled.connect(self._update_rule_toggle_text)
-        save_rule = QPushButton("保存规则")
-        save_rule.setProperty("primary", True)
-        archive_rule = QPushButton("归档")
-        delete_rule = QPushButton("删除")
-        delete_rule.setProperty("danger", True)
-        save_rule.clicked.connect(self.save_current_rule)
-        archive_rule.clicked.connect(self.archive_current_rule)
-        delete_rule.clicked.connect(self.delete_current_rule)
-        for widget in (self.rule_enabled_toggle, save_rule, archive_rule, delete_rule):
-            action_row.addWidget(widget)
-        action_row.addStretch(1)
-        form.addLayout(action_row, 8, 0, 1, 3)
-        body.addWidget(editor, 3)
-        layout.addLayout(body)
-        self.content_layout.addWidget(card, 1)
-
-    def _build_actions(self) -> None:
-        card = Card()
-        layout = QHBoxLayout(card)
-        layout.setContentsMargins(10, 6, 10, 6)
-        layout.addStretch(1)
-        save = QPushButton("保存设置")
-        save.setProperty("primary", True)
-        discard = QPushButton("放弃修改")
-        save.clicked.connect(self.save_settings)
-        discard.clicked.connect(self.load_settings)
-        layout.addWidget(save)
-        layout.addSpacing(10)
-        layout.addWidget(discard)
-        layout.addStretch(1)
-        self.content_layout.addWidget(card)
+    # ------------------------------------------------------------------
+    # API Profile
+    # ------------------------------------------------------------------
 
     def _refresh_api_profiles(self) -> None:
         public = self.context.api_profile_store.load_public()
         profiles = [item for item in public["profiles"] if isinstance(item, dict)]
         bindings = public["button_bindings"]
-        for combo in (self.api_profile_select, self.visual_binding, self.local_binding):
+        # 视觉识图 / 局部文字重估 下拉框保留"新建配置"
+        for combo in (self.visual_binding, self.local_binding):
+            if combo is None:
+                continue
             combo.blockSignals(True)
             combo.clear()
             combo.addItem("新建配置", "")
             for item in profiles:
                 combo.addItem(str(item.get("display_name") or "未命名配置"), str(item.get("profile_id") or ""))
             combo.blockSignals(False)
-        self.visual_binding.setCurrentIndex(max(0, self.visual_binding.findData(bindings.get(VISUAL_AI))))
-        self.local_binding.setCurrentIndex(max(0, self.local_binding.findData(bindings.get(LOCAL_REESTIMATE))))
+        # API profile 选择下拉框：只显示已有配置
+        if self.api_profile_select is not None:
+            self.api_profile_select.blockSignals(True)
+            self.api_profile_select.clear()
+            self.api_profile_select.addItem("选择已有配置", "")
+            for item in profiles:
+                self.api_profile_select.addItem(str(item.get("display_name") or "未命名配置"), str(item.get("profile_id") or ""))
+            self.api_profile_select.blockSignals(False)
+        if self.visual_binding:
+            self.visual_binding.setCurrentIndex(max(0, self.visual_binding.findData(bindings.get(VISUAL_AI))))
+        if self.local_binding:
+            self.local_binding.setCurrentIndex(max(0, self.local_binding.findData(bindings.get(LOCAL_REESTIMATE))))
+
+    def _new_api_profile(self) -> None:
+        """新建配置：清空输入字段，进入新建模式。"""
+        if self.api_profile_select:
+            self.api_profile_select.setCurrentIndex(max(0, self.api_profile_select.findData("")))
+        # 清空输入字段
+        for field in (self.api_profile_name, self.vision_endpoint, self.vision_model, self.vision_key):
+            if field:
+                field.clear()
+        if self.api_provider:
+            self.api_provider.setCurrentText("自定义")
+        if self.btn_delete_api:
+            self.btn_delete_api.setEnabled(False)
 
     def _load_selected_api_profile(self, _index: int) -> None:
+        if self.api_profile_select is None:
+            return
         profile_id = str(self.api_profile_select.currentData() or "")
+        # 删除按钮状态：选中已保存配置时启用
+        if self.btn_delete_api:
+            self.btn_delete_api.setEnabled(bool(profile_id))
         if not profile_id:
-            self.api_profile_name.clear()
-            self.api_provider.setCurrentText("自定义")
-            self.vision_endpoint.clear()
-            self.vision_model.clear()
-            self.vision_key.clear()
+            if self.api_profile_name:
+                self.api_profile_name.clear()
+            if self.api_provider:
+                self.api_provider.setCurrentText("自定义")
+            if self.vision_endpoint:
+                self.vision_endpoint.clear()
+            if self.vision_model:
+                self.vision_model.clear()
+            if self.vision_key:
+                self.vision_key.clear()
             return
         raw = next(
             (item for item in self.context.api_profile_store.load_public()["profiles"] if item.get("profile_id") == profile_id),
@@ -323,68 +371,143 @@ class SettingsPage(QWidget):
         )
         keys = self.context.api_profile_store.load_keys()
         self._updating = True
-        self.api_profile_name.setText(str(raw.get("display_name") or ""))
-        self.api_provider.setCurrentText(str(raw.get("provider") or "自定义"))
-        self.vision_endpoint.setText(str(raw.get("api_url") or ""))
-        self.vision_model.setText(str(raw.get("model_name") or ""))
-        self.vision_key.setText(keys.get(profile_id, ""))
+        if self.api_profile_name:
+            self.api_profile_name.setText(str(raw.get("display_name") or ""))
+        if self.api_provider:
+            provider = str(raw.get("provider") or "自定义")
+            if self.api_provider.findText(provider) < 0:
+                self.api_provider.addItem(provider)
+            self.api_provider.setCurrentText(provider)
+        if self.vision_endpoint:
+            self.vision_endpoint.setText(str(raw.get("api_url") or ""))
+        if self.vision_model:
+            self.vision_model.setText(str(raw.get("model_name") or ""))
+        if self.vision_key:
+            self.vision_key.setText(keys.get(profile_id, ""))
         self._updating = False
 
     def _apply_provider_preset(self, provider: str) -> None:
         if self._updating:
             return
         preset = PROVIDER_PRESETS.get(provider, "")
-        if preset:
+        if preset and self.vision_endpoint:
             self.vision_endpoint.setText(preset)
 
+    def _toggle_api_key_visibility(self, visible: bool) -> None:
+        """临时显示/隐藏 API Key，不写日志、不复制、不持久化明文状态。"""
+        if self.vision_key:
+            self.vision_key.setEchoMode(
+                QLineEdit.EchoMode.Normal if visible else QLineEdit.EchoMode.Password
+            )
+
     def save_api_profile(self) -> None:
-        profile_id = str(self.api_profile_select.currentData() or "")
-        name = self.api_profile_name.text().strip()
-        if not name or not self.vision_endpoint.text().strip() or not self.vision_model.text().strip():
+        name = self.api_profile_name.text().strip() if self.api_profile_name else ""
+        endpoint = self.vision_endpoint.text().strip() if self.vision_endpoint else ""
+        model = self.vision_model.text().strip() if self.vision_model else ""
+        profile_id = str(self.api_profile_select.currentData() or "") if self.api_profile_select else ""
+        if not name or not endpoint or not model:
             QMessageBox.warning(self, "无法保存", "请填写配置名称、API地址和模型。")
             return
+        provider = self.api_provider.currentText() if self.api_provider else "自定义"
         if profile_id:
             profile = ApiProfile(
-                profile_id=profile_id, display_name=name, provider=self.api_provider.currentText(),
-                api_url=self.vision_endpoint.text().strip(), model_name=self.vision_model.text().strip(),
+                profile_id=profile_id, display_name=name, provider=provider,
+                api_url=endpoint, model_name=model,
             )
         else:
             profile = ApiProfile.create(
-                display_name=name, provider=self.api_provider.currentText(),
-                api_url=self.vision_endpoint.text().strip(), model_name=self.vision_model.text().strip(),
+                display_name=name, provider=provider,
+                api_url=endpoint, model_name=model,
             )
         stores = [self.context.api_profile_store]
         pending_data_dir = ApplicationPaths.configured_data_dir()
         if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
             stores.append(ApiProfileStore(pending_data_dir))
-        visual_id = str(self.visual_binding.currentData() or profile.profile_id)
-        local_id = str(self.local_binding.currentData() or profile.profile_id)
+        visual_id = str(self.visual_binding.currentData() or profile.profile_id) if self.visual_binding else profile.profile_id
+        local_id = str(self.local_binding.currentData() or profile.profile_id) if self.local_binding else profile.profile_id
+        key_text = self.vision_key.text() if self.vision_key else ""
         for store in stores:
-            store.save_profile(profile, self.vision_key.text())
+            store.save_profile(profile, key_text)
             store.bind(VISUAL_AI, visual_id)
             store.bind(LOCAL_REESTIMATE, local_id)
         self._refresh_api_profiles()
-        self.api_profile_select.setCurrentIndex(max(0, self.api_profile_select.findData(profile.profile_id)))
+        if self.api_profile_select:
+            self.api_profile_select.setCurrentIndex(max(0, self.api_profile_select.findData(profile.profile_id)))
         QMessageBox.information(self, "已保存", "API配置与私钥已保存到当前数据目录。")
+
+    def _delete_api_profile(self) -> None:
+        """删除当前选中的 API 配置，含二次确认与绑定清理。"""
+        if self.api_profile_select is None:
+            return
+        profile_id = str(self.api_profile_select.currentData() or "")
+        if not profile_id:
+            return
+        display_name = self.api_profile_select.currentText()
+        # 检查是否被视觉识图或局部文字重估使用
+        visual_id = str(self.visual_binding.currentData() or "") if self.visual_binding else ""
+        local_id = str(self.local_binding.currentData() or "") if self.local_binding else ""
+        in_use = []
+        if visual_id == profile_id:
+            in_use.append("视觉识图/整体识别")
+        if local_id == profile_id:
+            in_use.append("局部文字重估")
+        msg = f"确定永久删除配置「{display_name}」及其 API Key 吗？"
+        if in_use:
+            msg += f"\n\n该配置正在被以下功能使用：{', '.join(in_use)}\n删除后将清空对应绑定，需重新选择配置。"
+        answer = QMessageBox.question(
+            self, "删除配置", msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        # 删除配置和 key
+        stores = [self.context.api_profile_store]
+        pending_data_dir = ApplicationPaths.configured_data_dir()
+        if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
+            stores.append(ApiProfileStore(pending_data_dir))
+        for store in stores:
+            store.delete_profile(profile_id)
+            if in_use:
+                store.bind(VISUAL_AI, "")
+                store.bind(LOCAL_REESTIMATE, "")
+        self._refresh_api_profiles()
+        self._new_api_profile()
+
+    # ------------------------------------------------------------------
+    # 设置加载 / 保存
+    # ------------------------------------------------------------------
 
     def load_settings(self) -> None:
         self.settings = self.context.settings_service.load()
         self._updating = True
-        self.display_name.setText(str(self.settings.get("display_name") or "用户"))
-        self.log_level.setCurrentText(str(self.settings.get("log_level") or "INFO"))
-        self.log_retention_days.setValue(float(self.settings.get("log_retention_days", 30)))
-        self.vision_endpoint.setText(str(self.settings.get("vision_api_endpoint") or ""))
-        self.vision_model.setText(str(self.settings.get("vision_api_model") or ""))
-        self.vision_key.setText(str(self.settings.get("vision_api_key") or ""))
+        if self.display_name:
+            self.display_name.setText(str(self.settings.get("display_name") or "用户"))
+        if self.log_level:
+            self.log_level.setCurrentText(str(self.settings.get("log_level") or "INFO"))
+        if self.log_retention_days:
+            self.log_retention_days.setValue(float(self.settings.get("log_retention_days", 30)))
+        if self.log_directory:
+            self.log_directory.setText(str(self.context.paths.data_dir / "logs"))
         self._refresh_api_profiles()
         self._load_forwarder_rows(self.settings.get("forwarders", []))
         self.rules_data = list(self.settings.get("profit_rules", []))
         self.refresh_rule_list()
+        if self.vision_key:
+            self.vision_key.setEchoMode(QLineEdit.EchoMode.Password)
+        if self.btn_show_key:
+            self.btn_show_key.setChecked(False)
         self._updating = False
         self.dirty = False
         self.dirtyChanged.emit(False)
 
+    # ------------------------------------------------------------------
+    # 货代管理
+    # ------------------------------------------------------------------
+
     def _load_forwarder_rows(self, items: list[dict]) -> None:
+        if self.forwarder_table is None:
+            return
         self.forwarder_table.blockSignals(True)
         self.forwarder_table.setRowCount(0)
         for raw in items:
@@ -394,6 +517,8 @@ class SettingsPage(QWidget):
 
     def add_forwarder_row(self, checked: bool = False, *, raw: dict | None = None) -> None:
         del checked
+        if self.forwarder_table is None:
+            return
         data = raw or {
             "id": f"forwarder_{uuid4().hex}",
             "name": "新货代",
@@ -423,11 +548,26 @@ class SettingsPage(QWidget):
         enabled_box.setEnabled(not is_archived)
         enabled_box.toggled.connect(lambda _checked: self._mark_dirty())
         self.forwarder_table.setCellWidget(row, 4, enabled_box)
-        operation = QPushButton("已归档" if data.get("archived", False) else "归档")
+
+        # 操作列：活动行=归档按钮，已归档行=恢复+永久删除
         identifier = str(data.get("id") or f"forwarder_{uuid4().hex}")
-        operation.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
-        operation.setEnabled(not bool(data.get("archived", False)))
-        self.forwarder_table.setCellWidget(row, 5, operation)
+        op_layout = QHBoxLayout()
+        op_layout.setContentsMargins(2, 2, 2, 2)
+        op_layout.setSpacing(4)
+        op_widget = QWidget()
+        if is_archived:
+            btn_restore = QPushButton("恢复")
+            btn_restore.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
+            op_layout.addWidget(btn_restore)
+            btn_delete = QPushButton("永久删除")
+            btn_delete.clicked.connect(lambda _checked=False, fid=identifier: self._delete_forwarder_permanently(fid))
+            op_layout.addWidget(btn_delete)
+        else:
+            btn_archive = QPushButton("归档")
+            btn_archive.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
+            op_layout.addWidget(btn_archive)
+        op_widget.setLayout(op_layout)
+        self.forwarder_table.setCellWidget(row, 5, op_widget)
         self.forwarder_table.setItem(row, 6, QTableWidgetItem(identifier))
         self.forwarder_table.setItem(row, 7, QTableWidgetItem("1" if data.get("archived", False) else "0"))
         if raw is None:
@@ -444,40 +584,119 @@ class SettingsPage(QWidget):
         row = self._find_forwarder_row(identifier)
         if row < 0:
             return
-        if self.forwarder_table.item(row, 7).text() == "1":
+        is_archived = self.forwarder_table.item(row, 7).text() == "1"
+        if is_archived:
+            # 恢复：无需确认
+            self.forwarder_table.item(row, 7).setText("0")
+            enabled_box = self.forwarder_table.cellWidget(row, 4)
+            if isinstance(enabled_box, QCheckBox):
+                enabled_box.setChecked(True)
+                enabled_box.setEnabled(True)
+            for col in range(4):
+                item = self.forwarder_table.item(row, col)
+                if item is not None:
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+            # 重建操作按钮（归档）
+            op_widget = self.forwarder_table.cellWidget(row, 5)
+            if isinstance(op_widget, QWidget):
+                old_layout = op_widget.layout()
+                while old_layout and old_layout.count():
+                    it = old_layout.takeAt(0)
+                    if it.widget():
+                        it.widget().deleteLater()
+                op_layout = QHBoxLayout()
+                op_layout.setContentsMargins(2, 2, 2, 2)
+                op_layout.setSpacing(4)
+                btn_archive = QPushButton("归档")
+                btn_archive.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
+                op_layout.addWidget(btn_archive)
+                op_widget.setLayout(op_layout)
+        else:
+            # 归档
+            answer = QMessageBox.question(
+                self,
+                "归档货代",
+                "归档后该货代将从当前测算与使用中列表移除，确定继续吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            self.forwarder_table.item(row, 7).setText("1")
+            enabled_box = self.forwarder_table.cellWidget(row, 4)
+            if isinstance(enabled_box, QCheckBox):
+                enabled_box.setChecked(False)
+                enabled_box.setEnabled(False)
+            for col in range(4):
+                item = self.forwarder_table.item(row, col)
+                if item is not None:
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            # 重建操作按钮（恢复+永久删除）
+            op_widget = self.forwarder_table.cellWidget(row, 5)
+            if isinstance(op_widget, QWidget):
+                old_layout = op_widget.layout()
+                while old_layout and old_layout.count():
+                    it = old_layout.takeAt(0)
+                    if it.widget():
+                        it.widget().deleteLater()
+                op_layout = QHBoxLayout()
+                op_layout.setContentsMargins(2, 2, 2, 2)
+                op_layout.setSpacing(4)
+                btn_restore = QPushButton("恢复")
+                btn_restore.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
+                op_layout.addWidget(btn_restore)
+                btn_delete = QPushButton("永久删除")
+                btn_delete.clicked.connect(lambda _checked=False, fid=identifier: self._delete_forwarder_permanently(fid))
+                op_layout.addWidget(btn_delete)
+                op_widget.setLayout(op_layout)
+        self._mark_dirty()
+        self.filter_forwarders(self._show_archived_forwarders)
+
+    def _delete_forwarder_permanently(self, identifier: str) -> None:
+        """永久删除已归档货代。"""
+        row = self._find_forwarder_row(identifier)
+        if row < 0:
             return
+        if self.forwarder_table.item(row, 7).text() != "1":
+            QMessageBox.warning(self, "无法删除", "只能删除已归档的货代，使用中的货代请先归档。")
+            return
+        name = self.forwarder_table.item(row, 0).text()
         answer = QMessageBox.question(
-            self,
-            "归档货代",
-            "归档后该货代将从当前测算与使用中列表移除，确定继续吗？",
+            self, "永久删除",
+            f"确定永久删除货代「{name}」吗？\n\n历史记录将继续使用其保存的物流快照，不会被修改。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.forwarder_table.item(row, 7).setText("1")
-        enabled_box = self.forwarder_table.cellWidget(row, 4)
-        if isinstance(enabled_box, QCheckBox):
-            enabled_box.setChecked(False)
-            enabled_box.setEnabled(False)
-        operation = self.forwarder_table.cellWidget(row, 5)
-        if isinstance(operation, QPushButton):
-            operation.setText("已归档")
-            operation.setEnabled(False)
-        for col in range(4):
-            item = self.forwarder_table.item(row, col)
-            if item is not None:
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.forwarder_table.removeRow(row)
         self._mark_dirty()
-        self.filter_forwarders(self._show_archived_forwarders)
+        self._update_forwarder_counts()
 
     def filter_forwarders(self, archived: bool) -> None:
         self._show_archived_forwarders = archived
-        self.show_active.setChecked(not archived)
-        self.show_archived.setChecked(archived)
+        if self.show_active:
+            self.show_active.setChecked(not archived)
+        if self.show_archived:
+            self.show_archived.setChecked(archived)
         for row in range(self.forwarder_table.rowCount()):
             is_archived = self.forwarder_table.item(row, 7).text() == "1"
             self.forwarder_table.setRowHidden(row, is_archived != archived)
+        self._update_forwarder_counts()
+
+    def _update_forwarder_counts(self) -> None:
+        """实时统计使用中 / 已归档货代数并更新按钮文本。"""
+        active_count = 0
+        archived_count = 0
+        for row in range(self.forwarder_table.rowCount()):
+            if self.forwarder_table.item(row, 7).text() == "1":
+                archived_count += 1
+            else:
+                active_count += 1
+        if self.show_active:
+            self.show_active.setText(f"使用中的货代({active_count})")
+        if self.show_archived:
+            self.show_archived.setText(f"已归档({archived_count})")
 
     def collect_forwarders(self) -> list[dict]:
         output = []
@@ -500,16 +719,6 @@ class SettingsPage(QWidget):
             output.append(asdict(forwarder))
         return output
 
-    def _merge_forwarders_into_settings(self) -> list[dict]:
-        forwarders = self.collect_forwarders()
-        enabled_ids = [item["id"] for item in forwarders if item["enabled"] and not item["archived"]]
-        selected = self.settings.get("selected_forwarder_id")
-        if selected not in enabled_ids:
-            selected = enabled_ids[0] if enabled_ids else ""
-        self.settings["forwarders"] = forwarders
-        self.settings["selected_forwarder_id"] = selected
-        return forwarders
-
     def save_forwarders_only(self) -> None:
         try:
             forwarders = self.collect_forwarders()
@@ -528,7 +737,13 @@ class SettingsPage(QWidget):
         self.forwardersSaved.emit()
         QMessageBox.information(self, "已保存", "货代设置已保存。")
 
+    # ------------------------------------------------------------------
+    # 利润规则
+    # ------------------------------------------------------------------
+
     def refresh_rule_list(self) -> None:
+        if self.rule_list is None:
+            return
         current_source = self.current_rule_source_index()
         self.rule_list.clear()
         self.visible_rule_indices = []
@@ -547,7 +762,7 @@ class SettingsPage(QWidget):
             self.rule_list.setCurrentRow(target)
 
     def current_rule_source_index(self) -> int:
-        item = self.rule_list.currentItem() if hasattr(self, "rule_list") else None
+        item = self.rule_list.currentItem() if self.rule_list is not None else None
         if item is None:
             return -1
         value = item.data(Qt.ItemDataRole.UserRole)
@@ -586,23 +801,32 @@ class SettingsPage(QWidget):
             return
         raw = self.rules_data[self.visible_rule_indices[visible_row]]
         self._updating = True
-        self.rule_name.setText(str(raw.get("name") or ""))
+        if self.rule_name:
+            self.rule_name.setText(str(raw.get("name") or ""))
         self._set_combo_data(self.rule_condition_field, raw.get("condition_field"))
         self._set_combo_data(self.rule_compare, raw.get("compare_op"))
-        self.rule_condition_value.setValue(float(raw.get("condition_value", 0)))
+        if self.rule_condition_value:
+            self.rule_condition_value.setValue(float(raw.get("condition_value", 0)))
         self._set_combo_data(self.rule_direction, raw.get("direction"))
         self._set_combo_data(self.rule_type, raw.get("adjustment_type"))
-        self.rule_value.setValue(float(raw.get("adjustment_value", 0)))
-        self.rule_currency.setCurrentText(str(raw.get("currency") or "RMB"))
+        if self.rule_value:
+            self.rule_value.setValue(float(raw.get("adjustment_value", 0)))
+        if self.rule_currency:
+            self.rule_currency.setCurrentText(str(raw.get("currency") or "RMB"))
         self._set_combo_data(self.rule_percent_base, raw.get("percent_base"))
-        self.rule_enabled_toggle.setChecked(bool(raw.get("enabled", True)))
-        self.rule_description.setPlainText(str(raw.get("description") or ""))
+        if self.btn_disable_rule:
+            self.btn_disable_rule.setChecked(bool(raw.get("enabled", True)))
+        if self.rule_description:
+            self.rule_description.setPlainText(str(raw.get("description") or ""))
         self._updating = False
-        self._update_rule_toggle_text(self.rule_enabled_toggle.isChecked())
+        if self.btn_disable_rule:
+            self._update_rule_toggle_text(self.btn_disable_rule.isChecked())
 
     def _update_rule_toggle_text(self, checked: bool) -> None:
-        self.rule_enabled_toggle.setText("✓ 已启用" if checked else "停用")
-        self.rule_enabled_toggle.setStyleSheet(
+        if self.btn_disable_rule is None:
+            return
+        self.btn_disable_rule.setText("✓ 已启用" if checked else "停用")
+        self.btn_disable_rule.setStyleSheet(
             "color:#219B68;font-weight:600;" if checked else "color:#7E8999;"
         )
 
@@ -621,7 +845,7 @@ class SettingsPage(QWidget):
             adjustment_value=float(self.rule_value.value()),
             currency=self.rule_currency.currentText(),
             percent_base=self.rule_percent_base.currentData(),
-            enabled=self.rule_enabled_toggle.isChecked(),
+            enabled=self.btn_disable_rule.isChecked(),
             archived=False,
             description=self.rule_description.toPlainText().strip(),
         )
@@ -674,6 +898,10 @@ class SettingsPage(QWidget):
         self.refresh_rule_list()
         self._mark_dirty()
 
+    # ------------------------------------------------------------------
+    # 保存全部设置
+    # ------------------------------------------------------------------
+
     def save_settings(self) -> None:
         try:
             forwarders = self.collect_forwarders()
@@ -681,8 +909,25 @@ class SettingsPage(QWidget):
             QMessageBox.warning(self, "无法保存", str(exc))
             return
         latest = self.context.settings_service.load()
-        latest["log_level"] = self.log_level.currentText()
-        latest["log_retention_days"] = int(self.log_retention_days.value())
+
+        # 验证显示名称：去除首尾空格后 Unicode 可见字符 1-8 个
+        if self.display_name:
+            raw_name = self.display_name.text().strip()
+            visible_len = sum(1 for ch in raw_name if not ch.isspace())
+            if visible_len > 8:
+                QMessageBox.warning(
+                    self, "名称过长",
+                    f"显示名称最多 8 个字符，当前共 {visible_len} 个字符。\n请缩短后保存。",
+                )
+                return
+            display_name_val = raw_name if visible_len >= 1 else "用户"
+        else:
+            display_name_val = "用户"
+
+        if self.log_level:
+            latest["log_level"] = self.log_level.currentText()
+        if self.log_retention_days:
+            latest["log_retention_days"] = int(self.log_retention_days.value())
         enabled_ids = [item["id"] for item in forwarders if item["enabled"] and not item["archived"]]
         selected_forwarder = latest.get("selected_forwarder_id")
         if selected_forwarder not in enabled_ids:
@@ -697,7 +942,7 @@ class SettingsPage(QWidget):
             selected_rule = enabled_rule_ids[0] if enabled_rule_ids else ""
         latest.update(
             {
-                "display_name": self.display_name.text().strip() or "用户",
+                "display_name": display_name_val,
                 "forwarders": forwarders,
                 "selected_forwarder_id": selected_forwarder,
                 "profit_rules": self.rules_data,

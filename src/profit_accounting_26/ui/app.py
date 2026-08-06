@@ -17,7 +17,7 @@ def build_window():
 
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
     app = QApplication.instance() or QApplication(sys.argv)
-    app.setApplicationName("微智能利润管理软件 2.6")
+    app.setApplicationName("微智能利润管理软件 2.6.1")
     app.setOrganizationName("ProfitAccounting26")
     app.setWindowIcon(QIcon(str(resource_path("src/profit_accounting_26/ui/assets/app_icon_desktop_taskbar.svg"))))
     context = AppContext.create_default()

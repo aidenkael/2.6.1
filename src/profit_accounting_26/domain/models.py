@@ -78,6 +78,87 @@ class ProfitResult:
     profit_rate_on_cost: float | None
 
 
+@dataclass(frozen=True, slots=True)
+class RuleEvaluation:
+    """单条利润规则在某个场景下的评估明细，用于 UI tooltip。
+
+    不改变原规则数据格式，仅作为非破坏性的评估结果结构。
+    """
+
+    rule_id: str
+    rule_name: str
+    scenario: str  # "no_activity" | "activity"
+    condition_field: str
+    condition_value: float
+    compare_op: str
+    matched: bool
+    direction: str  # "income" | "cost"
+    amount_rmb: float
+    amount_original: float
+    currency: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class ScenarioProfitResult:
+    """单场景利润结果（无活动或活动后）。
+
+    每个场景按其真实售价独立执行规则；reserve 已在传入售价中折算，
+    因此内部 reserve_rate 恒为 0。
+    """
+
+    sale_price_usd: float
+    sale_price_rmb: float
+    total_cost_rmb: float
+    income_adjustment_rmb: float
+    cost_adjustment_rmb: float
+    profit_rmb: float
+    profit_usd: float
+    profit_rate_on_cost: float | None
+    rule_evaluations: tuple[RuleEvaluation, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sale_price_usd": self.sale_price_usd,
+            "sale_price_rmb": self.sale_price_rmb,
+            "total_cost_rmb": self.total_cost_rmb,
+            "income_adjustment_rmb": self.income_adjustment_rmb,
+            "cost_adjustment_rmb": self.cost_adjustment_rmb,
+            "profit_rmb": self.profit_rmb,
+            "profit_usd": self.profit_usd,
+            "profit_rate_on_cost": self.profit_rate_on_cost,
+            "rule_evaluations": [item.to_dict() for item in self.rule_evaluations],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DualProfitResult:
+    """双场景利润结果（无活动 + 活动后）。
+
+    利润率统一为 活动后利润 RMB / 计算总成本 RMB。
+    """
+
+    calculation_total_cost_rmb: float
+    exchange_rate: float
+    reserve_percent: float  # 0-100
+    no_activity: ScenarioProfitResult
+    activity: ScenarioProfitResult
+    profit_rate: float | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": "2.6.1-dual-profit-v1",
+            "calculation_total_cost_rmb": self.calculation_total_cost_rmb,
+            "exchange_rate": self.exchange_rate,
+            "reserve_percent": self.reserve_percent,
+            "no_activity": self.no_activity.to_dict(),
+            "activity": self.activity.to_dict(),
+            "profit_rate": self.profit_rate,
+        }
+
+
 @dataclass(slots=True)
 class ValueLayers:
     ai_raw: dict[str, Any] = field(default_factory=dict)
