@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<ui version="4.0">
-<widget class="QDialog" name="api_profile_editor"><layout class="QVBoxLayout" name="api_profile_editorLayout"><item><widget class="QLabel" name="api_profile_editorLabel"><property name="text"><string>API Profile Editor</string></property></widget></item></layout></widget>
-
-</ui>

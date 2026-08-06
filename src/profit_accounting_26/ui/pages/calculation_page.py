@@ -56,6 +56,9 @@ from profit_accounting_26.domain.models import (
 )
 from profit_accounting_26.ui.binders.calculation_binder import CalculationBinder
 from profit_accounting_26.ui.ui_loader import load_page_module
+from profit_accounting_26.ui.panels.calculation_panels import (
+    ImageAIPanel, ProductCostPanel, PackagingPanel, LogisticsPanel, ProfitPanel,
+)
 from profit_accounting_26.ui.widgets import Card, ImageSlotWidget, QuoteCard
 from profit_accounting_26.ui.input_editing import install_blank_click_focus_filter
 
@@ -240,6 +243,14 @@ class CalculationPage(QWidget):
             if rule.enabled and not rule.archived
         ))
         self.profit_binder.selectedRuleChanged.connect(self._persist_selected_rule)
+
+        # 五个面板包装器（提供清晰的模块边界，不跨面板 findChild）
+        self.image_ai_panel = ImageAIPanel(self._root, self)
+        self.product_cost_panel = ProductCostPanel(self._root, self)
+        self.packaging_ui_panel = PackagingPanel(self._root, self)
+        self.logistics_ui_panel = LogisticsPanel(self._root, self)
+        self.profit_ui_panel = ProfitPanel(self._root, self)
+        self.profit_ui_panel.binder = self.profit_binder  # 注入已有 binder
 
         self.rebuild_image_slots(int(self.settings.get("image_slot_count", 5)))
         self.rebuild_quote_cards()

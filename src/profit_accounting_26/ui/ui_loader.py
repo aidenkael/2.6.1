@@ -14,6 +14,9 @@ from PySide6.QtUiTools import QUiLoader
 
 _FORMS_DIR = Path(__file__).resolve().parent / "forms"
 _PAGES_DIR = _FORMS_DIR / "pages"
+_CALC_DIR = _FORMS_DIR / "calculation"
+_SETTINGS_DIR = _FORMS_DIR / "settings"
+_DIALOG_DIR = _FORMS_DIR / "dialogs"
 
 
 def forms_dir() -> Path:
@@ -71,3 +74,23 @@ def load_main_window(parent=None):
 def load_settings_page(parent=None):
     """加载设置页（兼容旧路径，指向 forms/pages/）。"""
     return load_page_module("settings_page.ui", parent)
+
+
+def load_calculation_page(parent=None):
+    """加载新品测算页壳。"""
+    return load_page_module("calculation_page.ui", parent)
+
+
+def load_calculation_panel(name: str, parent=None):
+    """加载 ``forms/calculation/<name>_panel.ui``。"""
+    return _load_ui_path(_CALC_DIR / f"{name}_panel.ui", parent)
+
+
+def load_settings_panel(name: str, parent=None):
+    """加载 ``forms/settings/<name>_panel.ui``。"""
+    return _load_ui_path(_SETTINGS_DIR / f"{name}_panel.ui", parent)
+
+
+def load_dialog(name: str, parent=None):
+    """加载 ``forms/dialogs/<name>.ui``。"""
+    return _load_ui_path(_DIALOG_DIR / f"{name}.ui", parent)

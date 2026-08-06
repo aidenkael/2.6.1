@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<ui version="4.0">
-<widget class="QWidget" name="general_settings_panel"><layout class="QVBoxLayout" name="general_settings_panelLayout"><item><widget class="QLabel" name="general_settings_panelLabel"><property name="text"><string>General Settings Panel</string></property></widget></item></layout></widget>
-
-</ui>
