@@ -102,7 +102,7 @@ class TestUIFileContract:
         """5 个独立面板 .ui 中关键 objectName 全部存在。"""
         panel_checks = {
             "calculation/product_cost_panel.ui": [
-                "bareProductCard", "spinProductCostRmb", "spinDomesticFreightRmb",
+                "productCostPanel", "spinProductCostRmb", "spinDomesticFreightRmb",
                 "spinBareLengthCm", "spinBareWidthCm", "spinBareHeightCm", "spinBareWeightG",
             ],
             "calculation/packaging_panel.ui": [
@@ -114,13 +114,13 @@ class TestUIFileContract:
                 "forwarderCardsLayout", "lblSystemTotalRmb",
             ],
             "calculation/profit_panel.ui": [
-                "profitSection", "txtSheinPriceRmb", "txtCalculatedCostRmb",
+                "profitPanel", "txtSheinPriceRmb", "txtCalculatedCostRmb",
                 "spinProfitRate", "txtNoActivityPriceRmb",
                 "txtListPriceProfitRate", "cmbProfitRule",
             ],
             "calculation/image_ai_panel.ui": [
                 "imageAIPanel", "btnAiRecognize", "imageSlotsLayout",
-                "btnPartialReestimate",
+                "btnPartialReestimate", "txtAiSummary", "txtPackingState",
             ],
         }
         base = FORMS_DIR
@@ -205,9 +205,125 @@ class TestRuntimeLoading:
     def test_calculation_panels_load_independently(self):
         """5 个测算面板各自独立加载。"""
         from profit_accounting_26.ui.ui_loader import load_calculation_panel
+        roots = []
         for name in ['image_ai','product_cost','packaging','logistics','profit']:
             w = load_calculation_panel(name)
             assert w is not None, f"{name} panel 加载失败"
+            roots.append(w)
+        # 验证 5 个 root 互不相同
+        root_names = [w.objectName() for w in roots]
+        assert len(set(root_names)) == 5, f"面板 root 存在重复: {root_names}"
+
+
+class TestRealSplitVerification:
+    """真实验证：独立 root、唯一 objectName、跨面板联动。"""
+
+    def test_five_panel_roots_are_distinct(self, qapp):
+        """5 个面板 root 互不相同。"""
+        from profit_accounting_26.ui.ui_loader import load_calculation_panel
+        roots = {name: load_calculation_panel(name) for name in
+                 ['image_ai','product_cost','packaging','logistics','profit']}
+        ids = [id(r) for r in roots.values()]
+        assert len(set(ids)) == 5, f"面板 root id 重复: {ids}"
+
+    def test_calculation_page_shell_excludes_panel_widgets(self, qapp):
+        """calculation_page.ui 壳不包含面板内部核心控件。"""
+        from profit_accounting_26.ui.ui_loader import load_page_module
+        shell = load_page_module("calculation_page.ui")
+        from PySide6.QtWidgets import QDoubleSpinBox, QLineEdit, QRadioButton
+        # 壳中应无利润区、包装区、商品区的核心交互控件
+        panel_core = ["txtSheinPriceRmb", "spinProfitRate", "spinProductCostRmb",
+                      "radioNormalPackage", "spinTailFreightUsd", "btnAiRecognize"]
+        for name in panel_core:
+            w = shell.findChild(QDoubleSpinBox, name) or shell.findChild(QLineEdit, name) or shell.findChild(QRadioButton, name)
+            assert w is None, f"壳页面不应包含面板控件 {name}"
+
+    def test_each_objectname_unique_across_all_ui(self):
+        """每个关键 objectName 在所有 .ui 文件中只出现一次。"""
+        import re
+        key_names = ["txtSheinPriceRmb", "spinProfitRate", "spinProductCostRmb",
+                     "radioNormalPackage", "spinTailFreightUsd", "btnAiRecognize",
+                     "profitPanel", "productCostPanel", "packagingPanel",
+                     "logisticsPanel", "imageAIPanel",
+                     "txtProductLink", "btnSaveCurrentRecord", "btnClearAndNew"]
+        ui_dir = "src/profit_accounting_26/ui/forms"
+        for name in key_names:
+            count = 0
+            for root, _, files in os.walk(ui_dir):
+                for fn in files:
+                    if fn.endswith('.ui'):
+                        with open(os.path.join(root, fn), encoding='utf-8-sig') as f:
+                            content = f.read()
+                        if f'name="{name}"' in content:
+                            count += 1
+            assert count == 1, f"objectName '{name}' 出现 {count} 次（应为 1 次）"
+
+    def test_shell_contains_bottom_controls(self, qapp):
+        """页面壳包含底部控件（txtProductLink, btnSave, btnClear）。"""
+        from profit_accounting_26.ui.ui_loader import load_page_module
+        from PySide6.QtWidgets import QLineEdit, QPushButton
+        shell = load_page_module("calculation_page.ui")
+        assert shell.findChild(QLineEdit, "txtProductLink") is not None
+        assert shell.findChild(QPushButton, "btnSaveCurrentRecord") is not None
+        assert shell.findChild(QPushButton, "btnClearAndNew") is not None
+
+    @pytest.fixture
+    def calc_page(self, qapp, tmp_path):
+        """完整的 CalculationPage 实例（5 面板挂载）。"""
+        import os
+        os.environ.setdefault("PROFIT_ACCOUNTING_DATA_DIR", str(tmp_path))
+        from profit_accounting_26.application import AppContext
+        from profit_accounting_26.ui.pages.calculation_page import CalculationPage
+        ctx = AppContext.create_default()
+        page = CalculationPage(ctx)
+        yield page
+        page.deleteLater()
+
+    def test_five_panels_mounted_in_calc_page(self, calc_page):
+        """CalculationPage 实例中 5 个面板 root 全部真实挂载。"""
+        roots = calc_page._panel_roots
+        assert len(roots) == 5, f"应有 5 个面板，实际 {len(roots)}"
+        for name in ['image_ai','product_cost','packaging','logistics','profit']:
+            assert name in roots, f"缺少面板 {name}"
+            assert roots[name] is not None
+        # 验证 root 互不相同
+        ids = [id(r) for r in roots.values()]
+        assert len(set(ids)) == 5
+
+    def test_profit_binder_uses_profit_root(self, calc_page):
+        """CalculationBinder root 等于 profit panel root。"""
+        profit_root = calc_page._panel_roots["profit"]
+        assert calc_page.profit_binder.page == profit_root
+
+    def test_image_slots_host_in_image_panel(self, calc_page):
+        """动态图片槽宿主位于 image panel。"""
+        image_root = calc_page._panel_roots["image_ai"]
+        from PySide6.QtWidgets import QHBoxLayout
+        layout = image_root.findChild(QHBoxLayout, "imageSlotsLayout")
+        assert layout is not None
+
+    def test_forwarder_cards_host_in_logistics_panel(self, calc_page):
+        """动态货代卡宿主位于 logistics panel。"""
+        log_root = calc_page._panel_roots["logistics"]
+        from PySide6.QtWidgets import QHBoxLayout
+        layout = log_root.findChild(QHBoxLayout, "forwarderCardsLayout")
+        assert layout is not None
+
+    def test_tail_usd_rmb_live_linkage(self, calc_page):
+        """尾程 USD 写入后 RMB 可通过 sync 方法同步。"""
+        # 手动调用同步方法验证汇率计算
+        calc_page.tail_fee_usd.setValue(10.0)
+        calc_page._sync_tail_rmb_from_usd(recalculate=False)
+        rate = float(calc_page.settings.get("exchange_rate_usd_to_rmb", 7.2))
+        expected_rmb = round(10.0 * rate, 2)
+        assert abs(calc_page.tail_fee_rmb.value() - expected_rmb) < 0.1
+
+    def test_list_price_rate_visible(self, calc_page):
+        """标价利率控件存在于 profit panel。"""
+        from PySide6.QtWidgets import QLabel
+        profit_root = calc_page._panel_roots["profit"]
+        label = profit_root.findChild(QLabel, "txtListPriceProfitRate")
+        assert label is not None
 
 
 class TestFrozenStates:

@@ -1,7 +1,12 @@
-<?xml version='1.0' encoding='UTF-8'?>
-<ui version='4.0'>
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
 <widget class="QWidget" name="packagingPanel">
  <layout class="QVBoxLayout" name="packagingPanelLayout" stretch="0,0">
+  <property name="spacing"><number>0</number></property>
+  <property name="leftMargin"><number>0</number></property>
+  <property name="topMargin"><number>0</number></property>
+  <property name="rightMargin"><number>0</number></property>
+  <property name="bottomMargin"><number>0</number></property>
   <item>
   <widget class="QFrame" name="normalPackageCard">
                         <property name="sizePolicy">
@@ -1066,4 +1071,5 @@
   </item>
  </layout>
 </widget>
+
 </ui>

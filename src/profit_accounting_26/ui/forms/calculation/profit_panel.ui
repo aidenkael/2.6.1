@@ -1,6 +1,6 @@
-<?xml version='1.0' encoding='UTF-8'?>
-<ui version='4.0'>
-<widget class="QFrame" name="profitSection">
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+<widget class="QFrame" name="profitPanel">
                  <property name="card" stdset="0">
                   <bool>true</bool>
                  </property>

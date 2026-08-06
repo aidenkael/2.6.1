@@ -367,10 +367,10 @@ class CalculationPage(QWidget):
         }
         self.system_total = f(log_root, QLabel, "lblSystemTotalRmb")
         self.system_total_usd = f(log_root, QLabel, "lblSystemTotalUsd")
-        # 底部
-        self.product_link = f(prof_root, QLineEdit, "txtProductLink")
-        self.btn_save_record = f(prof_root, QPushButton, "btnSaveCurrentRecord")
-        self.btn_clear_new = f(prof_root, QPushButton, "btnClearAndNew")
+        # 底部（页面级操作，位于 shell root）
+        self.product_link = f(self._root, QLineEdit, "txtProductLink")
+        self.btn_save_record = f(self._root, QPushButton, "btnSaveCurrentRecord")
+        self.btn_clear_new = f(self._root, QPushButton, "btnClearAndNew")
 
     def _cost_in(self, root, name: str, *, maximum: float) -> _SpinAdapter:
         spin = root.findChild(QDoubleSpinBox, name) if root else None

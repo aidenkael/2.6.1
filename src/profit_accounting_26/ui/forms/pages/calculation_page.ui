@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
 <widget class="QWidget" name="pageCalculation">
- <layout class="QVBoxLayout" name="calculationPageLayout" stretch="0,0,0,0,0">
+ <layout class="QVBoxLayout" name="calculationPageLayout" stretch="0,0,0,0,0,0">
   <property name="spacing"><number>0</number></property>
   <property name="leftMargin"><number>0</number></property>
   <property name="topMargin"><number>0</number></property>
@@ -12,6 +12,77 @@
   <item><widget class="QWidget" name="packagingPanelHost"/></item>
   <item><widget class="QWidget" name="logisticsPanelHost"/></item>
   <item><widget class="QWidget" name="profitPanelHost"/></item>
+  <item>
+  <widget class="QFrame" name="bottomActionSection">
+                 <property name="card" stdset="0">
+                  <bool>true</bool>
+                 </property>
+                 <layout class="QHBoxLayout" name="bottomActionLayout">
+                  <property name="spacing">
+                   <number>10</number>
+                  </property>
+                  <property name="leftMargin">
+                   <number>12</number>
+                  </property>
+                  <property name="topMargin">
+                   <number>8</number>
+                  </property>
+                  <property name="rightMargin">
+                   <number>12</number>
+                  </property>
+                  <property name="bottomMargin">
+                   <number>8</number>
+                  </property>
+                  <item>
+                   <widget class="QLabel" name="lblProductLink">
+                    <property name="text">
+                     <string>商品链接</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QLineEdit" name="txtProductLink">
+                    <property name="text">
+                     <string />
+                    </property>
+                    <property name="placeholderText">
+                     <string>请输入商品链接（可选）</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QPushButton" name="btnSaveCurrentRecord">
+                    <property name="minimumSize">
+                     <size>
+                      <width>160</width>
+                      <height>38</height>
+                     </size>
+                    </property>
+                    <property name="text">
+                     <string>保存本次记录</string>
+                    </property>
+                    <property name="primary" stdset="0">
+                     <bool>true</bool>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QPushButton" name="btnClearAndNew">
+                    <property name="minimumSize">
+                     <size>
+                      <width>150</width>
+                      <height>38</height>
+                     </size>
+                    </property>
+                    <property name="text">
+                     <string>清空并新建</string>
+                    </property>
+                   </widget>
+                  </item>
+                 </layout>
+                </widget>
+  </item>
  </layout>
 </widget>
+
 </ui>
