@@ -143,15 +143,20 @@ class TestUIFileContract:
         missing = [n for n in required if n not in names]
         assert not missing, f"settings_page.ui 缺少 objectName: {missing}"
 
+    @staticmethod
+    def _ui_content_sha256(path: Path) -> str:
+        """计算 .ui 文件内容 SHA256，不受平台换行符影响（统一使用 LF）。"""
+        text = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
     def test_ui_sha256_matches_contract(self):
-        """.ui SHA 与输入文件一致。"""
+        """.ui SHA 与输入文件一致（换行规范化为 LF）。"""
         expected = {
-            "main_window.ui": "551adb6dfbd323825d758e70f4ba3301e680b63bd5a2cecb02c7628e84688b13",
+            "main_window.ui": "e0b928cb74afece822323ecb4200198e9a44f72201463d84bcda5833600b9717",
         }
         for file_rel, sha in expected.items():
             fpath = FORMS_DIR / file_rel
-            data = fpath.read_bytes()
-            actual = hashlib.sha256(data).hexdigest()
+            actual = self._ui_content_sha256(fpath)
             assert actual == sha, f"{file_rel} SHA 不匹配: {actual} != {sha}"
 
 
