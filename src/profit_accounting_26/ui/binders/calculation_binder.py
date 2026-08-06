@@ -610,10 +610,13 @@ class CalculationBinder(QObject):
     def _update_single_rule_status(self, label: QLabel | None, scenario_result, scenario: str) -> None:
         if label is None or not _shiboken_is_valid(label):
             return
-        if scenario_result is None or not scenario_result.rule_evaluations:
-            label.setText("无规则")
-            label.setStyleSheet(f"color:{_COLOR_NORMAL};")
-            label.setToolTip("")
+        try:
+            if scenario_result is None or not scenario_result.rule_evaluations:
+                label.setText("无规则")
+                label.setStyleSheet(f"color:{_COLOR_NORMAL};")
+                label.setToolTip("")
+                return
+        except Exception:
             return
 
         # 过滤当前场景的规则评估

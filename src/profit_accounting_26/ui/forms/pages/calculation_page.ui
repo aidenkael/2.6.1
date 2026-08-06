@@ -7,11 +7,11 @@
   <property name="topMargin"><number>0</number></property>
   <property name="rightMargin"><number>0</number></property>
   <property name="bottomMargin"><number>0</number></property>
-  <item><widget class="QWidget" name="imageAIPanelHost"/></item>
-  <item><widget class="QWidget" name="productCostPanelHost"/></item>
-  <item><widget class="QWidget" name="packagingPanelHost"/></item>
-  <item><widget class="QWidget" name="logisticsPanelHost"/></item>
-  <item><widget class="QWidget" name="profitPanelHost"/></item>
+  <item><widget class="QWidget" name="imageAIPanelHost"><layout class="QVBoxLayout" name="imageAIPanelHostLayout"><property name="spacing"><number>0</number></property><property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property></layout></widget></item>
+  <item><widget class="QWidget" name="productCostPanelHost"><layout class="QVBoxLayout" name="productCostPanelHostLayout"><property name="spacing"><number>0</number></property><property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property></layout></widget></item>
+  <item><widget class="QWidget" name="packagingPanelHost"><layout class="QVBoxLayout" name="packagingPanelHostLayout"><property name="spacing"><number>0</number></property><property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property></layout></widget></item>
+  <item><widget class="QWidget" name="logisticsPanelHost"><layout class="QVBoxLayout" name="logisticsPanelHostLayout"><property name="spacing"><number>0</number></property><property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property></layout></widget></item>
+  <item><widget class="QWidget" name="profitPanelHost"><layout class="QVBoxLayout" name="profitPanelHostLayout"><property name="spacing"><number>0</number></property><property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property></layout></widget></item>
   <item>
   <widget class="QFrame" name="bottomActionSection">
                  <property name="card" stdset="0">
