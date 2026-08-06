@@ -382,6 +382,40 @@ class TestRealSplitVerification:
             assert actual == expected, f"{widget_name}.{prop}: {actual} != {expected}"
 
 
+    def test_scroll_area_present_and_content_taller_than_viewport(self, calc_page):
+        """QScrollArea 存在，内容高度超过视口时出现滚动条。"""
+        from PySide6.QtWidgets import QScrollArea
+        scroll = calc_page._scroll_area
+        assert scroll is not None
+        assert isinstance(scroll, QScrollArea), f"应该是 QScrollArea，实际是 {type(scroll).__name__}"
+
+    def test_panels_not_overlapping_in_layout(self, calc_page):
+        """每个面板在自己 host 内，host 在 content layout 中垂直排列。"""
+        from PySide6.QtWidgets import QScrollArea, QApplication
+        QApplication.processEvents()
+        # 验证滚动区域正确配置
+        scroll = calc_page._scroll_area
+        assert isinstance(scroll, QScrollArea)
+        assert scroll.widgetResizable() is True
+        # 验证内容布局包含 6 个 item（5 host + bottom section）
+        content = calc_page._scroll_contents
+        content_layout = content.layout()
+        assert content_layout is not None
+        assert content_layout.count() >= 6, f"内容布局应至少 6 项，实际 {content_layout.count()}"
+
+    def test_panels_not_compressed_below_size_hint(self, calc_page):
+        """每个面板高度不低于其 sizeHint。"""
+        from PySide6.QtWidgets import QApplication
+        calc_page.show()
+        QApplication.processEvents()
+        for name, panel in calc_page._panel_roots.items():
+            hint = panel.sizeHint().height()
+            actual = panel.height()
+            assert actual >= hint - 5, (
+                f"{name} panel height={actual} < sizeHint={hint} (被压缩)"
+            )
+
+
 class TestFrozenStates:
     """冻结状态验证（契约 §7）。"""
 

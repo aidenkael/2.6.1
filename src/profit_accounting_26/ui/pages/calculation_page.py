@@ -33,6 +33,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QRadioButton,
+    QScrollArea,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -255,16 +257,19 @@ class CalculationPage(QWidget):
     # ------------------------------------------------------------------
 
     def _load_ui_widgets(self) -> None:
-        """加载页面壳 + 5 个独立面板 .ui 文件，各面板持有自己的 root。"""
+        """加载页面壳 + 5 个独立面板，挂入 QScrollArea 内。"""
         self._ui_root = load_page_module("calculation_page.ui")
-        root = self._ui_root  # 壳
-        self._root = root
-        root.setParent(self)
-        root.setVisible(True)
+        self._root = self._ui_root  # pageCalculation
+        self._root.setParent(self)
+        self._root.setVisible(True)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(root)
+        layout.addWidget(self._root)
+
+        # 滚动区域引用
+        self._scroll_area = self._root.findChild(QWidget, "calculationScrollArea")
+        self._scroll_contents = self._root.findChild(QWidget, "calculationScrollContents")
 
         # 加载并挂载 5 个独立面板
         panel_specs = [
@@ -279,7 +284,9 @@ class CalculationPage(QWidget):
             panel_w = load_calculation_panel(panel_name)
             setattr(self, f"_panel_{panel_name}", panel_w)  # 强引用防止 GC
             self._panel_roots[panel_name] = panel_w
-            host = root.findChild(QWidget, host_name)
+
+            # Host 位于 scroll contents 内
+            host = self._root.findChild(QWidget, host_name)
             if host is not None:
                 host_layout = host.layout()
                 if host_layout is None:
@@ -288,6 +295,11 @@ class CalculationPage(QWidget):
                 host_layout.setContentsMargins(0, 0, 0, 0)
                 host_layout.setSpacing(0)
                 host_layout.addWidget(panel_w)
+
+            # 面板垂直策略：使用自身 sizeHint，不被压缩
+            panel_w.setSizePolicy(
+                QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            )
 
         # 从各面板 root 查找控件
         ai_root = self._panel_roots["image_ai"]
