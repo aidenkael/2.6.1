@@ -277,6 +277,7 @@ class CalculationPage(QWidget):
         self._panel_roots: dict[str, QWidget] = {}
         for panel_name, host_name in panel_specs:
             panel_w = load_calculation_panel(panel_name)
+            setattr(self, f"_panel_{panel_name}", panel_w)  # 强引用防止 GC
             self._panel_roots[panel_name] = panel_w
             host = root.findChild(QWidget, host_name)
             if host is not None:
