@@ -82,8 +82,25 @@ def load_calculation_page(parent=None):
 
 
 def load_calculation_panel(name: str, parent=None):
-    """加载 ``forms/calculation/<name>_panel.ui``。"""
-    return _load_ui_path(_CALC_DIR / f"{name}_panel.ui", parent)
+    """加载计算面板 widget（使用 pyside6-uic 预编译类，避免 QUiLoader 平台差异）。"""
+    from profit_accounting_26.ui.panels.calc_panels import (
+        ImageAIPanelWidget,
+        ProductCostPanelWidget,
+        PackagingPanelWidget,
+        LogisticsPanelWidget,
+        ProfitPanelWidget,
+    )
+    panel_map = {
+        "image_ai": ImageAIPanelWidget,
+        "product_cost": ProductCostPanelWidget,
+        "packaging": PackagingPanelWidget,
+        "logistics": LogisticsPanelWidget,
+        "profit": ProfitPanelWidget,
+    }
+    cls = panel_map.get(name)
+    if cls is None:
+        raise ValueError(f"未知面板: {name}")
+    return cls(parent)
 
 
 def load_settings_panel(name: str, parent=None):

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
+ <class>ProductCostPanel</class>
 <widget class="QFrame" name="productCostPanel">
                         <property name="sizePolicy">
                          <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
@@ -609,4 +610,6 @@
                          </item>
                         </layout>
                        </widget>
+ <resources/>
+ <connections/>
 </ui>

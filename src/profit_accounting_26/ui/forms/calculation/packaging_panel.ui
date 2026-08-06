@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
+ <class>PackagingPanel</class>
 <widget class="QWidget" name="packagingPanel">
  <layout class="QVBoxLayout" name="packagingPanelLayout" stretch="0,0">
   <property name="spacing"><number>0</number></property>
@@ -1071,5 +1072,6 @@
   </item>
  </layout>
 </widget>
-
+ <resources/>
+ <connections/>
 </ui>

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
+ <class>ImageAIPanel</class>
 <widget class="QWidget" name="imageAIPanel">
  <layout class="QVBoxLayout" name="imageAIPanelLayout" stretch="0,0">
   <property name="spacing"><number>0</number></property>
@@ -964,5 +965,6 @@
   </item>
  </layout>
 </widget>
-
+ <resources/>
+ <connections/>
 </ui>

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
+ <class>ProfitPanel</class>
 <widget class="QFrame" name="profitPanel">
                  <property name="card" stdset="0">
                   <bool>true</bool>
@@ -1748,4 +1749,6 @@
                   </item>
                  </layout>
                 </widget>
+ <resources/>
+ <connections/>
 </ui>

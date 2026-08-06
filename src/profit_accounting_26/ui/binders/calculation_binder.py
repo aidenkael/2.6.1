@@ -21,8 +21,6 @@ from PySide6.QtCore import QObject, QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QLabel
 
-from shiboken6 import isValid as _shiboken_is_valid
-
 from profit_accounting_26.application import AppContext
 from profit_accounting_26.domain.rules import AdjustmentRule
 from profit_accounting_26.engines.profit import (
@@ -608,15 +606,12 @@ class CalculationBinder(QObject):
         self._update_single_rule_status(self.lbl_act_status, act, "activity")
 
     def _update_single_rule_status(self, label: QLabel | None, scenario_result, scenario: str) -> None:
-        if label is None or not _shiboken_is_valid(label):
+        if label is None:
             return
-        try:
-            if scenario_result is None or not scenario_result.rule_evaluations:
-                label.setText("无规则")
-                label.setStyleSheet(f"color:{_COLOR_NORMAL};")
-                label.setToolTip("")
-                return
-        except Exception:
+        if scenario_result is None or not scenario_result.rule_evaluations:
+            label.setText("无规则")
+            label.setStyleSheet(f"color:{_COLOR_NORMAL};")
+            label.setToolTip("")
             return
 
         # 过滤当前场景的规则评估
