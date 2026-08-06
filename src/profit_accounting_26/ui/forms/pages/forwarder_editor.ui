@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+<widget class="QDialog" name="forwarder_editor"><layout class="QVBoxLayout" name="forwarder_editorLayout"><item><widget class="QLabel" name="forwarder_editorLabel"><property name="text"><string>Forwarder Editor</string></property></widget></item></layout></widget>
+
+</ui>

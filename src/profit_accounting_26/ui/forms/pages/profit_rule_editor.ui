@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+<widget class="QDialog" name="profit_rule_editor"><layout class="QVBoxLayout" name="profit_rule_editorLayout"><item><widget class="QLabel" name="profit_rule_editorLabel"><property name="text"><string>Profit Rule Editor</string></property></widget></item></layout></widget>
+
+</ui>

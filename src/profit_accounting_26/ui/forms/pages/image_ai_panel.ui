@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+<widget class="QWidget" name="imageAIPanelHost">
+<widget class="QWidget" name="imageAIPanel">
+  <layout class="QVBoxLayout" name="imageAIPanelLayout">
+   <property name="spacing"><number>4</number></property>
+   <property name="leftMargin"><number>0</number></property>
+   <property name="topMargin"><number>0</number></property>
+   <property name="rightMargin"><number>0</number></property>
+   <property name="bottomMargin"><number>0</number></property>
+   <item>
+    <widget class="QLabel" name="imageAIPanelLabel">
+     <property name="text"><string>Image & AI panel — widgets loaded from calculation_page.ui</string></property>
+    </widget>
+   </item>
+  </layout>
+</widget>
+</widget>
+</ui>
