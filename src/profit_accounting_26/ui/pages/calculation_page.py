@@ -18,7 +18,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QObject, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QObject, QThread, Qt, QSignalBlocker, Signal, Slot
 from PySide6.QtGui import QCursor, QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -243,6 +243,8 @@ class CalculationPage(QWidget):
 
         self.rebuild_image_slots(int(self.settings.get("image_slot_count", 5)))
         self.rebuild_quote_cards()
+        # 页面初始化：执行一次 USD → RMB 同步（RMB=USD×汇率）
+        self._sync_tail_rmb_from_usd(recalculate=False)
         self.recalculate()
         self._blank_focus_guard = install_blank_click_focus_filter(self)
 
@@ -447,6 +449,8 @@ class CalculationPage(QWidget):
                 box.toggled.connect(lambda checked, k=key: self._on_structure_toggled(k, checked))
         self.tail_fee_rmb.editingFinished.connect(self._tail_rmb_changed)
         self.tail_fee_usd.editingFinished.connect(self._tail_usd_changed)
+        # 尾程 USD 实时联动：直接连接真实 USD 控件的 valueChanged，不等待编辑完成
+        self.tail_fee_usd.valueChanged.connect(self._tail_usd_live_changed)
 
         self.btn_decrease_slots.clicked.connect(lambda: self.change_slot_count(-1))
         self.btn_increase_slots.clicked.connect(lambda: self.change_slot_count(1))
@@ -1236,6 +1240,42 @@ class CalculationPage(QWidget):
         self.context.settings_service.save(self.settings)
         self.recalculate()
 
+    # ------------------------------------------------------------------
+    # 尾程 USD → RMB 实时联动（直连 valueChanged；遵守 _loading_record）
+    # ------------------------------------------------------------------
+
+    def _tail_usd_live_changed(self, _value: float) -> None:
+        """主页尾程 USD 实时变化：读取当前有效汇率 → 更新冻结 RMB → 立即全链路重算。
+
+        不等待用户点击保存汇率；不要求再次点击系统计算；不修改 settings.json；
+        修改当前 CalculationPage 的实时状态。
+        记录加载 / 快照保护期间（_loading_record）不触发实时重算。
+        """
+        if self._updating:
+            return
+        if getattr(self.profit_binder, '_loading_record', False):
+            return
+        self._sync_tail_rmb_from_usd(recalculate=True)
+
+    def _sync_tail_rmb_from_usd(self, *, recalculate: bool) -> None:
+        """USD → RMB 单向同步：RMB = USD × 当前有效汇率，使用 QSignalBlocker 更新冻结 RMB。
+
+        用于：
+        - 页面初始化（recalculate=False）
+        - 尾程 USD 编辑器实时联动（recalculate=True）
+        - refresh_settings / 汇率变化后同步（通常结合立即 recalculate）
+        """
+        rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
+        if rate <= 0:
+            rate = 7.2
+        usd = self.tail_fee_usd.value()
+        rmb = round(usd * rate, 2)
+        # 使用 QSignalBlocker 更新冻结 RMB，避免信号递归
+        with QSignalBlocker(self.tail_fee_rmb.spin):
+            self.tail_fee_rmb.spin.setValue(rmb)
+        if recalculate:
+            self.recalculate()
+
     def _clear_calculation(self, message: str) -> None:
         self.current_quote = None
         self.current_forwarder = None
@@ -1609,8 +1649,9 @@ class CalculationPage(QWidget):
         self.selected_profit_rule_id = str(self.settings.get("selected_profit_rule_id") or self.selected_profit_rule_id)
         self._updating = True
         self.tail_fee_usd.setValue(float(self.settings.get("default_tail_fee_usd", 5.56)))
-        self.tail_fee_rmb.setValue(float(self.settings.get("default_tail_fee_rmb", 40.0)))
         self._updating = False
+        # 重新同步 RMB = USD × 当前有效汇率，确保汇率变化后一致性
+        self._sync_tail_rmb_from_usd(recalculate=False)
         self.rebuild_quote_cards()
         self.profit_binder.set_exchange_rate(float(self.settings.get("exchange_rate_usd_to_rmb", 7.2)))
         self.profit_binder.set_selected_rule_id(self.selected_profit_rule_id)

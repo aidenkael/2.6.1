@@ -84,6 +84,7 @@ class TestUIFileContract:
             "mainStack",
             # 问候
             "btnRefreshGreeting", "lblGreetingTitle", "lblGreetingSubtitle",
+            "lblGreetingHi", "lblGreetingUserName",
             # 数据目录和汇率
             "lblDataDirectoryPath", "btnChangeDataDirectory",
             "spinExchangeRate", "btnRefreshExchangeRate", "lblExchangeRateUpdated",
@@ -99,6 +100,7 @@ class TestUIFileContract:
             "txtActivityPriceRmb", "txtActivityPriceUsd",
             "txtActivityProfitRmb", "txtActivityProfitUsd",
             "lblNoActivitySubsidyStatus", "lblActivitySubsidyStatus",
+            "lblListPriceProfitRateTitle", "txtListPriceProfitRate",
             "cmbProfitRule", "lblProfitConclusion",
             # 图片
             "imageSlotsLayout", "btnDecreaseImageSlots", "lblImageSlotCount",
@@ -134,7 +136,7 @@ class TestUIFileContract:
     def test_ui_sha256_matches_contract(self):
         """.ui SHA 与输入文件一致。"""
         expected = {
-            "main_window.ui": "f2a234ca9a2ba57a45638b3a39c7c0e38914ca10ceb1bd3ab29f157a1c444aa2",
+            "main_window.ui": "44ca8089a74b1f7321679d806b3af41e54fd243bb4c2e903d18ab28c5f493b62",
             "settings_page.ui": "88a1422fa758e9eed835b2f422b9fcd070c2d69bb1eac025cbafb8aa0cb579ae",
         }
         for name, sha in expected.items():

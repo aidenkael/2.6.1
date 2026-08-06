@@ -36,7 +36,9 @@ QFrame#forwarderCardShenzhen, QFrame#forwarderCardYiwu {
     background: #fbfdff; border: 1px solid #dbe5f1; border-radius: 8px;
 }
 QLabel[sectionTitle="true"] { font-size: 12pt; font-weight: 700; color: #172033; }
-QLabel#lblGreetingTitle { font-size: 16pt; font-weight: 700; }
+QLabel#lblGreetingTitle { font-size: 11pt; }
+QLabel#lblGreetingHi { font-family: "Segoe UI Semibold", "Microsoft YaHei UI"; font-size: 15pt; font-weight: 600; color: #172033; }
+QLabel#lblGreetingUserName { background: #176ff2; color: white; border-radius: 8px; padding: 4px 14px; font-weight: 600; font-size: 11pt; }
 QLabel#lblGreetingSubtitle, QLabel[hint="true"] { color: #738198; font-size: 9pt; }
 QPushButton { background: white; border: 1px solid #d7e2ef; border-radius: 7px; padding: 6px 12px; }
 QPushButton:hover { border-color: #4083ff; color: #1767e8; }
@@ -44,7 +46,7 @@ QPushButton[primary="true"] { background: #176ff2; color: white; border-color: #
 QPushButton[navActive="true"] { background: #eaf2ff; color: #176ff2; border: none; text-align: left; font-weight: 600; }
 QPushButton[navItem="true"] { background: transparent; border: none; text-align: left; padding: 10px 12px; }
 QLineEdit, QTextEdit, QComboBox, QDoubleSpinBox { background: white; border: 1px solid #d7e2ef; border-radius: 6px; padding: 5px 8px; min-height: 24px; }
-QLineEdit[preview="true"], QTextEdit[preview="true"], QDoubleSpinBox[preview="true"] { background: #f1f5fa; color: #607089; }
+QLineEdit[preview="true"], QTextEdit[preview="true"], QDoubleSpinBox[preview="true"], QLabel[preview="true"] { background: #f1f5fa; color: #607089; }
 QLabel[dropZone="true"] { background: #fbfdff; border: 1px dashed #c9d7e8; border-radius: 7px; color: #42526a; }
 QFrame#normalPackageCard[selected="true"], QFrame#forwarderCardShenzhen[selected="true"] { border: 2px solid #4d8dff; background: #f7fbff; }
 QLabel#lblSubsidyStatus { background: #ecfff4; color: #1b9a5a; border: 1px solid #bdebd1; border-radius: 6px; padding: 6px 10px; font-weight: 600; }
@@ -556,16 +558,33 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
            <number>22</number>
           </property>
           <property name="topMargin">
-           <number>16</number>
+           <number>20</number>
           </property>
           <property name="rightMargin">
            <number>18</number>
           </property>
           <property name="bottomMargin">
-           <number>16</number>
+           <number>20</number>
           </property>
           <item>
-           <layout class="QVBoxLayout" name="greetingLayout">
+           <widget class="QLabel" name="lblGreetingHi">
+            <property name="text">
+             <string>Hi</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="lblGreetingUserName">
+            <property name="text">
+             <string>用户</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignmentFlag::AlignCenter</set>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QVBoxLayout" name="greetingTextLayout">
             <property name="spacing">
              <number>2</number>
             </property>
@@ -584,17 +603,17 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
             <item>
              <widget class="QLabel" name="lblGreetingTitle">
               <property name="text">
-               <string>Hi 用户，今天也要稳稳出单。</string>
+               <string>今天也要稳稳出单。</string>
               </property>
               <property name="textFormat">
-               <enum>Qt::RichText</enum>
+               <enum>Qt::PlainText</enum>
               </property>
              </widget>
             </item>
             <item>
              <widget class="QLabel" name="lblGreetingSubtitle">
               <property name="text">
-               <string>Hi User, let's keep the orders steady today.</string>
+               <string>Let's keep the orders steady today.</string>
               </property>
               <property name="hint" stdset="0">
                <bool>true</bool>
@@ -4735,7 +4754,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </property>
                         </widget>
                        </item>
-                       <item row="0" column="4">
+                       <item row="0" column="5">
                         <layout class="QHBoxLayout" name="layoutNoActivityProfitTitle">
                          <property name="spacing">
                           <number>5</number>
@@ -4777,21 +4796,21 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="0" column="5">
+                       <item row="0" column="6">
                         <widget class="QLabel" name="lblPromotionReserve">
                          <property name="text">
                           <string>活动预留</string>
                          </property>
                         </widget>
                        </item>
-                       <item row="0" column="6">
+                       <item row="0" column="7">
                         <widget class="QLabel" name="lblActivityPrice">
                          <property name="text">
                           <string>活动后售价</string>
                          </property>
                         </widget>
                        </item>
-                       <item row="0" column="7">
+                       <item row="0" column="8">
                         <layout class="QHBoxLayout" name="layoutActivityProfitTitle">
                          <property name="spacing">
                           <number>5</number>
@@ -5526,7 +5545,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="1" column="4">
+                       <item row="1" column="5">
                         <layout class="QHBoxLayout" name="layout_txtNoActivityProfitRmb">
                          <property name="spacing">
                           <number>4</number>
@@ -5625,7 +5644,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="2" column="4">
+                       <item row="2" column="5">
                         <layout class="QHBoxLayout" name="layout_txtNoActivityProfitUsd">
                          <property name="spacing">
                           <number>4</number>
@@ -5724,7 +5743,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="1" column="5">
+                       <item row="1" column="6">
                         <layout class="QHBoxLayout" name="layout_spinPromotionReserve">
                          <property name="spacing">
                           <number>4</number>
@@ -5823,7 +5842,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="1" column="6">
+                       <item row="1" column="7">
                         <layout class="QHBoxLayout" name="layout_txtActivityPriceRmb">
                          <property name="spacing">
                           <number>4</number>
@@ -5922,7 +5941,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="2" column="6">
+                       <item row="2" column="7">
                         <layout class="QHBoxLayout" name="layout_txtActivityPriceUsd">
                          <property name="spacing">
                           <number>4</number>
@@ -6021,7 +6040,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="1" column="7">
+                       <item row="1" column="8">
                         <layout class="QHBoxLayout" name="layout_txtActivityProfitRmb">
                          <property name="spacing">
                           <number>4</number>
@@ -6123,7 +6142,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="2" column="7">
+                       <item row="2" column="8">
                         <layout class="QHBoxLayout" name="layout_txtActivityProfitUsd">
                          <property name="spacing">
                           <number>4</number>
@@ -6225,7 +6244,51 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                        <property name="columnMinimumWidth">
                         <string>140,140,140,140,140,140,140,140</string>
                        </property>
-                      </layout>
+                      <item row="0" column="4">
+                       <widget class="QLabel" name="lblListPriceProfitRateTitle">
+                        <property name="text">
+                         <string>标价利率</string>
+                        </property>
+                        <property name="toolTip">
+                         <string>标价利润RMB ÷ 计算总成本RMB × 100%；冻结只读</string>
+                        </property>
+                       </widget>
+                      </item>
+<item row="1" column="4">
+                       <widget class="QLabel" name="txtListPriceProfitRate">
+                        <property name="minimumSize">
+                         <size>
+                          <width>96</width>
+                          <height>36</height>
+                         </size>
+                        </property>
+                        <property name="maximumSize">
+                         <size>
+                          <width>96</width>
+                          <height>36</height>
+                         </size>
+                        </property>
+                        <property name="sizePolicy">
+                         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                          <horstretch>0</horstretch>
+                          <verstretch>0</verstretch>
+                         </sizepolicy>
+                        </property>
+                        <property name="text">
+                         <string>--</string>
+                        </property>
+                        <property name="alignment">
+                         <set>Qt::AlignmentFlag::AlignCenter</set>
+                        </property>
+                        <property name="toolTip">
+                         <string>标价利润RMB ÷ 计算总成本RMB × 100%；只读</string>
+                        </property>
+                        <property name="preview" stdset="0">
+                         <bool>true</bool>
+                        </property>
+                       </widget>
+                      </item>
+</layout>
                      </item>
                     </layout>
                    </widget>

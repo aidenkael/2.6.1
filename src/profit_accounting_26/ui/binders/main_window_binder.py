@@ -91,6 +91,7 @@ class MainWindowBinder:
         btn_refresh = self.window.findChild(QPushButton, "btnRefreshGreeting")
         lbl_title = self.window.findChild(QLabel, "lblGreetingTitle")
         lbl_subtitle = self.window.findChild(QLabel, "lblGreetingSubtitle")
+        lbl_user_name = self.window.findChild(QLabel, "lblGreetingUserName")
 
         self.greeting_header = GreetingHeaderController(
             lambda: str(self.settings.get("display_name") or "用户"), self.window
@@ -100,6 +101,7 @@ class MainWindowBinder:
                 title_label=lbl_title,
                 subtitle_label=lbl_subtitle,
                 shuffle_button=btn_refresh,
+                user_name_label=lbl_user_name,
             )
 
     # ------------------------------------------------------------------

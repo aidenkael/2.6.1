@@ -18,16 +18,8 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import QObject, QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPalette
-from PySide6.QtWidgets import (
-    QComboBox,
-    QDoubleSpinBox,
-    QGridLayout,
-    QHBoxLayout,
-    QLabel,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtGui import QColor, QPalette
+from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QLabel
 
 from profit_accounting_26.application import AppContext
 from profit_accounting_26.domain.rules import AdjustmentRule
@@ -168,68 +160,9 @@ class CalculationBinder(QObject):
         # 利润结论
         self.lbl_conclusion: QLabel = f(QLabel, "lblProfitConclusion")
 
-        # 标价利率（动态注入到利润区 grid，不修改 .ui）
-        self._inject_list_price_rate()
-
-    def _inject_list_price_rate(self) -> None:
-        """动态注入 标价利率 标题 + 冻结值到 profitFieldsGrid 的 SHEIN标价 右侧。
-
-        不修改 .ui（避免大范围列移位审计），改为查找 grid、移除 column >= 4 的 widget，
-        移位至 col+1，再在 col 4 插入标题/数值两个 label。
-        """
-        host = self.page.findChild(QWidget, "profitFieldsHost")
-        if host is None:
-            return
-        grid: QGridLayout | None = host.layout()  # type: ignore[assignment]
-        if grid is None or not isinstance(grid, QGridLayout):
-            return
-
-        # 收集 column >= 4 的 widget，记下原列号以便移位
-        reloc: list[tuple[int, int, QWidget]] = []
-        for i in range(grid.count()):
-            item = grid.itemAt(i)
-            if item is None:
-                continue
-            w = item.widget()
-            if w is None:
-                continue
-            # 通过 iter 所有 widget 反查其在 grid 中的位置
-            idx = grid.indexOf(w)
-            if idx < 0:
-                continue
-            _r, _c, _rs, _cs = grid.getItemPosition(idx)
-            if _c >= 4:
-                reloc.append((_c, _r, w))
-                grid.removeWidget(w)
-
-        # 移到 col+1
-        for col_old, row, w in reloc:
-            grid.addWidget(w, row, col_old + 1)
-
-        # 创建标题 label
-        self.lbl_list_price_rate_title = QLabel("标价利率")
-        self.lbl_list_price_rate_title.setObjectName("lblListPriceProfitRateTitle")
-        title_font = QFont()
-        title_font.setBold(True)
-        title_font.setPointSize(10)
-        self.lbl_list_price_rate_title.setFont(title_font)
-        self.lbl_list_price_rate_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
-        grid.addWidget(self.lbl_list_price_rate_title, 0, 4)
-
-        # 创建数值 label（冻结）
-        self.txt_list_price_rate = QLabel("--")
-        self.txt_list_price_rate.setObjectName("txtListPriceProfitRate")
-        val_font = QFont()
-        val_font.setPointSize(10)
-        self.txt_list_price_rate.setFont(val_font)
-        self.txt_list_price_rate.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self.txt_list_price_rate.setMinimumWidth(80)
-        # 冻结样式：浅灰背景
-        self.txt_list_price_rate.setStyleSheet(
-            "background:#f0f3f7; border:1px solid #d7e2ef; border-radius:6px; "
-            "padding:4px 8px; color:#333;"
-        )
-        grid.addWidget(self.txt_list_price_rate, 1, 4)
+        # 标价利率（正式写入 main_window.ui，不再动态注入）
+        self.lbl_list_price_rate_title: QLabel = f(QLabel, "lblListPriceProfitRateTitle")
+        self.txt_list_price_rate: QLabel = f(QLabel, "txtListPriceProfitRate")
 
     def _setup_frozen_states(self) -> None:
         """设置冻结字段为只读。
@@ -505,7 +438,9 @@ class CalculationBinder(QObject):
         self.profitChanged.emit()
 
     def _do_display_only_refresh(self) -> None:
-        """旧记录/快照显示模式：只刷新成本与 SHEIN 核价冻结换算，不重算双场景。"""
+        """旧记录/快照显示模式：只刷新成本与 SHEIN 核价冻结换算，不重算双场景。
+
+        同时更新标价利率（使用保存时的标价利润与保存时成本）。"""
         cost = self._calculation_total_cost_rmb
         rate = self._exchange_rate
         self._set_spin(self.txt_cost_rmb, cost)
@@ -514,6 +449,13 @@ class CalculationBinder(QObject):
         self._shein_quote_usd = shein_usd
         self._set_spin(self.txt_shein_rmb, shein_usd * rate if rate > 0 else 0.0)
         self._update_shein_comparison_from_values()
+        # 标价利率：快照模式使用保存时的标价利润与保存时成本
+        if self.txt_list_price_rate is not None:
+            na_profit_snap = self.txt_na_profit_rmb.value() if self.txt_na_profit_rmb else 0.0
+            if cost > 0:
+                self.txt_list_price_rate.setText(f"{na_profit_snap / cost * 100.0:.2f}%")
+            else:
+                self.txt_list_price_rate.setText("--")
         self._update_snapshot_status_label()
 
     def _do_refresh(self) -> None:
@@ -632,8 +574,8 @@ class CalculationBinder(QObject):
         # SHEIN 核价比较
         self._update_shein_comparison(na)
 
-        # 标价利率 = 标价利润 RMB ÷ 计算总成本 RMB × 100%
-        if hasattr(self, "txt_list_price_rate") and self.txt_list_price_rate:
+        # 标价利率 = 标价利润 RMB ÷ 计算总成本 RMB × 100%（正式写入 .ui，不再动态注入）
+        if self.txt_list_price_rate is not None:
             na_profit = na.profit_rmb if na else 0.0
             if cost > 0:
                 list_price_rate = na_profit / cost * 100.0
