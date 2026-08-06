@@ -385,6 +385,30 @@ class Ui_ImageAIPanel(object):
         QMetaObject.connectSlotsByName(imageAIPanel)
     # setupUi
 
+        # --- restored dynamic properties ---
+        self.imageInputSection.setProperty("card", True)
+        self.lblImageSectionTitle.setProperty("sectionTitle", True)
+        self.lblImageSectionHint.setProperty("hint", True)
+        self.imageInputSection.setProperty("sizeType", "QSizePolicy::Policy::Expanding")
+        self.btnAiRecognize.setProperty("primary", True)
+        self.imageCard1.setProperty("sizeType", "QSizePolicy::Policy::Expanding")
+        self.lblImageDropZone1.setProperty("dropZone", True)
+        self.imageCard1.setProperty("uiPlaceholder", True)
+        self.imageCard2.setProperty("sizeType", "QSizePolicy::Policy::Expanding")
+        self.lblImageDropZone2.setProperty("dropZone", True)
+        self.imageCard2.setProperty("uiPlaceholder", True)
+        self.imageCard3.setProperty("sizeType", "QSizePolicy::Policy::Expanding")
+        self.lblImageDropZone3.setProperty("dropZone", True)
+        self.imageCard3.setProperty("uiPlaceholder", True)
+        self.imageCard4.setProperty("sizeType", "QSizePolicy::Policy::Expanding")
+        self.lblImageDropZone4.setProperty("dropZone", True)
+        self.imageCard4.setProperty("uiPlaceholder", True)
+        self.imageCard5.setProperty("sizeType", "QSizePolicy::Policy::Expanding")
+        self.lblImageDropZone5.setProperty("dropZone", True)
+        self.imageCard5.setProperty("uiPlaceholder", True)
+        self.aiSummarySection.setProperty("card", True)
+        self.lblAiSummaryTitle.setProperty("sectionTitle", True)
+
     def retranslateUi(self, imageAIPanel):
         self.lblImageSectionTitle.setText(QCoreApplication.translate("ImageAIPanel", u"\u56fe\u7247\u8f93\u5165", None))
         self.lblImageSectionHint.setText(QCoreApplication.translate("ImageAIPanel", u"\u5f53\u524d\u529f\u80fd\uff1a\u52a8\u6001 3\u20136 \u4e2a\u56fe\u7247\u6846\uff0c\u987a\u5e8f\u4e0d\u5f71\u54cd\u591a\u56fe\u8bc6\u522b", None))

@@ -274,6 +274,14 @@ class Ui_ProductCostPanel(object):
         QMetaObject.connectSlotsByName(productCostPanel)
     # setupUi
 
+        # --- restored dynamic properties ---
+        self.unit_spinProductCostRmb.setProperty("unitLabel", True)
+        self.unit_spinDomesticFreightRmb.setProperty("unitLabel", True)
+        self.unit_spinBareLengthCm.setProperty("unitLabel", True)
+        self.unit_spinBareWidthCm.setProperty("unitLabel", True)
+        self.unit_spinBareHeightCm.setProperty("unitLabel", True)
+        self.unit_spinBareWeightG.setProperty("unitLabel", True)
+
     def retranslateUi(self, productCostPanel):
         self.lblBareProductTitle.setText(QCoreApplication.translate("ProductCostPanel", u"\u5546\u54c1\u6210\u672c\u4e0e\u88f8\u4ef6", None))
         self.lblProductCost.setText(QCoreApplication.translate("ProductCostPanel", u"\u5546\u54c1\u6210\u672c", None))

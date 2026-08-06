@@ -430,6 +430,29 @@ class Ui_PackagingPanel(object):
         QMetaObject.connectSlotsByName(packagingPanel)
     # setupUi
 
+        # --- restored dynamic properties ---
+        self.normalPackageCard.setProperty("selected", True)
+        self.txtNormalReminder.setProperty("verticalScrollBarPolicy", "Qt::ScrollBarPolicy::ScrollBarAlwaysOff")
+        self.txtNormalReminder.setProperty("horizontalScrollBarPolicy", "Qt::ScrollBarPolicy::ScrollBarAlwaysOff")
+        self.txtNormalReminder.setProperty("lineWrapMode", "QTextEdit::LineWrapMode::WidgetWidth")
+        self.txtNormalReminder.setProperty("acceptRichText", False)
+        self.txtNormalReminder.setProperty("preview", True)
+        self.unit_spinNormalLengthCm.setProperty("unitLabel", True)
+        self.unit_spinNormalWidthCm.setProperty("unitLabel", True)
+        self.unit_spinNormalHeightCm.setProperty("unitLabel", True)
+        self.unit_spinNormalWeightG.setProperty("unitLabel", True)
+        self.normalPackageCard.setProperty("methodFrozen", True)
+        self.txtConservativeMethod.setProperty("preview", True)
+        self.spinConservativeLengthCm.setProperty("preview", True)
+        self.unit_spinConservativeLengthCm.setProperty("unitLabel", True)
+        self.spinConservativeWidthCm.setProperty("preview", True)
+        self.unit_spinConservativeWidthCm.setProperty("unitLabel", True)
+        self.spinConservativeHeightCm.setProperty("preview", True)
+        self.unit_spinConservativeHeightCm.setProperty("unitLabel", True)
+        self.spinConservativeWeightG.setProperty("preview", True)
+        self.unit_spinConservativeWeightG.setProperty("unitLabel", True)
+        self.conservativePackageCard.setProperty("frozen", True)
+
     def retranslateUi(self, packagingPanel):
         self.radioNormalPackage.setText(QCoreApplication.translate("PackagingPanel", u"\u6b63\u5e38\u6863\uff08\u5f53\u524d\u91c7\u7528\uff09", None))
         self.txtNormalReminder.setPlaceholderText(QCoreApplication.translate("PackagingPanel", u"\u6b63\u5e38\u6863\u5305\u88c5\u65b9\u5f0f\uff08\u7531 AI / CAL \u751f\u6210\uff09", None))

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import xml.etree.ElementTree as ET
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -21,13 +22,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 FORMS_DIR = Path(__file__).resolve().parents[2] / "src" / "profit_accounting_26" / "ui" / "forms"
 PAGES_DIR = FORMS_DIR / "pages"
+CALC_DIR = FORMS_DIR / "calculation"
 
 
 # ── helpers ──────────────────────────────────────────────────────────
 
-def _collect_names(tree: ET.Element) -> set[str]:
-    names = {w.get("name") for w in tree.iter("widget") if w.get("name")}
-    names |= {l.get("name") for l in tree.iter("layout") if l.get("name")}
+def _collect_names(tree: ET.Element) -> list[str]:
+    """收集 widget 和 layout 的 objectName（保留重复）。"""
+    names = [w.get("name") for w in tree.iter("widget") if w.get("name")]
+    names += [l.get("name") for l in tree.iter("layout") if l.get("name")]
     return names
 
 
@@ -162,6 +165,41 @@ class TestUIFileContract:
             fpath = FORMS_DIR / file_rel
             actual = self._ui_content_sha256(fpath)
             assert actual == sha, f"{file_rel} SHA 不匹配: {actual} != {sha}"
+
+
+    def test_objectnames_no_duplicates_per_file(self):
+        """每个 .ui 文件内 objectName 不重复。"""
+        for rel_path in ["main_window.ui", "pages/calculation_page.ui", "pages/settings_page.ui"]:
+            tree = ET.parse(FORMS_DIR / rel_path)
+            names = _collect_names(tree)
+            dupes = [name for name, cnt in Counter(names).items() if cnt > 1]
+            assert not dupes, f"{rel_path} 存在重复 objectName: {dupes}"
+        for fn in sorted(CALC_DIR.glob("*.ui")):
+            tree = ET.parse(fn)
+            names = _collect_names(tree)
+            dupes = [name for name, cnt in Counter(names).items() if cnt > 1]
+            assert not dupes, f"{fn.name} 存在重复 objectName: {dupes}"
+
+    def test_objectnames_unique_across_calculation_uis(self):
+        """calculation 目录下所有 .ui 的关键 objectName 不跨文件重复。"""
+        import re
+        key_names = ["txtSheinPriceRmb", "spinProfitRate", "spinProductCostRmb",
+                     "radioNormalPackage", "spinTailFreightUsd", "btnAiRecognize",
+                     "profitPanel", "productCostPanel", "packagingPanel",
+                     "logisticsPanel", "imageAIPanel",
+                     "txtProductLink", "btnSaveCurrentRecord", "btnClearAndNew"]
+        for name in key_names:
+            count = 0
+            for fn in sorted(CALC_DIR.glob("*.ui")):
+                content = fn.read_text(encoding="utf-8-sig")
+                if f'name="{name}"' in content:
+                    count += 1
+            if name in ["txtProductLink", "btnSaveCurrentRecord", "btnClearAndNew"]:
+                # 这些在壳页面中
+                shell_text = (FORMS_DIR / "pages/calculation_page.ui").read_text(encoding="utf-8-sig")
+                if f'name="{name}"' in shell_text:
+                    count += 1
+            assert count == 1, f"objectName '{name}' 出现 {count} 次（应为 1）"
 
 
 # ── 15.2 运行时加载与冻结状态 ────────────────────────────────────────
@@ -324,6 +362,24 @@ class TestRealSplitVerification:
         profit_root = calc_page._panel_roots["profit"]
         label = profit_root.findChild(QLabel, "txtListPriceProfitRate")
         assert label is not None
+
+    def test_dynamic_properties_restored_on_profit_panel(self, calc_page):
+        """profit panel 关键动态属性在 setupUi 后已恢复。"""
+        from PySide6.QtWidgets import QWidget
+        profit = calc_page._panel_roots["profit"]
+        # 根 widget 直接检查（非 findChild）
+        assert profit.property("card") == True, f"profitPanel.card = {profit.property('card')}"
+        checks = {
+            "lblProfitTitle": ("sectionTitle", True),
+            "lblProfitHint": ("hint", True),
+            "lblNoActivitySubsidyStatus": ("subsidyStatus", True),
+            "lblProfitConclusion": ("conclusion", True),
+        }
+        for widget_name, (prop, expected) in checks.items():
+            w = profit.findChild(QWidget, widget_name)
+            assert w is not None, f"widget {widget_name} not found"
+            actual = w.property(prop)
+            assert actual == expected, f"{widget_name}.{prop}: {actual} != {expected}"
 
 
 class TestFrozenStates:

@@ -500,6 +500,29 @@ class Ui_LogisticsPanel(object):
         QMetaObject.connectSlotsByName(logisticsPanel)
     # setupUi
 
+        # --- restored dynamic properties ---
+        self.freightSection.setProperty("card", True)
+        self.lblFreightTitle.setProperty("sectionTitle", True)
+        self.unit_spinTailFreightUsd.setProperty("unitLabel", True)
+        self.spinTailFreightRmb.setProperty("preview", True)
+        self.unit_spinTailFreightRmb.setProperty("unitLabel", True)
+        self.forwarderCardShenzhen.setProperty("selected", True)
+        self.lblShenzhenTotal.setProperty("totalValue", True)
+        self.forwarderCardShenzhen.setProperty("uiPlaceholder", True)
+        self.lblYiwuTotal.setProperty("totalValue", True)
+        self.forwarderCardYiwu.setProperty("uiPlaceholder", True)
+        self.systemCostSection.setProperty("card", True)
+        self.lblSystemCostTitle.setProperty("sectionTitle", True)
+        self.systemCostSection.setProperty("sizeType", "QSizePolicy::Policy::Expanding")
+        self.systemCostSection.setProperty("sizeType", "QSizePolicy::Policy::Expanding")
+        self.systemCostSection.setProperty("sizeType", "QSizePolicy::Policy::Expanding")
+        self.systemCostSection.setProperty("sizeType", "QSizePolicy::Policy::Expanding")
+        self.systemCostSection.setProperty("sizeType", "QSizePolicy::Policy::Expanding")
+        self.systemCostSection.setProperty("sizeType", "QSizePolicy::Policy::Expanding")
+        self.systemCostSection.setProperty("sizeType", "QSizePolicy::Policy::Expanding")
+        self.systemCostSection.setProperty("sizeType", "QSizePolicy::Policy::Expanding")
+        self.systemTotalBox.setProperty("card", True)
+
     def retranslateUi(self, logisticsPanel):
         self.lblFreightTitle.setText(QCoreApplication.translate("LogisticsPanel", u"\u8d27\u4ee3\u65b9\u6848\uff08\u8fd0\u884c\u65f6\u6309\u542f\u7528\u8d27\u4ee3\u52a8\u6001\u751f\u6210\uff09", None))
         self.lblTailFreight.setText(QCoreApplication.translate("LogisticsPanel", u"\u5c3e\u7a0b\u8d39\u7528", None))
