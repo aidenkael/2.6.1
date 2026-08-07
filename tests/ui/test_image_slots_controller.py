@@ -7,8 +7,9 @@
 4. rebuild 后已有图片路径保留；
 5. remove_image；
 6. image_fingerprint 稳定；
-7. save_image_config 写入与页面同一个 settings 对象；
-8. 剪贴板无目标时返回 False。
+7. save_image_config 写入页面当前 settings 对象（provider 语义）；
+8. 剪贴板无目标时返回 False；
+9. 回归：页面 settings 被 refresh_settings 整体替换后，保存写入新 dict。
 
 约束：qapp 由 tests/conftest.py 的会话级 fixture 提供，禁止在本文件内
 创建 QApplication。
@@ -146,11 +147,11 @@ def test_image_fingerprint_stable(page, tmp_path):
     assert page._image_fingerprint() == page.image_slots_controller.image_fingerprint()
 
 
-# 7. 保存数量写入与页面同一个 settings 对象（禁止第二份缓存）
+# 7. 保存数量写入页面当前 settings 对象（provider 每次返回同一对象，禁止第二份缓存）
 def test_save_image_config_writes_same_settings_object(page, monkeypatch):
     _silence_info(monkeypatch)
     settings_obj = page.settings
-    assert page.image_slots_controller.settings is settings_obj
+    assert page.image_slots_controller._settings_provider() is settings_obj
 
     page.change_slot_count(1)  # 5 → 6
     page.save_image_config()
@@ -168,3 +169,42 @@ def test_paste_without_target_returns_false(qapp, page):
     clipboard.setText("not-an-image")
     assert page.paste_from_clipboard() is False
     clipboard.clear()
+
+
+# 9. 回归：页面 settings 被整体替换（refresh_settings 场景）后，保存必须写入新 dict
+def test_save_image_config_follows_page_settings_replacement(page, monkeypatch):
+    _silence_info(monkeypatch)
+    settings_a = page.settings  # A：页面构造时的 dict（旧实现中 Controller 持久持有它）
+
+    # 模拟 refresh_settings()：page.settings 被换成新 dict B（用户已改汇率）
+    settings_b = page.context.settings_service.load()
+    settings_b["exchange_rate_usd_to_rmb"] = 6.5
+    page.settings = settings_b
+
+    # 监视 save/load：记录保存载荷与 load 调用次数
+    service = page.context.settings_service
+    original_save = service.save
+    original_load = service.load
+    saved_payloads: list = []
+    load_calls: list = []
+    monkeypatch.setattr(service, "save", lambda data: saved_payloads.append(data) or original_save(data))
+    monkeypatch.setattr(service, "load", lambda: load_calls.append(1) or original_load())
+
+    page.change_slot_count(1)  # 5 → 6
+    page.save_image_config()
+
+    # 修改发生在 settings B，且 B 的汇率未被覆盖
+    assert settings_b["image_slot_count"] == 6
+    assert settings_b["exchange_rate_usd_to_rmb"] == 6.5
+    # settings A 未被重新写入：既无新汇率，也无新数量
+    assert settings_a.get("exchange_rate_usd_to_rmb") != 6.5
+    assert settings_a.get("image_slot_count") != 6
+    # settings_service.save() 收到的就是 B 本身
+    assert len(saved_payloads) == 1
+    assert saved_payloads[0] is settings_b
+    # Controller 未调用 settings_service.load()
+    assert load_calls == []
+    # 持久化文件中新汇率与图片框数量并存
+    persisted = original_load()
+    assert persisted["image_slot_count"] == 6
+    assert persisted["exchange_rate_usd_to_rmb"] == 6.5
