@@ -229,12 +229,14 @@ class CalculationPage(QWidget):
 
         # 图片框管理委托 ImageSlotsController（第一阶段 Controller 拆分）；
         # AI 状态回调 _image_changed 保留在本页，行为不变。
-        # settings 传入本页当前 dict 引用，禁止 Controller 另建缓存。
+        # settings 以 provider 注入：refresh_settings 会用新 dict 整体替换
+        # self.settings，Controller 不得持有固定 dict 引用，也不得自行
+        # load() 创建第二份缓存；settings 唯一当前状态仍由本页持有。
         self.image_slots_controller = ImageSlotsController(
             self._root,
             self,
             self.context.settings_service,
-            self.settings,
+            settings_provider=lambda: self.settings,
             image_changed_callback=self._image_changed,
             mark_dirty_callback=self._mark_dirty,
         )

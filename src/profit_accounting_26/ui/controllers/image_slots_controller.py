@@ -10,13 +10,16 @@
 - 继续绑定稳定 ``main_window.ui`` 中的原有 objectName
   （btnDecreaseImageSlots / btnIncreaseImageSlots / btnSaveImageLayout /
   lblImageSlotCount / imageSlotsLayout）；
-- 不拥有或创建 UI，不修改控件布局；
+- 不创建新的页面布局结构、不修改 .ui；负责现有 imageSlotsLayout 内
+  动态 ImageSlotWidget 的创建与生命周期管理；
 - 不含业务公式，不创建 Service；
 - **不接管 AI/Recognition 状态**：图片框内容变化通过注入的
   ``image_changed_callback`` 通知页面，AI 按钮文案、AI整体重估判断与
   识图线程状态仍留在 ``CalculationPage._image_changed``；
-- ``settings`` 必须接收 ``CalculationPage`` 当前 ``self.settings`` 的
-  同一个 dict 引用，禁止在此再次 ``settings_service.load()`` 创建第二份缓存。
+- ``settings_provider`` 由页面注入，每次调用必须返回 ``CalculationPage``
+  当前的 ``self.settings``（``refresh_settings`` 会用新 dict 整体替换
+  ``self.settings``，因此禁止持有固定 dict 引用），也禁止在此
+  ``settings_service.load()`` 创建第二份缓存。
 """
 
 from __future__ import annotations
@@ -42,20 +45,20 @@ from profit_accounting_26.ui.widgets import ImageSlotWidget
 
 
 class ImageSlotsController:
-    """图片框管理 Controller（不拥有 UI，不接管 AI 状态）。"""
+    """图片框管理 Controller（不创建布局结构，管理动态 ImageSlotWidget，不接管 AI 状态）。"""
 
     def __init__(
         self,
         root: QWidget,
         parent: QWidget,
         settings_service: Any,
-        settings: dict[str, Any],
+        settings_provider: Callable[[], dict[str, Any]],
         image_changed_callback: Callable[[], None],
         mark_dirty_callback: Callable[[], None],
     ) -> None:
         self._parent = parent
         self._settings_service = settings_service
-        self.settings = settings
+        self._settings_provider = settings_provider
         self._image_changed_callback = image_changed_callback
         self._mark_dirty_callback = mark_dirty_callback
         self.image_slots: list[ImageSlotWidget] = []
@@ -104,9 +107,10 @@ class ImageSlotsController:
         self._mark_dirty_callback()
 
     def save_image_config(self) -> None:
-        self.settings["image_slot_count"] = len(self.image_slots)
-        self.settings.pop("image_slot_types", None)
-        self._settings_service.save(self.settings)
+        settings = self._settings_provider()
+        settings["image_slot_count"] = len(self.image_slots)
+        settings.pop("image_slot_types", None)
+        self._settings_service.save(settings)
         QMessageBox.information(self._parent, "已保存", "图片框数量、顺序和默认类型已保存。")
 
     def remove_image(self, index: int) -> None:
