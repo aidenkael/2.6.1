@@ -19,6 +19,7 @@ fixture that requests it). Never create a ``QApplication`` inside a test
 function or a narrower-scoped fixture.
 """
 
+import gc
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -61,8 +62,18 @@ def _qt_flush_deferred_deletes():
     then processing them guarantees a test's widgets are destroyed before the
     following test starts. This is a no-op when no ``QApplication`` exists
     (pure-logic tests).
+
+    The ``gc.collect()`` first forces any reference cycles left behind by the
+    finished test (e.g. fixture windows kept alive only by signal-slot cycles)
+    to be destroyed HERE — in the controlled gap between tests — instead of at
+    an arbitrary allocation threshold in the middle of a later test. A cyclic
+    GC pass destroying a Qt widget tree mid-test was observed to corrupt
+    widget state and segfault in ``QLabel.setStyleSheet`` on Linux offscreen
+    (timing-dependent on total allocation count; adding or removing unrelated
+    tests flipped the outcome).
     """
     yield
+    gc.collect()
     try:
         from PySide6.QtCore import QCoreApplication, QEvent
     except Exception:
