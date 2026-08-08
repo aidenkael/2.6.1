@@ -404,7 +404,7 @@ def test_permanent_delete_removes_record_feedback_and_exclusive_image(qapp, cont
     original_path = page._image_path(v2.images[0], prefer_thumbnail=False)
     assert original_path is not None and original_path.is_file()
     page.table.selectRow(_row_for(page, record_id))
-    page._archive_selected()
+    page._delete_selected()
     # 列表消失且记录本体物理删除（无回收站）
     assert page.table.rowCount() == 0
     with pytest.raises(KeyError):
@@ -430,11 +430,11 @@ def test_permanent_delete_keeps_shared_image_until_last_reference(qapp, context,
     shared_path = page._image_path(v2.images[0], prefer_thumbnail=False)
     assert shared_path is not None and shared_path.is_file()
     page.table.selectRow(_row_for(page, first))
-    page._archive_selected()
+    page._delete_selected()
     # 仍被另一条记录引用 → 图片保留
     assert shared_path.is_file()
     page.table.selectRow(_row_for(page, second))
-    page._archive_selected()
+    page._delete_selected()
     # 最后一条引用删除后才物理删除
     assert not shared_path.exists()
 
@@ -446,7 +446,7 @@ def test_permanent_delete_cancel_keeps_everything(qapp, context, monkeypatch):
     record_id = _create_v2(context)
     page = HistoryPage(context)
     page.table.selectRow(_row_for(page, record_id))
-    page._archive_selected()
+    page._delete_selected()
     assert page.table.rowCount() == 1
     assert context.record_service.load(record_id)["id"] == record_id
 

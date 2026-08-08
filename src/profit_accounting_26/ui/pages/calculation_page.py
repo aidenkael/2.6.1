@@ -579,8 +579,8 @@ class CalculationPage(QWidget):
         conservative_card.style().polish(conservative_card)
         self._style_card(self.normal_fields, selected=False)
         self._style_card(self.conservative_fields, selected=True)
-        # 4) 系统成本卡固定六行：采购成本 / 国内运费 / 头程 / 服务费 / 尾程 / 总成本；
-        # 标签与金额对齐由第五轮排版完成，旧的重量/计费重/物流总价行保持静态隐藏
+        # 4) 系统成本卡固定六行：采购成本 / 国内运费 / 头程（货代名）/ 服务费 / 尾程 / 总成本；
+        # 标签与金额对齐由静态 main_window.ui 排版完成，旧的重量/计费重/物流总价行已删除
 
     def _apply_round3_ui_polish(self) -> None:
         """利润区规则状态放字段标题上方（尾程输入已在 main_window.ui 静态独立卡内）。

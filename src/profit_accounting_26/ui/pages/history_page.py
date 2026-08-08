@@ -159,7 +159,7 @@ class HistoryPage(QWidget):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(14, 12, 14, 12)
         card_layout.setSpacing(10)
-        header = SectionHeader("历史记录管理", "裸品 → AI估算 → 当前采用 → 保存 → 实际校准")
+        header = SectionHeader("历史记录管理", "裸品 → AI估算 → 当前采用 → 保存 → 用户校准")
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("搜索商品……")
@@ -177,7 +177,7 @@ class HistoryPage(QWidget):
         refresh.clicked.connect(self.refresh)
         self.open_button.clicked.connect(self.open_selected)
         self.calibrate_button.clicked.connect(self._open_calibration_dialog)
-        self.delete_button.clicked.connect(self._archive_selected)
+        self.delete_button.clicked.connect(self._delete_selected)
         header.right_layout.addWidget(self.search)
         header.right_layout.addWidget(refresh)
         header.right_layout.addWidget(self.open_button)
@@ -496,7 +496,7 @@ class HistoryPage(QWidget):
         if dialog.exec():
             self.refresh()
 
-    def _archive_selected(self) -> None:
+    def _delete_selected(self) -> None:
         """永久删除：记录 + 绑定校准反馈 + 独占图片；不实现回收站。"""
         record_id = self.selected_record_id()
         if not record_id:

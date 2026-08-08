@@ -136,7 +136,7 @@ class TestUIFileContract:
     def test_ui_sha256_matches_contract(self):
         """.ui SHA 与输入文件一致。"""
         expected = {
-            "main_window.ui": "4cf975d3632645b8c4cdc73d924eebaa8f94300f707a6997838e06e7da7ccb62",
+            "main_window.ui": "e855af0e0a863904ad957c1bfabcf2081866cc8392195fc95bf70f07a3884472",
             "settings_page.ui": "88a1422fa758e9eed835b2f422b9fcd070c2d69bb1eac025cbafb8aa0cb579ae",
         }
         for name, sha in expected.items():

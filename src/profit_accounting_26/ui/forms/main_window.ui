@@ -4564,7 +4564,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          <string>¥40.00</string>
                         </property>
                         <property name="toolTip">
-                         <string>尾程费用单独显示，并已计入物流总价和系统总成本</string>
+                         <string>尾程费用单独显示，并已计入系统总成本</string>
                         </property>
                         <property name="alignment">
                          <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
