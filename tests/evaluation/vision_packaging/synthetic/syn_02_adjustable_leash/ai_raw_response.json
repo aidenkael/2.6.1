@@ -1,0 +1,20 @@
+{
+  "id": "chatcmpl-syn_02_adjustable_leash",
+  "object": "chat.completion",
+  "model": "synthetic-fixture-v1",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"observation\": {\"product_name\": \"宠物牵引绳\", \"product_type\": \"牵引绳\", \"product_family\": \"宠物用品\", \"product_type_raw\": \"宠物牵引绳\", \"product_type_code\": \"unknown\", \"product_family_code\": \"unknown\", \"material\": \"尼龙\", \"material_family\": \"织物\", \"material_family_code\": \"unknown\", \"display_product_summary\": \"尼龙宠物牵引绳一条\", \"display_packaging_summary\": \"未见包装\", \"overall_form\": \"flexible_chain\", \"packing_actions\": [\"coil\"], \"packing_constraints\": [], \"rigidity\": \"soft\", \"foldability\": \"good\", \"compressibility\": \"unknown\", \"packaging_state_hint\": \"moderate_compression\", \"requires_shape_retention\": false, \"has_hard_bottom\": false, \"has_hard_backboard\": false, \"has_frame\": false, \"has_rigid_insert\": false, \"has_rigid_parts\": false, \"retail_box_visible\": false, \"hard_card_visible\": false, \"protrusion_flattenable\": null, \"product_cost_rmb\": 8.9, \"product_cost_value_type\": \"exact\", \"domestic_shipping_rmb\": 2, \"domestic_shipping_value_type\": \"exact\", \"length_cm\": null, \"width_cm\": null, \"height_cm\": null, \"weight_g\": 120, \"dimension_value_source\": \"image_text\", \"weight_value_source\": \"image_text\", \"dimension_scope\": \"adjustable_range\", \"weight_scope\": \"net_weight\", \"quantity\": 1, \"confidence\": \"medium\"}, \"field_evidence\": {\"product_cost_rmb\": {\"source_image_index\": 0, \"raw_text\": \"8.9元\", \"confidence\": \"high\"}, \"domestic_shipping_rmb\": {\"source_image_index\": 0, \"raw_text\": \"运费2元\", \"confidence\": \"high\"}, \"dimensions\": {\"source_image_index\": 1, \"raw_text\": \"长度 100-120cm 可调节\", \"meaning\": \"可调长度范围\", \"semantic_note\": \"非单件三维外廓\", \"confidence\": \"high\"}, \"weight\": {\"source_image_index\": 1, \"raw_text\": \"120g\", \"confidence\": \"high\"}, \"structure\": {\"has_hard_bottom\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"has_hard_backboard\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"has_frame\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"has_rigid_insert\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"has_rigid_parts\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"retail_box_visible\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"hard_card_visible\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}}, \"transport_outline\": {\"source_image_index\": null, \"raw_text\": \"\", \"visible_features\": [], \"region_description\": \"\", \"confidence\": \"low\"}}, \"packaging_proposal\": {\"normal\": {\"label\": \"正常档\", \"packaging_state\": \"moderate_compression\", \"packaging_method\": \"盘绕后袋装\", \"length_cm\": 18, \"width_cm\": 12, \"height_cm\": 4, \"weight_g\": 150, \"reasoning_summary\": \"盘绕后装袋\", \"confidence\": \"medium\", \"needs_review\": false}, \"conservative\": {\"label\": \"保守档\", \"packaging_state\": \"moderate_compression\", \"packaging_method\": \"盘绕后袋装加厚\", \"length_cm\": 20, \"width_cm\": 14, \"height_cm\": 5, \"weight_g\": 170, \"reasoning_summary\": \"保守加护\", \"confidence\": \"medium\", \"needs_review\": false}, \"proposal_source\": \"vision_api\", \"needs_review\": false, \"review_reasons\": []}}"
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 128,
+    "completion_tokens": 256,
+    "total_tokens": 384
+  }
+}

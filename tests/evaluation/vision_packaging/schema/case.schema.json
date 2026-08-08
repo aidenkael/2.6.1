@@ -1,0 +1,55 @@
+{
+  "$comment": "vision-packaging-eval-case-v1 —— 评测案例格式参考。正式校验在 tests/evaluation/vision_packaging/harness/case_io.py:validate_case_metadata。所有人工标准字段均可留 null / unknown。",
+  "schema_version": "vision-packaging-eval-case-v1",
+  "files": {
+    "case.json": "案例元数据 + 人工标准（本文件描述的结构）",
+    "ai_raw_response.json": "完整的 provider 响应（OpenAI 兼容），content 内为模型返回的 JSON 字符串",
+    "images/": "可选：真实商品图片，仅保存在仓库外数据目录，绝不提交 GitHub"
+  },
+  "case.json": {
+    "case_id": "string，必填，目录名建议一致",
+    "schema_version": "vision-packaging-eval-case-v1",
+    "origin": "real | synthetic",
+    "model": "string，可选，raw response 的模型名",
+    "description": "string，可选",
+    "images": [
+      {
+        "file": "images/xxx.jpg，可选（仓库外数据才允许放真实图片）",
+        "image_role": "main | dimension | weight | packaging | other | unknown（当前人工填写）",
+        "sha256": "可选，导入时自动填写",
+        "bytes": "可选",
+        "mime_type": "可选"
+      }
+    ],
+    "current_observation": "object | null，导入时的软件识别快照（仅参考，不参与评分）",
+    "current_packaging_result": "object | null，导入时的软件包装结果快照（仅参考）",
+    "ground_truth": {
+      "expected_product_summary": "string | null",
+      "expected_material": "string | null",
+      "expected_structure": "string | null，软硬/折叠/保形等结构结论",
+      "bare_dimensions": {
+        "value": {"length_cm": 0, "width_cm": 0, "height_cm": 0},
+        "acceptable_range": {"length_cm": [0, 0], "width_cm": [0, 0], "height_cm": [0, 0]},
+        "unknown": "bool，true 时整项不参与评分"
+      },
+      "bare_weight": {
+        "value": 0,
+        "acceptable_range": [0, 0],
+        "unknown": "bool"
+      },
+      "normal_packaging": {
+        "length_range": "[min, max] | null，null 表示该轴不评分",
+        "width_range": "[min, max] | null",
+        "height_range": "[min, max] | null",
+        "weight_range": "[min, max] | null",
+        "acceptable_methods": "string[] | null，任一子串命中即算正确；[\"*\"] 表示任意非空方式均可",
+        "unknown": "bool，true 时整个正常档不评分"
+      },
+      "conservative_packaging": "同 normal_packaging，可选。normal/conservative 双档是当前生产引擎的 legacy_current_engine_output，不是 V2 长期数据标准",
+      "estimated_package": "可选，V2 单一主包装结果的人工标准，结构同 normal_packaging（区间 + acceptable_methods + unknown）",
+      "structure_feedback": "可选：rigidity/shape_retention/foldability/compressibility（字符串）+ foldable_parts/coilable_parts/detachable_parts/rigid_parts（字符串列表）+ axis_behavior；全部可 null",
+      "actual_feedback": "可选：actual_first_mile_fee_rmb/actual_chargeable_weight_kg/actual_package_weight（数字）+ actual_forwarder/actual_packaging_method（字符串）+ actual_package_dimensions；填写后可评 chargeable_weight_error/underestimate/severe_underestimate，不足时输出 unavailable",
+      "notes": "string，可选"
+    }
+  }
+}

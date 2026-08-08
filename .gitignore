@@ -70,3 +70,9 @@ logs/
 
 # 用户下载的原始 .ui 文件存放目录（非项目源码，实际 .ui 在 src/.../ui/forms/）
 /ui/
+
+# 视觉/包装评测：真实案例、图片与报告必须放在仓库外数据目录，禁止提交
+evaluation-data/
+*-evaluation-data/
+tests/evaluation/**/real/
+tests/evaluation/**/reports/

@@ -1,0 +1,21 @@
+{
+  "$comment": "ai_raw_response.json 模板：必须是完整的 provider 响应。choices[0].message.content 是模型返回的 JSON 字符串（与 DiagnosticLogger 保存的 provider_raw_response 结构一致）。真实文件放在仓库外数据目录，不要提交 GitHub。",
+  "id": "chatcmpl-xxxxxxxx",
+  "object": "chat.completion",
+  "model": "模型名",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"observation\": {...}, \"field_evidence\": {...}, \"packaging_proposal\": {...}}"
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
+  }
+}

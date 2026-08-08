@@ -1,0 +1,46 @@
+{
+  "case_id": "case-示例-请改名",
+  "schema_version": "vision-packaging-eval-case-v1",
+  "origin": "real",
+  "model": "unknown-model",
+  "description": "把本目录复制到仓库外数据目录 <data-dir>/cases/<case_id>/ 后填写",
+  "images": [
+    {
+      "file": "images/main.jpg",
+      "image_role": "unknown"
+    }
+  ],
+  "image_role_note": "image_role 当前人工填写：main / dimension / weight / packaging / other / unknown",
+  "current_observation": null,
+  "current_packaging_result": null,
+  "ground_truth": {
+    "expected_product_summary": null,
+    "expected_material": null,
+    "expected_structure": null,
+    "bare_dimensions": {
+      "unknown": true
+    },
+    "bare_weight": {
+      "unknown": true
+    },
+    "normal_packaging": {
+      "length_range": null,
+      "width_range": null,
+      "height_range": null,
+      "weight_range": null,
+      "acceptable_methods": null
+    },
+    "conservative_packaging": null,
+    "estimated_package": {
+      "length_range": null,
+      "width_range": null,
+      "height_range": null,
+      "weight_range": null,
+      "acceptable_methods": null,
+      "unknown": true
+    },
+    "structure_feedback": null,
+    "actual_feedback": null,
+    "notes": "所有字段允许保持 null / unknown；评分只统计已填写的部分。normal/conservative 是当前引擎 legacy 输出，estimated_package 为 V2 单一主结果预留；actual_feedback 填写后可评 chargeable_weight_error 等业务指标。"
+  }
+}
