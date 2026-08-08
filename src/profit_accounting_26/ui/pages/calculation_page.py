@@ -518,11 +518,17 @@ class CalculationPage(QWidget):
                 grid.addLayout(width_row, 2, 1)
             if height_row is not None:
                 grid.addLayout(height_row, 2, 2)
-            # 行 3：包装后重量
-            if weight_label is not None:
-                grid.addWidget(weight_label, 3, 0)
+            # 行 3：包装后重量 —— [标题][10px][固定宽输入框][5px][g][stretch] 单行紧凑结构
             if weight_row is not None:
-                grid.addLayout(weight_row, 3, 1, 1, 2)
+                weight_row.setSpacing(5)
+            weight_hbox = QHBoxLayout()
+            weight_hbox.setContentsMargins(0, 0, 0, 0)
+            weight_hbox.setSpacing(10)
+            if weight_label is not None:
+                weight_hbox.addWidget(weight_label)
+            if weight_row is not None:
+                weight_hbox.addLayout(weight_row)
+            grid.addLayout(weight_hbox, 3, 0, 1, 3)
             # 行 4：底部标签（两侧同一行结构，右卡不再显示动态货代/纯头程提示）
             bottom_label = QLabel("包装方式" if is_ai else "用户修正")
             bottom_label.setFixedHeight(20)

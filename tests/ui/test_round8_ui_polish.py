@@ -92,7 +92,7 @@ class TestWeightRowGap:
         left = shown_page.normal_fields["weight"].spin
         right = shown_page.conservative_fields["weight"].spin
         assert left.width() == right.width()
-        assert 100 <= left.width() <= 125
+        assert 92 <= left.width() <= 100
         assert left.sizePolicy().horizontalPolicy() != QSizePolicy.Policy.Expanding
         assert right.sizePolicy().horizontalPolicy() != QSizePolicy.Policy.Expanding
 
