@@ -381,8 +381,9 @@ class QuoteCard(Card):
             ("chargeable", "计费重"),
             ("weight_fee", "头程费"),
             ("fixed", "固定费"),
-            ("tail", "尾程"),
-            ("total", "物流总价"),
+            # 尾程行标题留空但保留行高：货代卡只负责头程展示
+            ("tail", ""),
+            ("total", "头程总费用"),
         ):
             row = QHBoxLayout()
             row.setSpacing(4)
@@ -404,13 +405,14 @@ class QuoteCard(Card):
     def update_quote(self, quote: LogisticsQuote | None, *, cheapest: bool = False) -> None:
         self.cheapest_label.setText("更低成本" if cheapest else "")
         if quote is None:
-            for label in self.rows.values():
-                label.setText("—")
+            for key, label in self.rows.items():
+                label.setText("" if key == "tail" else "—")
             return
         self.rows["actual"].setText(f"{quote.actual_weight_kg:.3f} kg")
         self.rows["volume"].setText(f"{quote.volume_weight_kg:.3f} kg")
         self.rows["chargeable"].setText(f"{quote.chargeable_weight_kg:.3f} kg")
         self.rows["weight_fee"].setText(f"¥{quote.weight_fee_rmb:.2f}")
         self.rows["fixed"].setText(f"¥{quote.fixed_fee_rmb:.2f}")
-        self.rows["tail"].setText(f"¥{quote.tail_fee_rmb:.2f}")
-        self.rows["total"].setText(f"¥{quote.total_logistics_rmb:.2f}")
+        # 尾程金额不显示；头程总费用 = 头程费 + 固定服务费（展示口径，不改业务引擎）
+        self.rows["tail"].setText("")
+        self.rows["total"].setText(f"¥{quote.weight_fee_rmb + quote.fixed_fee_rmb:.2f}")

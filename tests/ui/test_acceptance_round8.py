@@ -197,10 +197,11 @@ class TestTailFeeUsdLiveLink:
             # 冻结 RMB 立即变成 72.00
             assert rmb_spin.value() == pytest.approx(72.0, abs=0.01), f"RMB={rmb_spin.value()} != 72.00"
 
-            # 两家货代物流总价改变
+            # 两家货代“头程总费用”不随尾程变化（货代卡只显示头程口径）；尾程金额不显示
             for fid, card in page.quote_cards.items():
-                assert card.rows["total"].text() != cards_before.get(fid, ""), \
-                    f"货代 {fid} 物流总价未改变: {card.rows['total'].text()}"
+                assert card.rows["total"].text() == cards_before.get(fid, ""), \
+                    f"货代 {fid} 头程总费用不应随尾程变化: {card.rows['total'].text()}"
+                assert card.rows["tail"].text() == ""
 
             # 系统总成本改变
             assert page.system_total is not None
