@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from profit_accounting_26.application.calibration_manager import CalibrationManager
+from profit_accounting_26.application.calibration_feedback_service import CalibrationFeedbackService
 from profit_accounting_26.application.diagnostic_logger import DiagnosticLogger
 from profit_accounting_26.application.api_profile_store import ApiProfileStore
 from profit_accounting_26.application.history_record_service import HistoryRecordV2Service
@@ -32,6 +33,7 @@ class AppContext:
     diagnostic_logger: DiagnosticLogger
     history_record_v2_service: HistoryRecordV2Service
     image_store: ImageStore
+    calibration_feedback_service: CalibrationFeedbackService
 
     @classmethod
     def create_default(cls) -> "AppContext":
@@ -61,6 +63,8 @@ class AppContext:
         image_store = ImageStore(store, paths.data_dir)
         image_store.initialize()
         history_record_v2_service = HistoryRecordV2Service(store)
+        calibration_feedback_service = CalibrationFeedbackService(store)
+        calibration_feedback_service.initialize()
         return cls(
             paths=paths,
             store=store,
@@ -80,4 +84,5 @@ class AppContext:
             diagnostic_logger=diagnostic_logger,
             history_record_v2_service=history_record_v2_service,
             image_store=image_store,
+            calibration_feedback_service=calibration_feedback_service,
         )
