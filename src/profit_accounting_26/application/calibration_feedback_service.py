@@ -139,6 +139,8 @@ class CalibrationFeedbackService:
             feedback = self.load(feedback_id)
             feedback.calibration_exported_at = now
             feedback.calibration_export_batch_id = batch_id
+            # 重新成功导出后，修改标记必须恢复 false，待导出集合不再包含该反馈
+            feedback.feedback_updated_after_export = False
             with self.store.connect() as connection:
                 connection.execute(
                     "UPDATE calibration_feedback SET payload_json=?, updated_at=? WHERE feedback_id=?",

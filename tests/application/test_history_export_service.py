@@ -88,6 +88,8 @@ def test_calibration_export_structure_and_summary(env):
     assert manifest["format"] == "calibration-feedback-v1"
     assert manifest["prompt_version"]
     assert manifest["software_version"] == "2.6.1"
+    assert manifest["model"] == "m-1"
+    assert manifest["rule_version"] == "v2"
     summary = summaries[0]
     assert summary["record_id"] == record_id
     assert summary["product_name"] == "商品B"
@@ -95,6 +97,47 @@ def test_calibration_export_structure_and_summary(env):
     assert summary["legacy_packaging_output"]["normal"]["packaging_method"] == "袋装"
     assert summary["image_hashes"] == ["ab" * 32]
     assert items[0]["user_note"] == "提手可以折下去"
+
+
+def test_manifest_versions_from_actual_record_sources(env):
+    store, feedback, exporter, tmp_path = env
+    record_id = _record(store, "模型A")
+    payload = store.load_record(record_id)
+    payload["layers"]["ai_raw"] = {
+        "observation": {"model": "obs-model-1", "prompt_version": "p1"},
+    }
+    payload["layers"]["calculated"]["packaging_engine_version"] = "engine-1"
+    store.update_record(record_id, payload)
+    feedback.save({"record_id": record_id, "user_note": "a"})
+
+    second_id = _record(store, "模型B")
+    second = store.load_record(second_id)
+    second["layers"]["ai_raw"] = {"model": "top-model-2"}
+    second["layers"]["calculated"]["packaging_engine_version"] = "engine-2"
+    store.update_record(second_id, second)
+    feedback.save({"record_id": second_id, "user_note": "b"})
+
+    target = exporter.export_calibration(tmp_path / "multi.zip")
+    with zipfile.ZipFile(target) as bundle:
+        manifest = json.loads(bundle.read("manifest.json"))
+    # 同时兼容 observation.model 与顶层 model 两种实际落位
+    assert manifest["model"] == ["obs-model-1", "top-model-2"]
+    assert manifest["rule_version"] == ["engine-1", "engine-2"]
+
+
+def test_manifest_versions_null_when_unavailable(env):
+    store, feedback, exporter, tmp_path = env
+    record_id = _record(store, "无版本")
+    payload = store.load_record(record_id)
+    payload["layers"]["ai_raw"] = {}
+    payload["layers"]["calculated"].pop("packaging_engine_version", None)
+    store.update_record(record_id, payload)
+    feedback.save({"record_id": record_id, "user_note": "a"})
+    target = exporter.export_calibration(tmp_path / "null.zip")
+    with zipfile.ZipFile(target) as bundle:
+        manifest = json.loads(bundle.read("manifest.json"))
+    assert manifest["model"] is None
+    assert manifest["rule_version"] is None
 
 
 def test_export_marks_feedback_exported_but_allows_reexport(env):
@@ -132,12 +175,52 @@ def test_unexported_calibration_only_range(env):
     a = _record(store, "有反馈")
     b = _record(store, "无反馈")
     c = _record(store, "已导出反馈")
+    d = _record(store, "已导出又修改")
     feedback.save({"record_id": a, "user_note": "新反馈"})
     exported_id = feedback.save({"record_id": c, "user_note": "旧反馈"})
     feedback.mark_exported([exported_id], batch_id="batch-old")
+    modified_id = feedback.save({"record_id": d, "user_note": "v1"})
+    feedback.mark_exported([modified_id], batch_id="batch-old")
+    feedback.save({"feedback_id": modified_id, "record_id": d, "user_note": "v2"})
     selected = exporter.select_records(mode="all", unexported_calibration_only=True)
-    assert {record["id"] for record in selected} == {a}
+    assert {record["id"] for record in selected} == {a, d}
     assert b not in {record["id"] for record in selected}
+    assert c not in {record["id"] for record in selected}
+
+
+def test_unexported_calibration_only_full_cycle(env):
+    store, feedback, exporter, tmp_path = env
+    record_id = _record(store, "完整周期")
+    feedback_id = feedback.save({"record_id": record_id, "user_note": "首次保存"})
+
+    # 首次保存后出现在待导出集合
+    selected = exporter.select_records(mode="all", unexported_calibration_only=True)
+    assert record_id in {record["id"] for record in selected}
+
+    # 首次导出后不再出现，且导出状态已记录
+    exporter.export_calibration(tmp_path / "first.zip")
+    exported = feedback.load(feedback_id)
+    assert exported.calibration_exported_at
+    assert exported.calibration_export_batch_id
+    assert exported.feedback_updated_after_export is False
+    selected = exporter.select_records(mode="all", unexported_calibration_only=True)
+    assert record_id not in {record["id"] for record in selected}
+
+    # 导出后修改：标记更新，并重新出现在待导出集合
+    feedback.save({"feedback_id": feedback_id, "record_id": record_id, "user_note": "修改后"})
+    updated = feedback.load(feedback_id)
+    assert updated.feedback_updated_after_export is True
+    selected = exporter.select_records(mode="all", unexported_calibration_only=True)
+    assert record_id in {record["id"] for record in selected}
+
+    # 第二次导出：导出状态更新、标记恢复 false、不再出现在待导出集合
+    exporter.export_calibration(tmp_path / "second.zip")
+    reexported = feedback.load(feedback_id)
+    assert reexported.calibration_exported_at >= exported.calibration_exported_at
+    assert reexported.calibration_export_batch_id != exported.calibration_export_batch_id
+    assert reexported.feedback_updated_after_export is False
+    selected = exporter.select_records(mode="all", unexported_calibration_only=True)
+    assert record_id not in {record["id"] for record in selected}
 
 
 def test_sanitization_strips_secrets_and_paths(env):

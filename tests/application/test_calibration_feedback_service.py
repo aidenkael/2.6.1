@@ -81,7 +81,10 @@ def test_update_same_feedback_sets_updated_after_export_flag(service):
     assert updated.feedback_updated_after_export is True
     # 状态不阻止再次导出/保存
     service.mark_exported([feedback_id], batch_id="batch-2")
-    assert service.load(feedback_id).calibration_export_batch_id == "batch-2"
+    reexported = service.load(feedback_id)
+    assert reexported.calibration_export_batch_id == "batch-2"
+    # 重新成功导出后，修改标记必须恢复 false
+    assert reexported.feedback_updated_after_export is False
 
 
 def test_for_record_and_list_all(service):

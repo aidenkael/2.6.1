@@ -77,6 +77,47 @@ def scan_export_text(text: str) -> list[str]:
     return findings
 
 
+def _distinct_nonempty(values: Any) -> str | list[str] | None:
+    """去重排序非空字符串：单个返回字符串，多个返回列表，全空返回 None。"""
+    seen = sorted({value for value in values if value})
+    if not seen:
+        return None
+    return seen[0] if len(seen) == 1 else seen
+
+
+def _record_model(record: dict[str, Any]) -> str | None:
+    """从记录实际 AI raw 中读取模型：兼容顶层 model 与 observation.model 两种落位。"""
+    layers = record.get("layers") if isinstance(record.get("layers"), dict) else {}
+    ai_raw = layers.get("ai_raw") if isinstance(layers.get("ai_raw"), dict) else {}
+    model = ai_raw.get("model")
+    if not model:
+        observation = ai_raw.get("observation") if isinstance(ai_raw.get("observation"), dict) else {}
+        model = observation.get("model")
+    if not model:
+        return None
+    return str(model).strip() or None
+
+
+def _record_rule_version(record: dict[str, Any]) -> str | None:
+    """从记录实际计算快照中读取规则/引擎版本（packaging_engine_version）。"""
+    layers = record.get("layers") if isinstance(record.get("layers"), dict) else {}
+    calculated = layers.get("calculated") if isinstance(layers.get("calculated"), dict) else {}
+    version = calculated.get("packaging_engine_version")
+    if not version:
+        return None
+    return str(version).strip() or None
+
+
+def _export_model(records: list[dict[str, Any]]) -> str | list[str] | None:
+    """导出批次实际可获得的模型集合：单一模型返回字符串，多个返回列表，无法获得返回 None。"""
+    return _distinct_nonempty(_record_model(record) for record in records)
+
+
+def _export_rule_version(records: list[dict[str, Any]]) -> str | list[str] | None:
+    """导出批次实际可获得的规则/引擎版本集合，无法获得返回 None，不伪造。"""
+    return _distinct_nonempty(_record_rule_version(record) for record in records)
+
+
 class ExportAbortError(RuntimeError):
     """脱敏后仍检测到敏感内容时中止导出。"""
 
@@ -127,7 +168,7 @@ class HistoryExportService:
             unexported_record_ids = {
                 item.record_id
                 for item in self.feedback.list_all()
-                if not item.calibration_exported_at
+                if not item.calibration_exported_at or item.feedback_updated_after_export
             }
             records = [record for record in records if record.get("id") in unexported_record_ids]
         return records
@@ -157,6 +198,7 @@ class HistoryExportService:
             feedback_count=len(feedback_items),
             include_images=include_images,
             image_entries=self._image_metadata(sanitized_records),
+            records=records,
         )
         image_files = self._collect_image_files(sanitized_records) if include_images else []
         return self._write_zip(target, manifest, {
@@ -197,6 +239,7 @@ class HistoryExportService:
             include_images=include_images,
             image_entries=self._image_metadata(list(record_index.values())),
             batch_id=batch_id,
+            records=records,
         )
         image_files = (
             self._collect_image_files(list(record_index.values())) if include_images else []
@@ -224,6 +267,7 @@ class HistoryExportService:
         include_images: bool,
         image_entries: list[dict[str, Any]],
         batch_id: str | None = None,
+        records: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         from profit_accounting_26.application.recognition_service import RecognitionService
 
@@ -233,6 +277,8 @@ class HistoryExportService:
             "exported_at": datetime.now(UTC).isoformat(),
             "software_version": SOFTWARE_VERSION,
             "prompt_version": RecognitionService.PROMPT_VERSION,
+            "model": _export_model(records or []),
+            "rule_version": _export_rule_version(records or []),
             "record_count": record_count,
             "feedback_count": feedback_count,
             "include_images": include_images,

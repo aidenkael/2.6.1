@@ -52,12 +52,22 @@
 | 导出 | 格式标识 | 内容 |
 |---|---|---|
 | Full History Export | `history-export-v1.zip` | manifest.json / records.json / feedback.json；include_images 默认 false |
-| Calibration Export | `calibration-feedback-v1.zip` | manifest.json / feedback.json / records_summary.json；manifest 含 model / prompt_version / rule / software 版本 |
+| Calibration Export | `calibration-feedback-v1.zip` | manifest.json / feedback.json / records_summary.json；manifest 含 software_version / prompt_version / model / rule_version |
 
 - 范围（range）：all / record_ids / created_at_range / updated_at_range；可叠加 `unexported_calibration_only`。
+- `unexported_calibration_only` 同时包含两类反馈：从未导出的反馈；已导出但之后又被修改（`feedback_updated_after_export=true`）的反馈。重新成功导出后 `calibration_exported_at` / `calibration_export_batch_id` 更新，且 `feedback_updated_after_export` 恢复 `false`，不再出现在待导出集合。
 - 脱敏：递归剥离 api_key/authorization/token 等键名、data URL、绝对路径（取 basename）；写出前正则复扫，发现疑似密钥即 `ExportAbortError` 中止（不产生文件）。
 - ZIP 安全：拒绝 `..`、绝对路径、盘符；include_images 时只允许 data_dir 内文件。
 - Calibration 导出成功后自动 `mark_exported(batch_id)`。
+
+**manifest 版本字段（实际输出与文档一致）**：
+
+| 字段 | 来源 | 取值规则 |
+|---|---|---|
+| software_version | `history_export_service.SOFTWARE_VERSION`（当前 `2.6.1`） | 固定字符串 |
+| prompt_version | `RecognitionService.PROMPT_VERSION` | 固定字符串 |
+| model | 导出记录 `layers.ai_raw`（兼容顶层 `model` 与 `observation.model`） | 全部一致返回字符串；不一致返回去重列表；均缺失返回 `null`，不伪造 |
+| rule_version | 导出记录 `layers.calculated.packaging_engine_version`（记录保存时的实际规则/引擎版本） | 全部一致返回字符串；不一致返回去重列表；均缺失返回 `null`，不伪造 |
 
 ## 边界（本轮不做）
 
