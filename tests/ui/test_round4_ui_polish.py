@@ -75,7 +75,7 @@ class TestSystemCostSixRows:
             root = page._root
             assert root.findChild(QLabel, "lblSystemCostName0").text() == "采购成本"
             assert root.findChild(QLabel, "lblSystemCostName1").text() == "国内运费"
-            assert root.findChild(QLabel, "lblSystemCostName2").text() == "头程"
+            assert root.findChild(QLabel, "lblSystemCostName2").text().startswith("头程（")
             assert root.findChild(QLabel, "lblSystemCostName3").text() == "服务费"
             assert root.findChild(QLabel, "lblSystemCostName6").text() == "尾程"
             total_name = root.findChild(QLabel, "lblSystemTotalName")
@@ -88,7 +88,7 @@ class TestSystemCostSixRows:
             qapp.processEvents()
 
     def test_rows_filled_from_single_calculation_result(self, qapp, temp_context):
-        """计算后六行只读正式 Calculation 结果：头程带货代名、尾程 USD/RMB、总成本左对齐不加前缀。"""
+        """计算后六行只读正式 Calculation 结果：头程名进标签、尾程只 RMB、总成本左对齐不加前缀。"""
         page = CalculationPage(temp_context)
         try:
             _arm_page(page)
@@ -96,7 +96,9 @@ class TestSystemCostSixRows:
             assert quote is not None
             assert page.system_rows["product"].text() == "¥66.80"
             assert page.system_rows["domestic"].text() == "¥28.00"
-            assert "深圳货代" in page.system_rows["first_mile"].text()
+            # 第六轮：货代名进字段标签“头程（深圳）”，金额列只显示 ¥
+            assert page.system_names["first_mile"].text() == "头程（深圳）"
+            assert page.system_rows["first_mile"].text().startswith("¥")
             assert f"¥{quote.weight_fee_rmb:.2f}" in page.system_rows["first_mile"].text()
             assert page.system_rows["service"].text() == f"¥{quote.fixed_fee_rmb:.2f}"
             # 第五轮：摘要尾程只显示 RMB（USD 输入已移到总成本标题上方）

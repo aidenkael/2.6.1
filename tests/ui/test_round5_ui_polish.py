@@ -117,8 +117,8 @@ class TestMirrorCards:
             right_bottom = page.user_correction._widget
             assert isinstance(left_bottom, QTextEdit)
             assert isinstance(right_bottom, QTextEdit)
-            assert left_bottom.minimumHeight() == right_bottom.minimumHeight() == 84
-            assert left_bottom.maximumHeight() == right_bottom.maximumHeight() == 84
+            assert left_bottom.minimumHeight() == right_bottom.minimumHeight() == 88
+            assert left_bottom.maximumHeight() == right_bottom.maximumHeight() == 88
             # 底部标签：左“包装方式”，右“用户修正”
             assert page._root.findChild(QLabel, "lblNormalDims").text() == "包装尺寸（默认 cm）"
             assert page._root.findChild(QLabel, "lblConservativeDims").text() == "包装尺寸（默认 cm）"
@@ -145,67 +145,38 @@ class TestMirrorCards:
 
 
 # ---------------------------------------------------------------------------
-# 用户修正动态物流提示
+# 用户修正：动态提示已删除，placeholder 为两行静态示例
 # ---------------------------------------------------------------------------
 
 
-class TestForwarderHint:
-    def test_hint_shows_forwarder_and_weight_fee_only(self, qapp, temp_context):
+class TestUserCorrectionPlaceholder:
+    def test_no_dynamic_forwarder_hint_exists(self, qapp, temp_context):
         page = CalculationPage(temp_context)
         try:
-            _arm_page(page)
-            hint = page.user_correction_hint
-            assert hint is not None
-            assert "深圳货代" in hint.text()
-            assert "纯头程" in hint.text()
-            assert f"¥{page.current_quote.weight_fee_rmb:.2f}" in hint.text()
-            # 只含 weight_fee_rmb，不含固定服务费
-            assert "服务费" not in hint.text()
-            assert f"¥{page.current_quote.fixed_fee_rmb:.2f}" not in hint.text()
+            assert not hasattr(page, "user_correction_hint")
+            card = page.conservative_fields["card"]
+            texts = [label.text() for label in card.findChildren(QLabel)]
+            assert not any("纯头程" in text or "当前：" in text for text in texts)
         finally:
             page.deleteLater()
             qapp.processEvents()
 
-    def test_hint_refreshes_on_forwarder_switch(self, qapp, temp_context):
+    def test_user_correction_placeholder_is_two_line_example(self, qapp, temp_context):
         page = CalculationPage(temp_context)
         try:
-            _arm_page(page)
-            before = page.user_correction_hint.text()
-            assert "深圳货代" in before
-            yiwu = next(
-                item for item in page.context.settings_service.load()["forwarders"]
-                if item["name"] == "义乌货代"
-            )
-            page.selected_forwarder_id = yiwu["id"]
-            page.recalculate()
-            after = page.user_correction_hint.text()
-            assert "义乌货代" in after
-            assert f"¥{page.current_quote.weight_fee_rmb:.2f}" in after
+            placeholder = page.user_correction._widget.placeholderText()
+            assert "深圳货代纯头程26元" in placeholder
+            assert "义乌货代纯头程10元" in placeholder
+            assert "\n" in placeholder
         finally:
             page.deleteLater()
             qapp.processEvents()
 
-    def test_hint_refreshes_on_adopted_weight_change(self, qapp, temp_context):
+    def test_placeholder_not_written_to_note_or_dirty(self, qapp, temp_context):
         page = CalculationPage(temp_context)
         try:
-            _arm_page(page)
-            before = page.user_correction_hint.text()
-            page.conservative_fields["weight"].setValue(900.0)
-            page.recalculate()
-            assert page.user_correction_hint.text() != before
-            assert f"¥{page.current_quote.weight_fee_rmb:.2f}" in page.user_correction_hint.text()
-        finally:
-            page.deleteLater()
-            qapp.processEvents()
-
-    def test_hint_never_pollutes_note_or_calibration_dirty(self, qapp, temp_context):
-        page = CalculationPage(temp_context)
-        try:
-            _arm_page(page)
             assert page.user_correction.text() == ""
             assert page.user_calibration_dirty is False
-            assert page.user_correction_hint.text() != "当前：纯头程 —"
-            # 提示刷新不写 user_note、不置用户校准 dirty
             page.recalculate()
             assert page.user_correction.text() == ""
             assert page.user_calibration_dirty is False
@@ -220,11 +191,18 @@ class TestForwarderHint:
 
 
 class TestTailFeeAndCostSummary:
-    def test_tail_rmb_readonly_usd_editable_and_rate_linked(self, qapp, temp_context):
+    def test_tail_symbols_readonly_and_rate_linked(self, qapp, temp_context):
         page = CalculationPage(temp_context)
         try:
             assert page.tail_fee_rmb.spin.isReadOnly() is True
             assert page.tail_fee_usd.spin.isReadOnly() is False
+            assert page.tail_fee_rmb.spin.prefix() == "¥"
+            assert page.tail_fee_usd.spin.prefix() == "$"
+            # 不再显示 RMB / USD 文字标签
+            unit_rmb = page._root.findChild(QLabel, "unit_spinTailFreightRmb")
+            unit_usd = page._root.findChild(QLabel, "unit_spinTailFreightUsd")
+            assert unit_rmb is not None and not unit_rmb.isVisible()
+            assert unit_usd is not None and not unit_usd.isVisible()
             page.tail_fee_usd.setValue(5.55)
             page._sync_tail_rmb_from_usd(recalculate=False)
             rate = float(page.settings.get("exchange_rate_usd_to_rmb", 7.2))
@@ -244,6 +222,50 @@ class TestTailFeeAndCostSummary:
             assert page.system_total_usd.text().startswith("$")
             rate = float(page.settings.get("exchange_rate_usd_to_rmb", 7.2))
             assert page.system_total_usd.text() == f"${page.current_system_cost / rate:.2f}"
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    @staticmethod
+    def _visible_cost_names(page) -> list[str]:
+        layout = page._root.findChild(QVBoxLayout, "systemCostLayout")
+        names: list[str] = []
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            row = item.layout() if item is not None else None
+            if row is None:
+                widget = item.widget() if item is not None else None
+                if widget is not None:
+                    row = widget.layout()
+            if row is None:
+                continue
+            for j in range(row.count()):
+                widget = row.itemAt(j).widget()
+                if isinstance(widget, QLabel) and not widget.isHidden():
+                    names.append(widget.text())
+        allowed = {"采购成本", "国内运费", "头程（深圳）", "头程（义乌）", "头程（—）",
+                   "服务费", "尾程", "总成本"}
+        return [name for name in names if name in allowed]
+
+    def test_cost_summary_strict_order_and_forwarder_switch(self, qapp, temp_context):
+        page = CalculationPage(temp_context)
+        try:
+            _arm_page(page)
+            expected = ["采购成本", "国内运费", "头程（深圳）", "服务费", "尾程", "总成本"]
+            assert self._visible_cost_names(page) == expected
+            # 切换货代后头程名切换为（义乌）
+            yiwu = next(
+                item for item in page.context.settings_service.load()["forwarders"]
+                if item["name"] == "义乌货代"
+            )
+            page.selected_forwarder_id = yiwu["id"]
+            page.recalculate()
+            expected_switch = ["采购成本", "国内运费", "头程（义乌）", "服务费", "尾程", "总成本"]
+            assert self._visible_cost_names(page) == expected_switch
+            # 头程值只显示金额，货代名不再悬浮在中间
+            assert page.system_rows["first_mile"].text().startswith("¥")
+            assert "深圳货代" not in page.system_rows["first_mile"].text()
+            assert "义乌货代" not in page.system_rows["first_mile"].text()
         finally:
             page.deleteLater()
             qapp.processEvents()

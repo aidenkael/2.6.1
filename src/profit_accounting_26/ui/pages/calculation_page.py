@@ -471,21 +471,10 @@ class CalculationPage(QWidget):
                 grid.addWidget(weight_label, 3, 0)
             if weight_row is not None:
                 grid.addLayout(weight_row, 3, 1, 1, 2)
-            # 行 4：底部标签（右卡同行附带弱化动态物流提示，不额外占行）
+            # 行 4：底部标签（两侧同一行结构，右卡不再显示动态货代/纯头程提示）
             bottom_label = QLabel("包装方式" if is_ai else "用户修正")
             bottom_label.setFixedHeight(20)
-            grid.addWidget(bottom_label, 4, 0)
-            if is_ai:
-                self.user_correction_hint = None
-            else:
-                hint = QLabel("当前：纯头程 —")
-                hint.setProperty("hint", True)
-                hint_font = hint.font()
-                if hint_font.pointSize() > 8:
-                    hint_font.setPointSize(hint_font.pointSize() - 1)
-                hint.setFont(hint_font)
-                grid.addWidget(hint, 4, 1, 1, 2)
-                self.user_correction_hint = hint
+            grid.addWidget(bottom_label, 4, 0, 1, 3)
             # 行 5：底部多行框（两侧同高，视觉对称；AI估算只读、当前采用可编辑）
             if is_ai:
                 note_edit = method_widget
@@ -493,9 +482,12 @@ class CalculationPage(QWidget):
                 note_edit.setPlaceholderText("AI估算包装方式（第一次 AI 结果，只读）")
             else:
                 note_edit = QTextEdit()
-                note_edit.setPlaceholderText("这个包可以压扁，肩带可以拆下来单独放")
+                note_edit.setPlaceholderText(
+                    "这个包可以压扁，肩带可以拆下来，深圳货代纯头程26元\n"
+                    "这种小商品通常可以缠绕打包，预计袋装即可，义乌货代纯头程10元"
+                )
                 self.user_correction = _TextAdapter(note_edit)
-            note_edit.setFixedHeight(84)
+            note_edit.setFixedHeight(88)
             note_edit.setMinimumWidth(90)
             note_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             note_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -588,7 +580,7 @@ class CalculationPage(QWidget):
                 profit_grid.addLayout(stack, row, col, row_span, col_span)
 
     def _apply_round5_ui_polish(self) -> None:
-        """第五轮 UI 精修：尾程 RMB/USD 上下布局移到总成本标题上方；成本摘要字段左、金额右。
+        """第五轮+第六轮 UI 精修：尾程设置独立区；成本摘要字段左、金额右。
 
         只移动既有控件与对齐方式，不改任何计算逻辑与算法。
         """
@@ -598,7 +590,7 @@ class CalculationPage(QWidget):
         usd_box = f(QHBoxLayout, "layout_spinTailFreightUsd")
         rmb_box = f(QHBoxLayout, "layout_spinTailFreightRmb")
         # 1) 用 takeAt 从 systemCostRow6 取回尾程输入框（removeItem 会删除子布局），
-        #    构建“RMB 上 / USD 下”输入区并放到标题上方
+        #    构建独立“尾程设置”区：左标题 + 右金额（¥ 上 / $ 下，右对齐）放到标题上方
         if row6 is not None:
             for box in (usd_box, rmb_box):
                 index = row6.indexOf(box)
@@ -606,25 +598,33 @@ class CalculationPage(QWidget):
                     row6.takeAt(index)
         if cost_layout is not None and usd_box is not None and rmb_box is not None:
             tail_input = QWidget()
-            tail_v = QVBoxLayout(tail_input)
-            tail_v.setContentsMargins(0, 0, 0, 0)
-            tail_v.setSpacing(2)
-            for label_text, box, read_only in (
-                ("RMB", rmb_box, True),
-                ("USD", usd_box, False),
-            ):
-                row = QHBoxLayout()
-                row.setContentsMargins(0, 0, 0, 0)
-                row.setSpacing(6)
-                label = QLabel(label_text)
-                label.setFixedWidth(34)
-                label.setProperty("muted", True)
-                row.addWidget(label)
-                row.addLayout(box, 1)
-                tail_v.addLayout(row)
+            tail_row = QHBoxLayout(tail_input)
+            tail_row.setContentsMargins(0, 0, 0, 0)
+            tail_row.setSpacing(8)
+            tail_title = QLabel("尾程设置")
+            tail_row.addWidget(tail_title)
+            tail_row.addStretch(1)
+            amounts = QVBoxLayout()
+            amounts.setContentsMargins(0, 0, 0, 0)
+            amounts.setSpacing(1)
+            amounts.addLayout(rmb_box)
+            amounts.addLayout(usd_box)
+            tail_row.addLayout(amounts)
             cost_layout.insertWidget(0, tail_input)
+            # 尾程设置与下方“当前系统总成本”之间增加一点垂直间距
+            cost_layout.insertSpacing(1, 6)
+        # ¥ / $ 前缀、隐藏 RMB/USD 单位文字、金额右对齐；RMB 只读、USD 可编辑
+        for spin, prefix, unit_name in (
+            (self.tail_fee_rmb.spin, "¥", "unit_spinTailFreightRmb"),
+            (self.tail_fee_usd.spin, "$", "unit_spinTailFreightUsd"),
+        ):
+            spin.setPrefix(prefix)
+            spin.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            unit_label = f(QLabel, unit_name)
+            if unit_label is not None:
+                unit_label.setVisible(False)
         self.tail_fee_rmb.spin.setReadOnly(True)
-        # 2) 成本摘要行：字段名左对齐、金额右对齐（头程含货代名；尾程只显示 RMB）
+        # 2) 成本摘要行：字段名左对齐、金额右对齐（头程名称放字段名括号内；尾程只显示 RMB）
         for row_name in ("systemCostRow0", "systemCostRow1", "systemCostRow2", "systemCostRow3", "systemCostRow6"):
             row = f(QHBoxLayout, row_name)
             if row is None:
@@ -1573,7 +1573,6 @@ class CalculationPage(QWidget):
         self.current_quote = None
         self.current_forwarder = None
         self.current_system_cost = None
-        self._update_forwarder_hint()
         for card in self.quote_cards.values():
             card.update_quote(None)
         for value in self.system_rows.values():
@@ -1584,6 +1583,9 @@ class CalculationPage(QWidget):
             self.system_total.setText("—")
         if self.system_total_usd is not None:
             self.system_total_usd.setText("—")
+        first_mile_name = self.system_names.get("first_mile")
+        if first_mile_name is not None:
+            first_mile_name.setText("头程（—）")
         self.profit_binder.set_calculation_cost(0.0)
         del message  # 提示文案由利润区与复核徽标承载
 
@@ -1620,7 +1622,6 @@ class CalculationPage(QWidget):
             return
         self.current_quote = selected_quote
         self.current_forwarder = selected_forwarder
-        self._update_forwarder_hint()
         product_cost = self.product_cost.value()
         domestic_shipping = self.domestic_shipping.value()
         system_cost = product_cost + domestic_shipping + selected_quote.total_logistics_rmb
@@ -1629,7 +1630,11 @@ class CalculationPage(QWidget):
         # 采购成本/国内运费为 0 时仅用红色弱提醒，不阻止计算。
         self._set_system_row("product", f"¥{product_cost:.2f}", zero_warn=product_cost == 0)
         self._set_system_row("domestic", f"¥{domestic_shipping:.2f}", zero_warn=domestic_shipping == 0)
-        self._set_system_row("first_mile", f"{selected_forwarder.name}  ¥{selected_quote.weight_fee_rmb:.2f}")
+        short_name = str(selected_forwarder.name or "").rstrip("货代") or str(selected_forwarder.name or "")
+        first_mile_name = self.system_names.get("first_mile")
+        if first_mile_name is not None:
+            first_mile_name.setText(f"头程（{short_name}）")
+        self._set_system_row("first_mile", f"¥{selected_quote.weight_fee_rmb:.2f}")
         self._set_system_row("service", f"¥{selected_quote.fixed_fee_rmb:.2f}")
         self._set_system_row("tail", f"¥{self.tail_fee_rmb.value():.2f}")
         rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
@@ -1639,17 +1644,6 @@ class CalculationPage(QWidget):
             self.system_total_usd.setText(f"${system_cost / rate:.2f}" if rate > 0 else "—")
         self.profit_binder.set_calculation_cost(system_cost)
         self.context.diagnostic_logger.event("forwarder_calculated", package=scenario.to_dict(), forwarder_id=selected_forwarder.id, quote=asdict(selected_quote), system_cost=system_cost)
-
-    def _update_forwarder_hint(self) -> None:
-        """“用户修正”动态物流提示：只读辅助文案，绝不写入 user_note 或触发用户校准 dirty。"""
-        hint = getattr(self, "user_correction_hint", None)
-        if hint is None:
-            return
-        if self.current_forwarder is not None and self.current_quote is not None:
-            fee = float(self.current_quote.weight_fee_rmb or 0)
-            hint.setText(f"当前：{self.current_forwarder.name}，纯头程 ¥{fee:.2f}")
-        else:
-            hint.setText("当前：纯头程 —")
 
     def _set_system_row(self, key: str, text: str, *, zero_warn: bool = False) -> None:
         label = self.system_rows.get(key)
