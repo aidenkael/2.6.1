@@ -38,7 +38,12 @@ from profit_accounting_26.application import AppContext, CalculationService, Ima
 from profit_accounting_26.application.api_profile_store import VISUAL_AI
 from profit_accounting_26.application.calculation_session import CalculationSession
 from profit_accounting_26.application.category_normalizer import normalize_observation
-from profit_accounting_26.application.packaging_presentation import normal_reminder, packaging_summary, product_summary
+from profit_accounting_26.application.packaging_presentation import (
+    normal_reminder,
+    packaging_method_zh,
+    packaging_summary,
+    product_summary,
+)
 from profit_accounting_26.application.recognition_service import (
     RecognitionCancellation,
     RecognitionCancelledError,
@@ -381,6 +386,7 @@ class CalculationPage(QWidget):
             bottom_layout.insertWidget(2, self.edit_state_label)
         self._apply_adopted_flow_ui()
         self._apply_round3_ui_polish()
+        self._apply_round5_ui_polish()
 
     def _cost_spin(self, name: str, *, maximum: float) -> _SpinAdapter:
         spin = self._root.findChild(QDoubleSpinBox, name)
@@ -401,40 +407,107 @@ class CalculationPage(QWidget):
         return _SpinAdapter(spin)
 
     def _apply_adopted_flow_ui(self) -> None:
-        """把双档收敛为 AI估算 / 当前采用：隐藏选档、左卡只读冻结、右卡可编辑、增加用户修正。
+        """把双档收敛为 AI估算 / 当前采用：两张卡视觉镜像（同一行序、行高与宽度）。
 
         不改变主界面左右布局，只复用现有两个包装卡的位置；
         旧 normal/conservative 控件与数据字段保留兼容。
         """
         f = self._root.findChild
-        # 1) 标题与副标题：隐藏 radio，在原位置放固定文案
-        for fields, title, subtitle_text in (
-            (self.normal_fields, "AI估算", "第一次 AI 估算结果 · 只读"),
-            (self.conservative_fields, "当前采用", "用户可手动修正"),
-        ):
+        # 1) 隐藏旧选档 radio
+        for fields in (self.normal_fields, self.conservative_fields):
             radio = fields.get("radio")
             if radio is not None:
                 radio.setVisible(False)
-            layout = fields["card"].layout()
-            title_label = QLabel(title)
-            title_label.setFixedHeight(20)
+        # 2) 重排两张卡为相同行结构：标题+行内副标题 / 包装尺寸 / 长宽高 / 包装后重量 / 底部多行框
+        for fields, subtitle_text in (
+            (self.normal_fields, "第一次 AI 估算结果 · 只读"),
+            (self.conservative_fields, "用户可手动修正"),
+        ):
+            card = fields["card"]
+            grid = card.layout()
+            if not isinstance(grid, QGridLayout):
+                continue
+            is_ai = fields is self.normal_fields
+            prefix = "Normal" if is_ai else "Conservative"
+            dims_label = f(QLabel, f"lbl{prefix}Dims")
+            weight_label = f(QLabel, f"lbl{prefix}Weight")
+            length_row = f(QHBoxLayout, f"layout_spin{prefix}LengthCm")
+            width_row = f(QHBoxLayout, f"layout_spin{prefix}WidthCm")
+            height_row = f(QHBoxLayout, f"layout_spin{prefix}HeightCm")
+            weight_row = f(QHBoxLayout, f"layout_spin{prefix}WeightG")
+            method_widget = fields["method"]._widget
+            # 先清空网格再按统一行序重建（控件对象复用，引用不失效）
+            while grid.count():
+                grid.takeAt(0)
+            # 行 0：标题 + 行内副标题（释放原副标题独立行）
+            header_box = QWidget()
+            header_row = QHBoxLayout(header_box)
+            header_row.setContentsMargins(0, 0, 0, 0)
+            header_row.setSpacing(6)
+            title_label = QLabel(str(fields["name"]))
             title_label.setStyleSheet("font-weight: 600;")
             subtitle = QLabel(subtitle_text)
-            subtitle.setFixedHeight(18)
+            font = subtitle.font()
+            if font.pointSize() > 8:
+                font.setPointSize(font.pointSize() - 1)
+            subtitle.setFont(font)
             subtitle.setProperty("hint", True)
-            if isinstance(layout, QGridLayout):
-                # 副标题放到标题下方浅灰小字（不改卡内字段列结构）
-                header_box = QWidget()
-                header_stack = QVBoxLayout(header_box)
-                header_stack.setContentsMargins(0, 0, 0, 0)
-                header_stack.setSpacing(0)
-                header_stack.addWidget(title_label)
-                header_stack.addWidget(subtitle)
-                layout.addWidget(header_box, 0, 0, 1, 3)
-        # 2) 左卡 AI估算全部只读；右卡 当前采用全部可编辑
+            header_row.addWidget(title_label)
+            header_row.addWidget(subtitle)
+            header_row.addStretch(1)
+            grid.addWidget(header_box, 0, 0, 1, 3)
+            # 行 1：包装尺寸
+            if dims_label is not None:
+                grid.addWidget(dims_label, 1, 0, 1, 3)
+            # 行 2：长 / 宽 / 高
+            if length_row is not None:
+                grid.addLayout(length_row, 2, 0)
+            if width_row is not None:
+                grid.addLayout(width_row, 2, 1)
+            if height_row is not None:
+                grid.addLayout(height_row, 2, 2)
+            # 行 3：包装后重量
+            if weight_label is not None:
+                grid.addWidget(weight_label, 3, 0)
+            if weight_row is not None:
+                grid.addLayout(weight_row, 3, 1, 1, 2)
+            # 行 4：底部标签（右卡同行附带弱化动态物流提示，不额外占行）
+            bottom_label = QLabel("包装方式" if is_ai else "用户修正")
+            bottom_label.setFixedHeight(20)
+            grid.addWidget(bottom_label, 4, 0)
+            if is_ai:
+                self.user_correction_hint = None
+            else:
+                hint = QLabel("当前：纯头程 —")
+                hint.setProperty("hint", True)
+                hint_font = hint.font()
+                if hint_font.pointSize() > 8:
+                    hint_font.setPointSize(hint_font.pointSize() - 1)
+                hint.setFont(hint_font)
+                grid.addWidget(hint, 4, 1, 1, 2)
+                self.user_correction_hint = hint
+            # 行 5：底部多行框（两侧同高，视觉对称；AI估算只读、当前采用可编辑）
+            if is_ai:
+                note_edit = method_widget
+                note_edit.setReadOnly(True)
+                note_edit.setPlaceholderText("AI估算包装方式（第一次 AI 结果，只读）")
+            else:
+                note_edit = QTextEdit()
+                note_edit.setPlaceholderText("这个包可以压扁，肩带可以拆下来单独放")
+                self.user_correction = _TextAdapter(note_edit)
+            note_edit.setFixedHeight(84)
+            note_edit.setMinimumWidth(90)
+            note_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            note_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            note_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+            note_edit.setAcceptRichText(False)
+            grid.addWidget(note_edit, 5, 0, 1, 3)
+        if not hasattr(self, "user_correction"):  # 防御：布局缺失时仍保证字段可用
+            self.user_correction = _TextAdapter(QTextEdit())
+        self.user_correction.textChanged.connect(lambda _text: self._user_calibration_changed())
+        # 3) 左卡 AI估算全部只读；右卡 当前采用全部可编辑；旧方法输入行隐藏
         for key in ("length", "width", "height", "weight"):
             self.normal_fields[key].spin.setReadOnly(True)
-        self.normal_fields["method"]._widget.setPlaceholderText("AI估算包装方式（第一次 AI 结果，只读）")
         for key in ("length", "width", "height", "weight"):
             spin = self.conservative_fields[key].spin
             spin.setReadOnly(False)
@@ -443,43 +516,18 @@ class CalculationPage(QWidget):
             spin.style().polish(spin)
         method_edit = self.conservative_fields["method"]._widget
         method_edit.setReadOnly(False)
-        method_edit.setProperty("preview", False)
-        method_edit.setPlaceholderText("当前采用包装方式（可修改）")
-        method_edit.style().unpolish(method_edit)
-        method_edit.style().polish(method_edit)
+        method_edit.setVisible(False)
         method_label = f(QLabel, "lblConservativeMethod")
         if method_label is not None:
-            method_label.setText("包装方式")
-            # 当前采用不再展示包装方式输入（后台字段保留，仅隐藏控件）
             method_label.setVisible(False)
-        method_edit.setVisible(False)
         conservative_card = self.conservative_fields["card"]
         conservative_card.setProperty("frozen", False)
         conservative_card.style().unpolish(conservative_card)
         conservative_card.style().polish(conservative_card)
         self._style_card(self.normal_fields, selected=False)
         self._style_card(self.conservative_fields, selected=True)
-        # 3) 当前采用框底部增加“用户修正”自然语言输入（属于用户观察/修正，不是实测数据）
-        grid = f(QGridLayout, "conservativePackageLayout")
-        if grid is not None:
-            note_label = QLabel("用户修正")
-            note_label.setFixedHeight(20)
-            note_edit = QTextEdit()
-            note_edit.setFixedHeight(52)
-            note_edit.setMinimumWidth(90)
-            note_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            note_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            note_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-            note_edit.setAcceptRichText(False)
-            note_edit.setPlaceholderText("这个包可以压扁，肩带可以拆下来单独放")
-            grid.addWidget(note_label, 5, 0, 1, 3)
-            grid.addWidget(note_edit, 6, 0, 1, 3)
-            self.user_correction = _TextAdapter(note_edit)
-        else:  # 防御：布局缺失时仍保证字段可用
-            self.user_correction = _TextAdapter(QTextEdit())
-        self.user_correction.textChanged.connect(lambda _text: self._user_calibration_changed())
         # 4) 系统成本卡固定六行：采购成本 / 国内运费 / 头程 / 服务费 / 尾程 / 总成本；
-        # 标签与金额对齐由静态 UI 统一宽度完成，旧的重量/计费重/物流总价行保持静态隐藏
+        # 标签与金额对齐由第五轮排版完成，旧的重量/计费重/物流总价行保持静态隐藏
 
     def _apply_round3_ui_polish(self) -> None:
         """第三轮 UI 精修：尾程输入移到系统成本区；利润规则状态放标题上方。
@@ -538,6 +586,79 @@ class CalculationPage(QWidget):
                 if title_widget is not None:
                     stack.addWidget(title_widget)
                 profit_grid.addLayout(stack, row, col, row_span, col_span)
+
+    def _apply_round5_ui_polish(self) -> None:
+        """第五轮 UI 精修：尾程 RMB/USD 上下布局移到总成本标题上方；成本摘要字段左、金额右。
+
+        只移动既有控件与对齐方式，不改任何计算逻辑与算法。
+        """
+        f = self._root.findChild
+        cost_layout = f(QVBoxLayout, "systemCostLayout")
+        row6 = f(QHBoxLayout, "systemCostRow6")
+        usd_box = f(QHBoxLayout, "layout_spinTailFreightUsd")
+        rmb_box = f(QHBoxLayout, "layout_spinTailFreightRmb")
+        # 1) 用 takeAt 从 systemCostRow6 取回尾程输入框（removeItem 会删除子布局），
+        #    构建“RMB 上 / USD 下”输入区并放到标题上方
+        if row6 is not None:
+            for box in (usd_box, rmb_box):
+                index = row6.indexOf(box)
+                if index >= 0:
+                    row6.takeAt(index)
+        if cost_layout is not None and usd_box is not None and rmb_box is not None:
+            tail_input = QWidget()
+            tail_v = QVBoxLayout(tail_input)
+            tail_v.setContentsMargins(0, 0, 0, 0)
+            tail_v.setSpacing(2)
+            for label_text, box, read_only in (
+                ("RMB", rmb_box, True),
+                ("USD", usd_box, False),
+            ):
+                row = QHBoxLayout()
+                row.setContentsMargins(0, 0, 0, 0)
+                row.setSpacing(6)
+                label = QLabel(label_text)
+                label.setFixedWidth(34)
+                label.setProperty("muted", True)
+                row.addWidget(label)
+                row.addLayout(box, 1)
+                tail_v.addLayout(row)
+            cost_layout.insertWidget(0, tail_input)
+        self.tail_fee_rmb.spin.setReadOnly(True)
+        # 2) 成本摘要行：字段名左对齐、金额右对齐（头程含货代名；尾程只显示 RMB）
+        for row_name in ("systemCostRow0", "systemCostRow1", "systemCostRow2", "systemCostRow3", "systemCostRow6"):
+            row = f(QHBoxLayout, row_name)
+            if row is None:
+                continue
+            if row.count() >= 2:
+                value_widget = row.itemAt(row.count() - 1).widget()
+                if isinstance(value_widget, QLabel):
+                    value_widget.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                row.insertStretch(row.count() - 1, 1)
+        value6 = self.system_rows.get("tail")
+        if value6 is not None:
+            value6.setVisible(True)
+        # 3) 总成本：名称左 + RMB/USD 右（RMB 上、USD 下，加粗）
+        total_layout = f(QHBoxLayout, "systemTotalLayout")
+        if total_layout is not None:
+            name = f(QLabel, "lblSystemTotalName")
+            rmb = f(QLabel, "lblSystemTotalRmb")
+            usd = f(QLabel, "lblSystemTotalUsd")
+            while total_layout.count():
+                total_layout.takeAt(0)
+            if name is not None:
+                total_layout.addWidget(name)
+            total_layout.addStretch(1)
+            total_stack = QVBoxLayout()
+            total_stack.setContentsMargins(0, 0, 0, 0)
+            total_stack.setSpacing(0)
+            if rmb is not None:
+                rmb.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                total_stack.addWidget(rmb)
+            if usd is not None:
+                usd.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                usd.setVisible(True)
+                total_stack.addWidget(usd)
+            total_layout.addLayout(total_stack)
 
     def _build_dynamic_regions(self) -> None:
         """清除 Designer 预览控件，准备动态图片框与货代卡片容器。"""
@@ -1286,7 +1407,10 @@ class CalculationPage(QWidget):
         # 历史编辑模式下（含无 ai_initial 的旧记录）同样不得覆盖已恢复的两卡。
         if self.initial_ai_snapshot is None and self.editing_record_id is None:
             for fields in (self.normal_fields, self.conservative_fields):
-                fields["method"].setText(proposal.normal.packaging_method)
+                method_text = proposal.normal.packaging_method
+                fields["method"].setText(
+                    packaging_method_zh(method_text) if fields is self.normal_fields else method_text
+                )
                 fields["length"].setValue(proposal.normal.length_cm or 0)
                 fields["width"].setValue(proposal.normal.width_cm or 0)
                 fields["height"].setValue(proposal.normal.height_cm or 0)
@@ -1449,6 +1573,7 @@ class CalculationPage(QWidget):
         self.current_quote = None
         self.current_forwarder = None
         self.current_system_cost = None
+        self._update_forwarder_hint()
         for card in self.quote_cards.values():
             card.update_quote(None)
         for value in self.system_rows.values():
@@ -1495,6 +1620,7 @@ class CalculationPage(QWidget):
             return
         self.current_quote = selected_quote
         self.current_forwarder = selected_forwarder
+        self._update_forwarder_hint()
         product_cost = self.product_cost.value()
         domestic_shipping = self.domestic_shipping.value()
         system_cost = product_cost + domestic_shipping + selected_quote.total_logistics_rmb
@@ -1505,7 +1631,7 @@ class CalculationPage(QWidget):
         self._set_system_row("domestic", f"¥{domestic_shipping:.2f}", zero_warn=domestic_shipping == 0)
         self._set_system_row("first_mile", f"{selected_forwarder.name}  ¥{selected_quote.weight_fee_rmb:.2f}")
         self._set_system_row("service", f"¥{selected_quote.fixed_fee_rmb:.2f}")
-        self._set_system_row("tail", f"${self.tail_fee_usd.value():.2f} / ¥{self.tail_fee_rmb.value():.2f}")
+        self._set_system_row("tail", f"¥{self.tail_fee_rmb.value():.2f}")
         rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
         if self.system_total is not None:
             self.system_total.setText(f"¥{system_cost:.2f}")
@@ -1513,6 +1639,17 @@ class CalculationPage(QWidget):
             self.system_total_usd.setText(f"${system_cost / rate:.2f}" if rate > 0 else "—")
         self.profit_binder.set_calculation_cost(system_cost)
         self.context.diagnostic_logger.event("forwarder_calculated", package=scenario.to_dict(), forwarder_id=selected_forwarder.id, quote=asdict(selected_quote), system_cost=system_cost)
+
+    def _update_forwarder_hint(self) -> None:
+        """“用户修正”动态物流提示：只读辅助文案，绝不写入 user_note 或触发用户校准 dirty。"""
+        hint = getattr(self, "user_correction_hint", None)
+        if hint is None:
+            return
+        if self.current_forwarder is not None and self.current_quote is not None:
+            fee = float(self.current_quote.weight_fee_rmb or 0)
+            hint.setText(f"当前：{self.current_forwarder.name}，纯头程 ¥{fee:.2f}")
+        else:
+            hint.setText("当前：纯头程 —")
 
     def _set_system_row(self, key: str, text: str, *, zero_warn: bool = False) -> None:
         label = self.system_rows.get(key)
@@ -1938,7 +2075,11 @@ class CalculationPage(QWidget):
     def _fill_package_fields(fields: dict[str, Any], raw: dict[str, Any]) -> None:
         """把包装 dict 写入卡片字段（缺失归一为 0/空）。"""
         raw = raw if isinstance(raw, dict) else {}
-        fields["method"].setText(str(raw.get("packaging_method") or ""))
+        method_text = str(raw.get("packaging_method") or "")
+        if fields.get("name") == "AI估算":
+            # 仅显示层中文化：AI 英文包装方式转中文，原始 payload 不变
+            method_text = packaging_method_zh(method_text)
+        fields["method"].setText(method_text)
         fields["length"].setValue(float(raw.get("length_cm") or 0))
         fields["width"].setValue(float(raw.get("width_cm") or 0))
         fields["height"].setValue(float(raw.get("height_cm") or 0))

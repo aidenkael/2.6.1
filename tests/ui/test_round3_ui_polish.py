@@ -23,6 +23,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import (  # noqa: E402
     QGridLayout,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
@@ -85,14 +86,14 @@ def test_conservative_method_widgets_hidden_but_field_kept(qapp, page):
         ("conservative_fields", "当前采用", "用户可手动修正"),
     ],
 )
-def test_card_subtitle_below_title(qapp, page, card_key, title, subtitle):
+def test_card_subtitle_inline_after_title(qapp, page, card_key, title, subtitle):
     card = page.__dict__[card_key]["card"]
     title_label = next(label for label in card.findChildren(QLabel) if label.text() == title)
     subtitle_label = next(label for label in card.findChildren(QLabel) if label.text() == subtitle)
-    stack = title_label.parentWidget().layout()
-    assert isinstance(stack, QVBoxLayout)
-    # 副标题在标题下方、同一个竖排容器内
-    assert stack.indexOf(subtitle_label) == stack.indexOf(title_label) + 1
+    header = title_label.parentWidget().layout()
+    assert isinstance(header, QHBoxLayout)
+    # 副标题在标题后方、同一行内（第五轮：不再独占一行）
+    assert header.indexOf(subtitle_label) > header.indexOf(title_label)
 
 
 # ---------------------------------------------------------------- 八、尾程移到系统成本区
@@ -105,11 +106,11 @@ def test_tail_fee_inputs_moved_to_system_cost_section(qapp, page):
         ancestors = _ancestor_names(spin)
         assert "systemCostSection" in ancestors
         assert "freightSection" not in ancestors
-    # 原尾程标题与静态尾程值不再显示
+    # 原尾程标题不再显示；摘要尾程行可见（第五轮：只显示 RMB）
     tail_title = page._root.findChild(QLabel, "lblTailFreight")
     assert tail_title is not None and not tail_title.isVisibleTo(page)
-    assert not page.system_rows["tail"].isVisibleTo(page)
-    # 尾程输入行挂进 systemCostRow6
+    assert page.system_rows["tail"].isVisibleTo(page)
+    # 尾程输入改为“RMB 上 / USD 下”竖排，位于总成本标题上方，不再横向塞进 systemCostRow6
     root_layout = page._root.findChild(QVBoxLayout, "systemCostLayout")
     assert root_layout is not None
     from PySide6.QtWidgets import QHBoxLayout
@@ -118,8 +119,10 @@ def test_tail_fee_inputs_moved_to_system_cost_section(qapp, page):
     assert layout_row6 is not None
     usd_box = page._root.findChild(QHBoxLayout, "layout_spinTailFreightUsd")
     rmb_box = page._root.findChild(QHBoxLayout, "layout_spinTailFreightRmb")
-    assert layout_row6.indexOf(usd_box) >= 0
-    assert layout_row6.indexOf(rmb_box) >= 0
+    assert layout_row6.indexOf(usd_box) < 0
+    assert layout_row6.indexOf(rmb_box) < 0
+    assert page.tail_fee_rmb.spin.isReadOnly() is True
+    assert page.tail_fee_usd.spin.isReadOnly() is False
     # 尾程输入仍然可用且联动 dirty
     page.tail_fee_usd.setValue(6.5)
     assert page.tail_fee_usd.value() == pytest.approx(6.5)
@@ -190,7 +193,7 @@ def test_history_column_resize_modes(qapp, context):
     assert header.sectionResizeMode(2) == QHeaderView.ResizeMode.Stretch
     assert header.sectionResizeMode(6) == QHeaderView.ResizeMode.Stretch
     for column in (3, 4, 5, 7):
-        assert header.sectionResizeMode(column) == QHeaderView.ResizeMode.Interactive
+        assert header.sectionResizeMode(column) == QHeaderView.ResizeMode.Fixed
 
 
 # ---------------------------------------------------------------- 十八、中文弹窗

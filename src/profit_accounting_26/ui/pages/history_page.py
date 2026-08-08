@@ -187,27 +187,39 @@ class HistoryPage(QWidget):
 
         self.table = QTableWidget(0, self.COLUMN_COUNT)
         self.table.setHorizontalHeaderLabels(list(self.COLUMN_HEADERS))
-        # 列宽重分配：序号/图片窄固定；名称与包装数据吃多余空间；不 Stretch 尾列
+        # 列宽重分配：序号/图片窄固定；名称与包装数据吃多余空间；校准内容不 Stretch
         header = self.table.horizontalHeader()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
-        self.table.setColumnWidth(0, 52)
-        self.table.setColumnWidth(1, _THUMB_SIZE * 2 + 24)
-        self.table.setColumnWidth(2, 260)
-        self.table.setColumnWidth(3, 250)
-        self.table.setColumnWidth(4, 120)
-        self.table.setColumnWidth(5, 160)
-        self.table.setColumnWidth(6, 200)
-        self.table.setColumnWidth(7, 190)
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(0, 50)
+        self.table.setColumnWidth(1, _THUMB_SIZE * 2 + 16)
+        self.table.setColumnWidth(2, 290)
+        self.table.setColumnWidth(3, 205)
+        self.table.setColumnWidth(4, 125)
+        self.table.setColumnWidth(5, 170)
+        self.table.setColumnWidth(6, 230)
+        self.table.setColumnWidth(7, 170)
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(_ROW_HEIGHT)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        # 纵向分隔线：浅灰 1px，header 与数据区域视觉连续；不增加横向滚动条
+        self.table.setShowGrid(False)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.table.setStyleSheet(
+            "QTableWidget::item { border-right: 1px solid #DDE3EA; }"
+            "QHeaderView::section { border-right: 1px solid #DDE3EA; }"
+            "QHeaderView::section:last { border-right: none; }"
+        )
         self.table.itemSelectionChanged.connect(self._update_action_states)
         self.table.cellDoubleClicked.connect(lambda _row, _col: self.open_selected())
         card_layout.addWidget(self.table)
@@ -254,13 +266,20 @@ class HistoryPage(QWidget):
         anchor.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         anchor.setData(_RECORD_ID_ROLE, record_id)
         self.table.setItem(row, 0, anchor)
-        self.table.setCellWidget(row, 1, self._build_image_cell(payload))
-        self.table.setCellWidget(row, 2, self._build_name_cell(payload))
-        self.table.setCellWidget(row, 3, self._multiline_cell(self._cost_text(payload)))
-        self.table.setCellWidget(row, 4, self._multiline_cell(self._price_text(payload)))
-        self.table.setCellWidget(row, 5, self._multiline_cell(self._profit_text(payload)))
-        self.table.setCellWidget(row, 6, self._multiline_cell(self._packaging_text(payload)))
+        self.table.setCellWidget(row, 1, self._with_column_border(self._build_image_cell(payload)))
+        self.table.setCellWidget(row, 2, self._with_column_border(self._build_name_cell(payload)))
+        self.table.setCellWidget(row, 3, self._with_column_border(self._multiline_cell(self._cost_text(payload))))
+        self.table.setCellWidget(row, 4, self._with_column_border(self._multiline_cell(self._price_text(payload))))
+        self.table.setCellWidget(row, 5, self._with_column_border(self._multiline_cell(self._profit_text(payload))))
+        self.table.setCellWidget(row, 6, self._with_column_border(self._multiline_cell(self._packaging_text(payload))))
         self.table.setCellWidget(row, 7, self._multiline_cell(self._calibration_text(payload)))
+
+    @staticmethod
+    def _with_column_border(container: QWidget, *, last: bool = False) -> QWidget:
+        """给非最后一列单元格容器加 1px 浅灰纵向分隔线（选中高亮下仍可辨）。"""
+        if not last:
+            container.setStyleSheet("border-right: 1px solid #DDE3EA;")
+        return container
 
     @staticmethod
     def _multiline_cell(text: str) -> QWidget:

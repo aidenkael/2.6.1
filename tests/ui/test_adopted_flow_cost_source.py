@@ -277,7 +277,9 @@ class TestSingleCostSource:
         assert "¥66.80" in page.system_rows["product"].text()
         assert "¥28.00" in page.system_rows["domestic"].text()
         assert "深圳货代" in page.system_rows["first_mile"].text()
-        assert "$" in page.system_rows["tail"].text() and "¥" in page.system_rows["tail"].text()
+        # 第五轮：摘要尾程只显示 RMB（USD 输入已移到总成本标题上方）
+        assert "¥" in page.system_rows["tail"].text()
+        assert "$" not in page.system_rows["tail"].text()
 
 
 # ---------------------------------------------------------------------------

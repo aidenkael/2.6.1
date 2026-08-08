@@ -99,7 +99,9 @@ class TestSystemCostSixRows:
             assert "深圳货代" in page.system_rows["first_mile"].text()
             assert f"¥{quote.weight_fee_rmb:.2f}" in page.system_rows["first_mile"].text()
             assert page.system_rows["service"].text() == f"¥{quote.fixed_fee_rmb:.2f}"
-            assert "$" in page.system_rows["tail"].text() and "¥" in page.system_rows["tail"].text()
+            # 第五轮：摘要尾程只显示 RMB（USD 输入已移到总成本标题上方）
+            assert page.system_rows["tail"].text().startswith("¥")
+            assert "$" not in page.system_rows["tail"].text()
             # 总成本：左对齐金额，不带“总成本”前缀，不加粗由 totalBold 属性承载
             assert page.system_total.text() == f"¥{page.current_system_cost:.2f}"
             assert not page.system_total.text().startswith("总成本")
