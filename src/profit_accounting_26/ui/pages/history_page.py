@@ -169,7 +169,7 @@ class HistoryPage(QWidget):
         refresh = QPushButton("刷新")
         self.open_button = QPushButton("返回测算页编辑")
         self.open_button.setProperty("primary", True)
-        self.calibrate_button = QPushButton("实际校准")
+        self.calibrate_button = QPushButton("编辑校准")
         self.delete_button = QPushButton("删除")
         for button in (refresh, self.open_button, self.calibrate_button, self.delete_button):
             button.setFixedHeight(32)

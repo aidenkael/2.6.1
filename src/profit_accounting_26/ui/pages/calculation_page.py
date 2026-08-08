@@ -220,6 +220,12 @@ class CalculationPage(QWidget):
         self._ai_baseline: dict[str, Any] | None = None
         self.initial_ai_snapshot: dict[str, Any] | None = None
         self.current_feedback_id: str | None = None
+        # 历史编辑模式：load_record_payload 进入，清空并新建退出；
+        # 编辑模式下任何字段修改都允许直接重算并更新同一条记录。
+        self.editing_record_id: str | None = None
+        # 用户校准 dirty：仅用户手动修改当前采用尺寸/重量或填写用户修正时置位；
+        # AI 首次自动复制不置位（程序化 setValue 不发信号）。
+        self.user_calibration_dirty = False
         self._recognized_image_fingerprint: tuple[tuple[str, str], ...] = ()
         self._accepted_bare_fields: set[str] = set()
         self._pending_confirmed_normal: dict[str, Any] = {}
@@ -369,6 +375,13 @@ class CalculationPage(QWidget):
         self.product_link = f(QLineEdit, "txtProductLink")
         self.btn_save_record = f(QPushButton, "btnSaveCurrentRecord")
         self.btn_clear_new = f(QPushButton, "btnClearAndNew")
+        # 保存按钮旁的历史编辑状态轻提示（不占用新布局区域）
+        bottom_layout = f(QHBoxLayout, "bottomActionLayout")
+        self.edit_state_label = QLabel("")
+        self.edit_state_label.setProperty("muted", True)
+        self.edit_state_label.setVisible(False)
+        if bottom_layout is not None:
+            bottom_layout.insertWidget(2, self.edit_state_label)
         self._apply_adopted_flow_ui()
 
     def _cost_spin(self, name: str, *, maximum: float) -> _SpinAdapter:
@@ -457,7 +470,7 @@ class CalculationPage(QWidget):
             self.user_correction = _TextAdapter(note_edit)
         else:  # 防御：布局缺失时仍保证字段可用
             self.user_correction = _TextAdapter(QTextEdit())
-        self.user_correction.textChanged.connect(lambda _text: self._mark_dirty())
+        self.user_correction.textChanged.connect(lambda _text: self._user_calibration_changed())
         # 4) 系统成本卡收敛为唯一成本来源四行：总成本 / 国内成本 / 头程 / 尾程
         self.system_names["package"].setText("国内成本")
         self.system_names["forwarder"].setText("头程")
@@ -1212,8 +1225,9 @@ class CalculationPage(QWidget):
         self._updating = True
         # 只在第一次 AI（initial_ai_snapshot 尚未捕获）时写入两框：
         # AI估算与当前采用复制完全相同的首次 AI 数据；
-        # 同会话再次 AI / 局部重估不得静默覆盖已冻结的首次结果或用户已编辑的当前采用。
-        if self.initial_ai_snapshot is None:
+        # 同会话再次 AI / 局部重估不得静默覆盖已冻结的首次结果或用户已编辑的当前采用；
+        # 历史编辑模式下（含无 ai_initial 的旧记录）同样不得覆盖已恢复的两卡。
+        if self.initial_ai_snapshot is None and self.editing_record_id is None:
             for fields in (self.normal_fields, self.conservative_fields):
                 fields["method"].setText(proposal.normal.packaging_method)
                 fields["length"].setValue(proposal.normal.length_cm or 0)
@@ -1239,7 +1253,9 @@ class CalculationPage(QWidget):
         if self._updating:
             return
         self._mark_dirty()
-        if self.proposal is not None:
+        # 历史编辑模式：恢复后的记录允许直接修改任何字段并重算保存，
+        # 不得因裸规格/摘要变化把包装标记为过期而阻止保存。
+        if self.proposal is not None and self.editing_record_id is None:
             self.packaging_stale = True
             self.review_badge.setText("估算已过期 · 禁止保存")
             self.review_badge.setProperty("warning", True)
@@ -1247,10 +1263,19 @@ class CalculationPage(QWidget):
             self._refresh_badge_style()
         self.recalculate()
 
+    def _user_calibration_changed(self) -> None:
+        """当前采用尺寸/重量或用户修正被用户手动修改 → 用户校准 dirty。"""
+        self.user_calibration_dirty = True
+        self._mark_dirty()
+
     def _scenario_manually_changed(self, name: str) -> None:
         if self._updating:
             return
         self.manual_scenarios.add(name)
+        # 当前采用是用户校准入口 A：手动修改计入用户校准 dirty；
+        # AI 首次自动复制走程序化 setValue，不会进入这里。
+        if name == "当前采用":
+            self.user_calibration_dirty = True
         self.review_badge.setText("人工修改 · 需要复核")
         self.review_badge.setProperty("warning", True)
         self.review_badge.setProperty("success", False)
@@ -1533,6 +1558,7 @@ class CalculationPage(QWidget):
         }
 
     def save_record(self) -> None:
+        is_update = self.record_id is not None
         if self.packaging_stale:
             QMessageBox.warning(self, "无法保存", "包装估算已过期，请先重新估算规格。")
             return
@@ -1568,26 +1594,30 @@ class CalculationPage(QWidget):
         self.ai_button.setText("AI识图")
         self.ai_button.setEnabled(True)
         self.saved.emit(self.record_id)
-        QMessageBox.information(self, "保存成功", f"记录已保存：{self.record_id}")
+        if is_update:
+            QMessageBox.information(self, "更新成功", f"历史记录已更新：{self.record_id}")
+        else:
+            QMessageBox.information(self, "保存成功", f"记录已保存：{self.record_id}")
 
     def _save_user_feedback(self) -> None:
-        """把用户修正/当前采用差异保存为 CalibrationFeedback（source=user）。
+        """把用户校准（当前采用 + 用户修正）保存为 CalibrationFeedback（source=user）。
 
-        主界面的当前采用属于用户修正，不是实际发货实测：
-        绝不写 actual_logistics，也不标记 actual_measured。
-        已有 feedback 时更新同一个 feedback_id，并保留其中已录入的实测数据。
+        主界面的当前采用属于用户校准入口 A，不是实际发货实测：
+        suggested_package 恒为 user_suggested，绝不写 actual_logistics，
+        也绝不标记 actual_measured。
+        仅当用户校准 dirty（手动改当前采用或填写用户修正）时才写建议值；
+        AI 首次自动复制不产生校准反馈。
+        已有 feedback 时更新同一个 feedback_id，并保留其中已录入的
+        建议值、实测数据与结构反馈，不重复创建。
         """
         if not self.record_id:
             return
         note = self.user_correction.text().strip() or None
         adopted = self._card_package_dict(self.conservative_fields)
-        ai_estimate = self._card_package_dict(self.normal_fields)
         keys = ("packaging_method", "length_cm", "width_cm", "height_cm", "weight_g")
         adopted_filled = any(adopted[key] is not None for key in keys)
-        left_empty = not any(ai_estimate[key] is not None for key in keys)
-        # 当前采用与 AI估算 一致且左侧有数据时不重复保存建议值
         suggested = None
-        if adopted_filled and (left_empty or adopted != ai_estimate):
+        if self.user_calibration_dirty and adopted_filled:
             suggested = dict(adopted)
             suggested["evidence_level"] = "user_suggested"
         if note is None and suggested is None:
@@ -1601,8 +1631,10 @@ class CalculationPage(QWidget):
             except KeyError:
                 self.current_feedback_id = None
             else:
-                # 更新时保留对话框已录入的实际测量与结构反馈，禁止互相清掉
+                # 更新时保留对话框已录入的建议值、实际测量与结构反馈，禁止互相清掉
                 data["feedback_id"] = existing.feedback_id
+                if suggested is None and existing.suggested_package is not None and existing.suggested_package.has_content():
+                    data["suggested_package"] = existing.suggested_package.to_dict()
                 if existing.actual_logistics is not None and existing.actual_logistics.has_content():
                     data["actual_logistics"] = existing.actual_logistics.to_dict()
                 if existing.structure.has_content():
@@ -1611,6 +1643,9 @@ class CalculationPage(QWidget):
         if feedback_id != self.current_feedback_id:
             self.current_feedback_id = feedback_id
             self.context.history_record_v2_service.link_feedback(self.record_id, feedback_id)
+        # 用户校准入口 A 同步 current_estimate：与历史页“编辑校准”入口 B 更新同一条
+        if suggested is not None:
+            self.context.history_record_v2_service.update_current_estimate(self.record_id, dict(suggested))
 
     @staticmethod
     def _card_package_dict(fields: dict[str, Any]) -> dict[str, Any]:
@@ -1637,6 +1672,8 @@ class CalculationPage(QWidget):
                 return
         self._updating = True
         self.record_id = None
+        self.editing_record_id = None
+        self.user_calibration_dirty = False
         self.observation = AIObservation()
         self.proposal = None
         self.session = CalculationSession()
@@ -1681,6 +1718,7 @@ class CalculationPage(QWidget):
         self.review_badge.setText("待识别")
         self.review_badge.setProperty("warning", True)
         self._refresh_badge_style()
+        self._refresh_edit_mode_ui()
         self.mark_saved()
         self.recalculate()
 
@@ -1694,8 +1732,9 @@ class CalculationPage(QWidget):
         self._updating = True
         self.manual_scenarios.clear()
         self.record_id = record_id
-        # 打开历史记录不把当前 layers.ai_raw 当成新的第一次 AI；历史更新由 V2Service 保留 ai_initial
-        self.initial_ai_snapshot = None
+        # 进入历史编辑模式：恢复后修改任何字段都允许直接重算并更新同一条记录
+        self.editing_record_id = record_id
+        self.user_calibration_dirty = False
         self.product_summary.setText(str(record.get("product_name") or ""))
         if self.product_link is not None:
             self.product_link.setText(str(record.get("product_link") or ""))
@@ -1715,7 +1754,8 @@ class CalculationPage(QWidget):
                 self.proposal = None
                 self.session.adopted_packaging = None
         adopted = layers.get("adopted", {})
-        self.packaging_stale = bool(adopted.get("packaging_estimate_stale", False))
+        # 恢复历史记录后不再携带过期阻断：保存按钮随时可更新同一条记录
+        self.packaging_stale = False
         bare = adopted.get("bare", {})
         self.bare_length.setValue(float(bare.get("length_cm") or 0))
         self.bare_width.setValue(float(bare.get("width_cm") or 0))
@@ -1724,6 +1764,9 @@ class CalculationPage(QWidget):
         # AI估算（左卡）：优先第一次 AI 结果（_v2.ai_initial），旧记录回退 adopted.normal
         v2 = record.get("_v2") if isinstance(record.get("_v2"), dict) else {}
         ai_initial = v2.get("ai_initial") if isinstance(v2.get("ai_initial"), dict) else {}
+        # 恢复第一次 AI 冻结门控：后续再次 AI 识图不得覆盖 AI估算/当前采用两卡；
+        # 旧记录没有 ai_initial 时同样冻结（用空快照占位），历史更新由 V2Service 保留 ai_initial
+        self.initial_ai_snapshot = dict(ai_initial) if ai_initial else {}
         ai_initial_pkg = ai_initial.get("adopted_packaging") if isinstance(ai_initial.get("adopted_packaging"), dict) else {}
         left_raw = ai_initial_pkg.get("normal") if isinstance(ai_initial_pkg.get("normal"), dict) else None
         self._fill_package_fields(self.normal_fields, left_raw or adopted.get("normal", {}))
@@ -1754,6 +1797,8 @@ class CalculationPage(QWidget):
             else:
                 if feedback.user_note:
                     self.user_correction.setText(feedback.user_note)
+        # 程序化恢复不算用户修改：复位用户校准 dirty
+        self.user_calibration_dirty = False
         selected_package = str(adopted.get("selected_packaging") or "正常档")
         self.selected_forwarder_id = str(adopted.get("selected_forwarder_id") or self.selected_forwarder_id)
         calculated = layers.get("calculated", {})
@@ -1812,7 +1857,15 @@ class CalculationPage(QWidget):
             self.recalculate()
         finally:
             self.profit_binder._loading_record = False
+        self._refresh_edit_mode_ui()
         self.mark_saved()
+
+    def _refresh_edit_mode_ui(self) -> None:
+        """按新建/历史编辑模式刷新保存按钮文案与编辑状态提示。"""
+        editing = self.editing_record_id is not None
+        self.btn_save_record.setText("更新此记录" if editing else "保存本次记录")
+        self.edit_state_label.setText("正在编辑历史记录" if editing else "")
+        self.edit_state_label.setVisible(editing)
 
     @staticmethod
     def _fill_package_fields(fields: dict[str, Any], raw: dict[str, Any]) -> None:

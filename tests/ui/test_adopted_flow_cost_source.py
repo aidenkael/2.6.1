@@ -350,7 +350,8 @@ class TestSaveAndRestore:
         _arm_costs(page)
         _ensure_forwarders(page)
         _simulate_ai(page)
-        page.conservative_fields["length"].setValue(25.0)
+        # 用真实控件路径模拟用户手动修改（触发用户校准 dirty）
+        page.conservative_fields["length"].spin.setValue(25.0)
         page.recalculate()
         page.save_record()
         feedback = page.context.calibration_feedback_service.load(page.current_feedback_id)

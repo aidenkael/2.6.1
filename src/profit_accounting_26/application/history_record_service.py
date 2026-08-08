@@ -124,6 +124,21 @@ class HistoryRecordV2Service:
         payload["_v2"] = block
         self.store.update_record(record_id, payload, snapshot_kind="feedback_link")
 
+    # ------------------------------------------------------------ calibration
+
+    def update_current_estimate(self, record_id: str, estimate: dict[str, Any]) -> None:
+        """校准窄接口：只更新 ``_v2.current_estimate``。
+
+        不递增 revision、不修改 layers、不算一次完整编辑；
+        供主页面用户校准与历史页“编辑校准”对话框双向同步同一个当前采用结果。
+        """
+        payload = self.store.load_record(record_id)
+        block = v2_block_from_payload(payload)
+        block["current_estimate"] = dict(estimate or {})
+        block.setdefault("record_schema_version", RECORD_SCHEMA_VERSION)
+        payload["_v2"] = block
+        self.store.update_record(record_id, payload, snapshot_kind="calibration_edit")
+
     # ------------------------------------------------------------ read
 
     def load_v2(self, record_id: str) -> HistoryRecordV2:
