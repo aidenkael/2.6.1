@@ -96,33 +96,29 @@ def test_card_subtitle_inline_after_title(qapp, page, card_key, title, subtitle)
     assert header.indexOf(subtitle_label) > header.indexOf(title_label)
 
 
-# ---------------------------------------------------------------- 八、尾程移到系统成本区
+# ---------------------------------------------------------------- 八、尾程设置独立卡
 
 
-def test_tail_fee_inputs_moved_to_system_cost_section(qapp, page):
+def test_tail_fee_inputs_in_independent_tail_settings_card(qapp, page):
     usd_spin = page.tail_fee_usd.spin
     rmb_spin = page.tail_fee_rmb.spin
     for spin in (usd_spin, rmb_spin):
         ancestors = _ancestor_names(spin)
-        assert "systemCostSection" in ancestors
+        assert "tailSettingsCard" in ancestors
+        assert "systemCostSection" not in ancestors
         assert "freightSection" not in ancestors
-    # 原尾程标题不再显示；摘要尾程行可见（第五轮：只显示 RMB）
-    tail_title = page._root.findChild(QLabel, "lblTailFreight")
-    assert tail_title is not None and not tail_title.isVisibleTo(page)
+    # 摘要尾程行可见（只显示 RMB）
     assert page.system_rows["tail"].isVisibleTo(page)
-    # 尾程输入改为“RMB 上 / USD 下”竖排，位于总成本标题上方，不再横向塞进 systemCostRow6
-    root_layout = page._root.findChild(QVBoxLayout, "systemCostLayout")
-    assert root_layout is not None
-    from PySide6.QtWidgets import QHBoxLayout
-
-    layout_row6 = page._root.findChild(QHBoxLayout, "systemCostRow6")
-    assert layout_row6 is not None
-    usd_box = page._root.findChild(QHBoxLayout, "layout_spinTailFreightUsd")
-    rmb_box = page._root.findChild(QHBoxLayout, "layout_spinTailFreightRmb")
-    assert layout_row6.indexOf(usd_box) < 0
-    assert layout_row6.indexOf(rmb_box) < 0
+    # ¥ / $ 是输入框外的独立 QLabel；输入框内无 prefix
+    assert page.tail_fee_rmb.spin.prefix() == ""
+    assert page.tail_fee_usd.spin.prefix() == ""
+    rmb_symbol = page._root.findChild(QLabel, "lblTailSettingsRmbSymbol")
+    usd_symbol = page._root.findChild(QLabel, "lblTailSettingsUsdSymbol")
+    assert rmb_symbol is not None and rmb_symbol.text() == "¥"
+    assert usd_symbol is not None and usd_symbol.text() == "$"
     assert page.tail_fee_rmb.spin.isReadOnly() is True
     assert page.tail_fee_usd.spin.isReadOnly() is False
+    assert page.tail_fee_rmb.spin.width() == page.tail_fee_usd.spin.width()
     # 尾程输入仍然可用且联动 dirty
     page.tail_fee_usd.setValue(6.5)
     assert page.tail_fee_usd.value() == pytest.approx(6.5)

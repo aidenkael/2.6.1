@@ -386,7 +386,6 @@ class CalculationPage(QWidget):
             bottom_layout.insertWidget(2, self.edit_state_label)
         self._apply_adopted_flow_ui()
         self._apply_round3_ui_polish()
-        self._apply_round5_ui_polish()
 
     def _cost_spin(self, name: str, *, maximum: float) -> _SpinAdapter:
         spin = self._root.findChild(QDoubleSpinBox, name)
@@ -487,7 +486,7 @@ class CalculationPage(QWidget):
                     "这种小商品通常可以缠绕打包，预计袋装即可，义乌货代纯头程10元"
                 )
                 self.user_correction = _TextAdapter(note_edit)
-            note_edit.setFixedHeight(88)
+            note_edit.setFixedHeight(104)
             note_edit.setMinimumWidth(90)
             note_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             note_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -522,35 +521,12 @@ class CalculationPage(QWidget):
         # 标签与金额对齐由第五轮排版完成，旧的重量/计费重/物流总价行保持静态隐藏
 
     def _apply_round3_ui_polish(self) -> None:
-        """第三轮 UI 精修：尾程输入移到系统成本区；利润规则状态放标题上方。
+        """利润区规则状态放字段标题上方（尾程输入已在 main_window.ui 静态独立卡内）。
 
         只移动既有控件，不改任何计算逻辑与算法。
         """
         f = self._root.findChild
-        # 1) 尾程费用（$USD 可编辑 + ¥RMB）从货代方案顶部移到系统成本卡尾程行
-        freight_layout = f(QVBoxLayout, "freightLayout")
-        tail_grid = f(QGridLayout, "tailFreightLayout")
-        usd_box = f(QHBoxLayout, "layout_spinTailFreightUsd")
-        rmb_box = f(QHBoxLayout, "layout_spinTailFreightRmb")
-        tail_title = f(QLabel, "lblTailFreight")
-        if tail_grid is not None:
-            # 先取出全部子项再移除空网格：removeItem 会删除无主的子布局对象
-            while tail_grid.count():
-                tail_grid.takeAt(0)
-        if freight_layout is not None and tail_grid is not None:
-            freight_layout.removeItem(tail_grid)
-        if tail_title is not None:
-            tail_title.setVisible(False)
-        value6 = self.system_rows.get("tail")
-        if value6 is not None:
-            value6.setVisible(False)
-        row6 = f(QHBoxLayout, "systemCostRow6")
-        if row6 is not None:
-            if usd_box is not None:
-                row6.addLayout(usd_box, 1)
-            if rmb_box is not None:
-                row6.addLayout(rmb_box, 1)
-        # 2) 利润区规则状态放字段标题上方；字号用 QFont（binder 用 setStyleSheet 只覆盖颜色）
+        # 利润区规则状态放字段标题上方；字号用 QFont（binder 用 setStyleSheet 只覆盖颜色）
         profit_grid = f(QGridLayout, "profitFieldsGrid")
         if profit_grid is not None:
             for layout_name in ("layoutNoActivityProfitTitle", "layoutActivityProfitTitle"):
@@ -578,87 +554,6 @@ class CalculationPage(QWidget):
                 if title_widget is not None:
                     stack.addWidget(title_widget)
                 profit_grid.addLayout(stack, row, col, row_span, col_span)
-
-    def _apply_round5_ui_polish(self) -> None:
-        """第五轮+第六轮 UI 精修：尾程设置独立区；成本摘要字段左、金额右。
-
-        只移动既有控件与对齐方式，不改任何计算逻辑与算法。
-        """
-        f = self._root.findChild
-        cost_layout = f(QVBoxLayout, "systemCostLayout")
-        row6 = f(QHBoxLayout, "systemCostRow6")
-        usd_box = f(QHBoxLayout, "layout_spinTailFreightUsd")
-        rmb_box = f(QHBoxLayout, "layout_spinTailFreightRmb")
-        # 1) 用 takeAt 从 systemCostRow6 取回尾程输入框（removeItem 会删除子布局），
-        #    构建独立“尾程设置”区：左标题 + 右金额（¥ 上 / $ 下，右对齐）放到标题上方
-        if row6 is not None:
-            for box in (usd_box, rmb_box):
-                index = row6.indexOf(box)
-                if index >= 0:
-                    row6.takeAt(index)
-        if cost_layout is not None and usd_box is not None and rmb_box is not None:
-            tail_input = QWidget()
-            tail_row = QHBoxLayout(tail_input)
-            tail_row.setContentsMargins(0, 0, 0, 0)
-            tail_row.setSpacing(8)
-            tail_title = QLabel("尾程设置")
-            tail_row.addWidget(tail_title)
-            tail_row.addStretch(1)
-            amounts = QVBoxLayout()
-            amounts.setContentsMargins(0, 0, 0, 0)
-            amounts.setSpacing(1)
-            amounts.addLayout(rmb_box)
-            amounts.addLayout(usd_box)
-            tail_row.addLayout(amounts)
-            cost_layout.insertWidget(0, tail_input)
-            # 尾程设置与下方“当前系统总成本”之间增加一点垂直间距
-            cost_layout.insertSpacing(1, 6)
-        # ¥ / $ 前缀、隐藏 RMB/USD 单位文字、金额右对齐；RMB 只读、USD 可编辑
-        for spin, prefix, unit_name in (
-            (self.tail_fee_rmb.spin, "¥", "unit_spinTailFreightRmb"),
-            (self.tail_fee_usd.spin, "$", "unit_spinTailFreightUsd"),
-        ):
-            spin.setPrefix(prefix)
-            spin.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            unit_label = f(QLabel, unit_name)
-            if unit_label is not None:
-                unit_label.setVisible(False)
-        self.tail_fee_rmb.spin.setReadOnly(True)
-        # 2) 成本摘要行：字段名左对齐、金额右对齐（头程名称放字段名括号内；尾程只显示 RMB）
-        for row_name in ("systemCostRow0", "systemCostRow1", "systemCostRow2", "systemCostRow3", "systemCostRow6"):
-            row = f(QHBoxLayout, row_name)
-            if row is None:
-                continue
-            if row.count() >= 2:
-                value_widget = row.itemAt(row.count() - 1).widget()
-                if isinstance(value_widget, QLabel):
-                    value_widget.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                row.insertStretch(row.count() - 1, 1)
-        value6 = self.system_rows.get("tail")
-        if value6 is not None:
-            value6.setVisible(True)
-        # 3) 总成本：名称左 + RMB/USD 右（RMB 上、USD 下，加粗）
-        total_layout = f(QHBoxLayout, "systemTotalLayout")
-        if total_layout is not None:
-            name = f(QLabel, "lblSystemTotalName")
-            rmb = f(QLabel, "lblSystemTotalRmb")
-            usd = f(QLabel, "lblSystemTotalUsd")
-            while total_layout.count():
-                total_layout.takeAt(0)
-            if name is not None:
-                total_layout.addWidget(name)
-            total_layout.addStretch(1)
-            total_stack = QVBoxLayout()
-            total_stack.setContentsMargins(0, 0, 0, 0)
-            total_stack.setSpacing(0)
-            if rmb is not None:
-                rmb.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                total_stack.addWidget(rmb)
-            if usd is not None:
-                usd.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                usd.setVisible(True)
-                total_stack.addWidget(usd)
-            total_layout.addLayout(total_stack)
 
     def _build_dynamic_regions(self) -> None:
         """清除 Designer 预览控件，准备动态图片框与货代卡片容器。"""

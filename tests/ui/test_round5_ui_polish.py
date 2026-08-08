@@ -117,8 +117,8 @@ class TestMirrorCards:
             right_bottom = page.user_correction._widget
             assert isinstance(left_bottom, QTextEdit)
             assert isinstance(right_bottom, QTextEdit)
-            assert left_bottom.minimumHeight() == right_bottom.minimumHeight() == 88
-            assert left_bottom.maximumHeight() == right_bottom.maximumHeight() == 88
+            assert left_bottom.minimumHeight() == right_bottom.minimumHeight() == 104
+            assert left_bottom.maximumHeight() == right_bottom.maximumHeight() == 104
             # 底部标签：左“包装方式”，右“用户修正”
             assert page._root.findChild(QLabel, "lblNormalDims").text() == "包装尺寸（默认 cm）"
             assert page._root.findChild(QLabel, "lblConservativeDims").text() == "包装尺寸（默认 cm）"
@@ -196,13 +196,15 @@ class TestTailFeeAndCostSummary:
         try:
             assert page.tail_fee_rmb.spin.isReadOnly() is True
             assert page.tail_fee_usd.spin.isReadOnly() is False
-            assert page.tail_fee_rmb.spin.prefix() == "¥"
-            assert page.tail_fee_usd.spin.prefix() == "$"
-            # 不再显示 RMB / USD 文字标签
-            unit_rmb = page._root.findChild(QLabel, "unit_spinTailFreightRmb")
-            unit_usd = page._root.findChild(QLabel, "unit_spinTailFreightUsd")
-            assert unit_rmb is not None and not unit_rmb.isVisible()
-            assert unit_usd is not None and not unit_usd.isVisible()
+            # 输入框内只有数字：无 prefix/suffix；¥ / $ 是框外独立 QLabel
+            assert page.tail_fee_rmb.spin.prefix() == ""
+            assert page.tail_fee_usd.spin.prefix() == ""
+            assert page.tail_fee_rmb.spin.suffix() == ""
+            assert page.tail_fee_usd.spin.suffix() == ""
+            rmb_symbol = page._root.findChild(QLabel, "lblTailSettingsRmbSymbol")
+            usd_symbol = page._root.findChild(QLabel, "lblTailSettingsUsdSymbol")
+            assert rmb_symbol is not None and rmb_symbol.text() == "¥"
+            assert usd_symbol is not None and usd_symbol.text() == "$"
             page.tail_fee_usd.setValue(5.55)
             page._sync_tail_rmb_from_usd(recalculate=False)
             rate = float(page.settings.get("exchange_rate_usd_to_rmb", 7.2))

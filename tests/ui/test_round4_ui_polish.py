@@ -80,9 +80,9 @@ class TestSystemCostSixRows:
             assert root.findChild(QLabel, "lblSystemCostName6").text() == "尾程"
             total_name = root.findChild(QLabel, "lblSystemTotalName")
             assert total_name is not None and total_name.text() == "总成本"
-            # 旧的重量/计费重/物流总价行保持隐藏
-            for hidden in ("lblSystemCostName4", "lblSystemCostValue4", "lblSystemCostName5", "lblSystemCostValue5"):
-                assert not root.findChild(QLabel, hidden).isVisibleTo(page._root), f"{hidden} 应隐藏"
+            # 旧的重量/计费重/物流总价行已从 main_window.ui 删除（第七轮根因清理）
+            for removed in ("lblSystemCostName4", "lblSystemCostValue4", "lblSystemCostName5", "lblSystemCostValue5"):
+                assert root.findChild(QLabel, removed) is None, f"{removed} 不应再存在"
         finally:
             page.deleteLater()
             qapp.processEvents()

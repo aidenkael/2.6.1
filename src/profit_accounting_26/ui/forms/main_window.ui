@@ -65,17 +65,19 @@ QLabel[unitLabel="true"] { background: transparent; color: #607089; padding: 0 2
 
 
 /* Approved middle-section reference */
-QFrame#costPackingSection, QFrame#freightSection, QFrame#systemCostSection {
+QFrame#costPackingSection, QFrame#freightSection, QFrame#tailSettingsCard, QFrame#systemCostSection {
     font-size: 9pt;
 }
 QFrame#costPackingSection QLabel[sectionTitle="true"],
 QFrame#freightSection QLabel[sectionTitle="true"],
+QFrame#tailSettingsCard QLabel[sectionTitle="true"],
 QFrame#systemCostSection QLabel[sectionTitle="true"] {
     font-size: 11pt;
 }
 QFrame#costPackingSection QLineEdit,
 QFrame#costPackingSection QDoubleSpinBox,
-QFrame#freightSection QDoubleSpinBox {
+QFrame#freightSection QDoubleSpinBox,
+QFrame#tailSettingsCard QDoubleSpinBox {
     padding: 3px 5px;
     min-height: 20px;
 }
@@ -3559,7 +3561,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                    <property name="card" stdset="0">
                     <bool>true</bool>
                    </property>
-                   <layout class="QVBoxLayout" name="freightLayout" stretch="0,0,1">
+                   <layout class="QVBoxLayout" name="freightLayout" stretch="0,1">
                     <property name="spacing">
                      <number>6</number>
                     </property>
@@ -3596,167 +3598,6 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                        <bool>true</bool>
                       </property>
                      </widget>
-                    </item>
-                    <item>
-                     <layout class="QGridLayout" name="tailFreightLayout" columnstretch="0,1,1">
-                      <property name="leftMargin">
-                       <number>0</number>
-                      </property>
-                      <property name="topMargin">
-                       <number>0</number>
-                      </property>
-                      <property name="rightMargin">
-                       <number>0</number>
-                      </property>
-                      <property name="bottomMargin">
-                       <number>0</number>
-                      </property>
-                      <property name="spacing">
-                       <number>4</number>
-                      </property>
-                      <item row="0" column="0">
-                       <widget class="QLabel" name="lblTailFreight">
-                        <property name="text">
-                         <string>尾程费用</string>
-                        </property>
-                       </widget>
-                      </item>
-                      <item row="0" column="1">
-                       <layout class="QHBoxLayout" name="layout_spinTailFreightUsd">
-                        <property name="spacing">
-                         <number>6</number>
-                        </property>
-                        <property name="leftMargin">
-                         <number>0</number>
-                        </property>
-                        <property name="topMargin">
-                         <number>0</number>
-                        </property>
-                        <property name="rightMargin">
-                         <number>0</number>
-                        </property>
-                        <property name="bottomMargin">
-                         <number>0</number>
-                        </property>
-                        <item>
-                         <widget class="QDoubleSpinBox" name="spinTailFreightUsd">
-                          <property name="toolTip">
-                           <string>可编辑尾程费用（USD）</string>
-                          </property>
-                          <property name="readOnly">
-                           <bool>false</bool>
-                          </property>
-                          <property name="buttonSymbols">
-                           <enum>QAbstractSpinBox::NoButtons</enum>
-                          </property>
-                          <property name="decimals">
-                           <number>2</number>
-                          </property>
-                          <property name="minimum">
-                           <double>0.000000000000000</double>
-                          </property>
-                          <property name="maximum">
-                           <double>9999.000000000000000</double>
-                          </property>
-                          <property name="singleStep">
-                           <double>1.000000000000000</double>
-                          </property>
-                          <property name="value">
-                           <double>5.560000000000000</double>
-                          </property>
-                         </widget>
-                        </item>
-                        <item>
-                         <widget class="QLabel" name="unit_spinTailFreightUsd">
-                          <property name="minimumSize">
-                           <size>
-                            <width>36</width>
-                            <height>0</height>
-                           </size>
-                          </property>
-                          <property name="text">
-                           <string>USD</string>
-                          </property>
-                          <property name="alignment">
-                           <set>Qt::AlignmentFlag::AlignCenter</set>
-                          </property>
-                          <property name="unitLabel" stdset="0">
-                           <bool>true</bool>
-                          </property>
-                         </widget>
-                        </item>
-                       </layout>
-                      </item>
-                      <item row="0" column="2">
-                       <layout class="QHBoxLayout" name="layout_spinTailFreightRmb">
-                        <property name="spacing">
-                         <number>6</number>
-                        </property>
-                        <property name="leftMargin">
-                         <number>0</number>
-                        </property>
-                        <property name="topMargin">
-                         <number>0</number>
-                        </property>
-                        <property name="rightMargin">
-                         <number>0</number>
-                        </property>
-                        <property name="bottomMargin">
-                         <number>0</number>
-                        </property>
-                        <item>
-                         <widget class="QDoubleSpinBox" name="spinTailFreightRmb">
-                          <property name="toolTip">
-                           <string>按当前汇率换算，仅显示</string>
-                          </property>
-                          <property name="readOnly">
-                           <bool>true</bool>
-                          </property>
-                          <property name="buttonSymbols">
-                           <enum>QAbstractSpinBox::NoButtons</enum>
-                          </property>
-                          <property name="decimals">
-                           <number>2</number>
-                          </property>
-                          <property name="minimum">
-                           <double>0.000000000000000</double>
-                          </property>
-                          <property name="maximum">
-                           <double>99999.000000000000000</double>
-                          </property>
-                          <property name="singleStep">
-                           <double>1.000000000000000</double>
-                          </property>
-                          <property name="value">
-                           <double>40.000000000000000</double>
-                          </property>
-                          <property name="preview" stdset="0">
-                           <bool>true</bool>
-                          </property>
-                         </widget>
-                        </item>
-                        <item>
-                         <widget class="QLabel" name="unit_spinTailFreightRmb">
-                          <property name="minimumSize">
-                           <size>
-                            <width>36</width>
-                            <height>0</height>
-                           </size>
-                          </property>
-                          <property name="text">
-                           <string>RMB</string>
-                          </property>
-                          <property name="alignment">
-                           <set>Qt::AlignmentFlag::AlignCenter</set>
-                          </property>
-                          <property name="unitLabel" stdset="0">
-                           <bool>true</bool>
-                          </property>
-                         </widget>
-                        </item>
-                       </layout>
-                      </item>
-                     </layout>
                     </item>
                     <item>
                      <layout class="QHBoxLayout" name="forwarderCardsLayout" stretch="1,1">
@@ -4035,7 +3876,246 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                   </widget>
                  </item>
                  <item>
-                  <widget class="QFrame" name="systemCostSection">
+                  <layout class="QVBoxLayout" name="rightCostColumnLayout" stretch="0,1">
+                   <property name="spacing">
+                    <number>9</number>
+                   </property>
+                   <item>
+                    <widget class="QFrame" name="tailSettingsCard">
+                     <property name="sizePolicy">
+                      <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                       <horstretch>0</horstretch>
+                       <verstretch>0</verstretch>
+                      </sizepolicy>
+                     </property>
+                     <property name="minimumSize">
+                      <size>
+                       <width>220</width>
+                       <height>0</height>
+                      </size>
+                     </property>
+                     <property name="card" stdset="0">
+                      <bool>true</bool>
+                     </property>
+                     <layout class="QHBoxLayout" name="tailSettingsLayout">
+                      <property name="spacing">
+                       <number>8</number>
+                      </property>
+                      <property name="leftMargin">
+                       <number>10</number>
+                      </property>
+                      <property name="topMargin">
+                       <number>8</number>
+                      </property>
+                      <property name="rightMargin">
+                       <number>10</number>
+                      </property>
+                      <property name="bottomMargin">
+                       <number>8</number>
+                      </property>
+                      <item>
+                       <widget class="QLabel" name="lblTailSettingsTitle">
+                        <property name="text">
+                         <string>尾程设置</string>
+                        </property>
+                        <property name="sectionTitle" stdset="0">
+                         <bool>true</bool>
+                        </property>
+                       </widget>
+                      </item>
+                      <item>
+                       <spacer name="tailSettingsSpacer">
+                        <property name="orientation">
+                         <enum>Qt::Orientation::Horizontal</enum>
+                        </property>
+                        <property name="sizeType">
+                         <enum>QSizePolicy::Policy::Expanding</enum>
+                        </property>
+                        <property name="sizeHint" stdset="0">
+                         <size>
+                          <width>20</width>
+                          <height>20</height>
+                         </size>
+                        </property>
+                       </spacer>
+                      </item>
+                      <item>
+                       <layout class="QVBoxLayout" name="tailSettingsAmountsLayout">
+                        <property name="spacing">
+                         <number>1</number>
+                        </property>
+                        <property name="leftMargin">
+                         <number>0</number>
+                        </property>
+                        <property name="topMargin">
+                         <number>0</number>
+                        </property>
+                        <property name="rightMargin">
+                         <number>0</number>
+                        </property>
+                        <property name="bottomMargin">
+                         <number>0</number>
+                        </property>
+                        <item>
+                         <layout class="QHBoxLayout" name="layout_spinTailFreightRmb">
+                          <property name="spacing">
+                           <number>4</number>
+                          </property>
+                          <property name="leftMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="topMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="rightMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="bottomMargin">
+                           <number>0</number>
+                          </property>
+                          <item>
+                           <widget class="QLabel" name="lblTailSettingsRmbSymbol">
+                            <property name="minimumSize">
+                             <size>
+                              <width>14</width>
+                              <height>0</height>
+                             </size>
+                            </property>
+                            <property name="text">
+                             <string>¥</string>
+                            </property>
+                            <property name="alignment">
+                             <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                            </property>
+                           </widget>
+                          </item>
+                          <item>
+                           <widget class="QDoubleSpinBox" name="spinTailFreightRmb">
+                            <property name="toolTip">
+                             <string>按当前汇率换算，仅显示</string>
+                            </property>
+                            <property name="minimumSize">
+                             <size>
+                              <width>88</width>
+                              <height>0</height>
+                             </size>
+                            </property>
+                            <property name="maximumSize">
+                             <size>
+                              <width>88</width>
+                              <height>16777215</height>
+                             </size>
+                            </property>
+                            <property name="readOnly">
+                             <bool>true</bool>
+                            </property>
+                            <property name="buttonSymbols">
+                             <enum>QAbstractSpinBox::NoButtons</enum>
+                            </property>
+                            <property name="decimals">
+                             <number>2</number>
+                            </property>
+                            <property name="minimum">
+                             <double>0.000000000000000</double>
+                            </property>
+                            <property name="maximum">
+                             <double>99999.000000000000000</double>
+                            </property>
+                            <property name="singleStep">
+                             <double>1.000000000000000</double>
+                            </property>
+                            <property name="alignment">
+                             <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                            </property>
+                            <property name="value">
+                             <double>40.000000000000000</double>
+                            </property>
+                           </widget>
+                          </item>
+                         </layout>
+                        </item>
+                        <item>
+                         <layout class="QHBoxLayout" name="layout_spinTailFreightUsd">
+                          <property name="spacing">
+                           <number>4</number>
+                          </property>
+                          <property name="leftMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="topMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="rightMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="bottomMargin">
+                           <number>0</number>
+                          </property>
+                          <item>
+                           <widget class="QLabel" name="lblTailSettingsUsdSymbol">
+                            <property name="minimumSize">
+                             <size>
+                              <width>14</width>
+                              <height>0</height>
+                             </size>
+                            </property>
+                            <property name="text">
+                             <string>$</string>
+                            </property>
+                            <property name="alignment">
+                             <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                            </property>
+                           </widget>
+                          </item>
+                          <item>
+                           <widget class="QDoubleSpinBox" name="spinTailFreightUsd">
+                            <property name="toolTip">
+                             <string>可编辑尾程费用（USD）</string>
+                            </property>
+                            <property name="minimumSize">
+                             <size>
+                              <width>88</width>
+                              <height>0</height>
+                             </size>
+                            </property>
+                            <property name="maximumSize">
+                             <size>
+                              <width>88</width>
+                              <height>16777215</height>
+                             </size>
+                            </property>
+                            <property name="buttonSymbols">
+                             <enum>QAbstractSpinBox::NoButtons</enum>
+                            </property>
+                            <property name="decimals">
+                             <number>2</number>
+                            </property>
+                            <property name="minimum">
+                             <double>0.000000000000000</double>
+                            </property>
+                            <property name="maximum">
+                             <double>9999.000000000000000</double>
+                            </property>
+                            <property name="singleStep">
+                             <double>1.000000000000000</double>
+                            </property>
+                            <property name="alignment">
+                             <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                            </property>
+                            <property name="value">
+                             <double>5.560000000000000</double>
+                            </property>
+                           </widget>
+                          </item>
+                         </layout>
+                        </item>
+                       </layout>
+                      </item>
+                     </layout>
+                    </widget>
+                   </item>
+                   <item>
+                    <widget class="QFrame" name="systemCostSection">
                    <property name="sizePolicy">
                     <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
                      <horstretch>16</horstretch>
@@ -4051,7 +4131,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                    <property name="card" stdset="0">
                     <bool>true</bool>
                    </property>
-                   <layout class="QVBoxLayout" name="systemCostLayout" stretch="0,0,0,0,0,0,0,0,1">
+                   <layout class="QVBoxLayout" name="systemCostLayout" stretch="0,0,0,0,0,0,0,0,0">
                     <property name="spacing">
                      <number>4</number>
                     </property>
@@ -4165,27 +4245,34 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                       </property>
                       <item>
                        <widget class="QLabel" name="lblSystemCostName0">
-                        <property name="minimumSize">
-                         <size>
-                          <width>64</width>
-                          <height>0</height>
-                         </size>
-                        </property>
-                        <property name="maximumSize">
-                         <size>
-                          <width>64</width>
-                          <height>16777215</height>
-                         </size>
-                        </property>
                         <property name="text">
                          <string>采购成本</string>
                         </property>
                        </widget>
                       </item>
                       <item>
+                       <spacer name="systemCostRow0Spacer">
+                        <property name="orientation">
+                         <enum>Qt::Orientation::Horizontal</enum>
+                        </property>
+                        <property name="sizeType">
+                         <enum>QSizePolicy::Policy::Expanding</enum>
+                        </property>
+                        <property name="sizeHint" stdset="0">
+                         <size>
+                          <width>20</width>
+                          <height>20</height>
+                         </size>
+                        </property>
+                       </spacer>
+                      </item>
+                      <item>
                        <widget class="QLabel" name="lblSystemCostValue0">
                         <property name="text">
                          <string>—</string>
+                        </property>
+                        <property name="alignment">
+                         <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
                         </property>
                        </widget>
                       </item>
@@ -4210,27 +4297,34 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                       </property>
                       <item>
                        <widget class="QLabel" name="lblSystemCostName1">
-                        <property name="minimumSize">
-                         <size>
-                          <width>64</width>
-                          <height>0</height>
-                         </size>
-                        </property>
-                        <property name="maximumSize">
-                         <size>
-                          <width>64</width>
-                          <height>16777215</height>
-                         </size>
-                        </property>
                         <property name="text">
                          <string>国内运费</string>
                         </property>
                        </widget>
                       </item>
                       <item>
+                       <spacer name="systemCostRow1Spacer">
+                        <property name="orientation">
+                         <enum>Qt::Orientation::Horizontal</enum>
+                        </property>
+                        <property name="sizeType">
+                         <enum>QSizePolicy::Policy::Expanding</enum>
+                        </property>
+                        <property name="sizeHint" stdset="0">
+                         <size>
+                          <width>20</width>
+                          <height>20</height>
+                         </size>
+                        </property>
+                       </spacer>
+                      </item>
+                      <item>
                        <widget class="QLabel" name="lblSystemCostValue1">
                         <property name="text">
                          <string>—</string>
+                        </property>
+                        <property name="alignment">
+                         <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
                         </property>
                        </widget>
                       </item>
@@ -4255,27 +4349,34 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                       </property>
                       <item>
                        <widget class="QLabel" name="lblSystemCostName2">
-                        <property name="minimumSize">
-                         <size>
-                          <width>64</width>
-                          <height>0</height>
-                         </size>
-                        </property>
-                        <property name="maximumSize">
-                         <size>
-                          <width>64</width>
-                          <height>16777215</height>
-                         </size>
-                        </property>
                         <property name="text">
                          <string>头程</string>
                         </property>
                        </widget>
                       </item>
                       <item>
+                       <spacer name="systemCostRow2Spacer">
+                        <property name="orientation">
+                         <enum>Qt::Orientation::Horizontal</enum>
+                        </property>
+                        <property name="sizeType">
+                         <enum>QSizePolicy::Policy::Expanding</enum>
+                        </property>
+                        <property name="sizeHint" stdset="0">
+                         <size>
+                          <width>20</width>
+                          <height>20</height>
+                         </size>
+                        </property>
+                       </spacer>
+                      </item>
+                      <item>
                        <widget class="QLabel" name="lblSystemCostValue2">
                         <property name="text">
                          <string>—</string>
+                        </property>
+                        <property name="alignment">
+                         <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
                         </property>
                        </widget>
                       </item>
@@ -4300,61 +4401,13 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                       </property>
                       <item>
                        <widget class="QLabel" name="lblSystemCostName3">
-                        <property name="minimumSize">
-                         <size>
-                          <width>64</width>
-                          <height>0</height>
-                         </size>
-                        </property>
-                        <property name="maximumSize">
-                         <size>
-                          <width>64</width>
-                          <height>16777215</height>
-                         </size>
-                        </property>
                         <property name="text">
                          <string>服务费</string>
                         </property>
                        </widget>
                       </item>
                       <item>
-                       <widget class="QLabel" name="lblSystemCostValue3">
-                        <property name="text">
-                         <string>—</string>
-                        </property>
-                       </widget>
-                      </item>
-                     </layout>
-                    </item>
-                    <item>
-                     <layout class="QHBoxLayout" name="systemCostRow4">
-                      <property name="spacing">
-                       <number>5</number>
-                      </property>
-                      <property name="leftMargin">
-                       <number>0</number>
-                      </property>
-                      <property name="topMargin">
-                       <number>0</number>
-                      </property>
-                      <property name="rightMargin">
-                       <number>0</number>
-                      </property>
-                      <property name="bottomMargin">
-                       <number>0</number>
-                      </property>
-                      <item>
-                       <widget class="QLabel" name="lblSystemCostName4">
-                        <property name="text">
-                         <string>计费重</string>
-                        </property>
-                        <property name="visible">
-                         <bool>false</bool>
-                        </property>
-                       </widget>
-                      </item>
-                      <item>
-                       <spacer name="systemCostSpacer4">
+                       <spacer name="systemCostRow3Spacer">
                         <property name="orientation">
                          <enum>Qt::Orientation::Horizontal</enum>
                         </property>
@@ -4370,12 +4423,12 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                        </spacer>
                       </item>
                       <item>
-                       <widget class="QLabel" name="lblSystemCostValue4">
+                       <widget class="QLabel" name="lblSystemCostValue3">
                         <property name="text">
-                         <string>0.750 kg</string>
+                         <string>—</string>
                         </property>
-                        <property name="visible">
-                         <bool>false</bool>
+                        <property name="alignment">
+                         <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
                         </property>
                        </widget>
                       </item>
@@ -4400,67 +4453,13 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                       </property>
                       <item>
                        <widget class="QLabel" name="lblSystemCostName6">
-                        <property name="minimumSize">
-                         <size>
-                          <width>64</width>
-                          <height>0</height>
-                         </size>
-                        </property>
-                        <property name="maximumSize">
-                         <size>
-                          <width>64</width>
-                          <height>16777215</height>
-                         </size>
-                        </property>
                         <property name="text">
                          <string>尾程</string>
                         </property>
                        </widget>
                       </item>
                       <item>
-                       <widget class="QLabel" name="lblSystemCostValue6">
-                        <property name="text">
-                         <string>¥40.00</string>
-                        </property>
-                        <property name="toolTip">
-                         <string>尾程费用单独显示，并已计入物流总价和系统总成本</string>
-                        </property>
-                        <property name="visible">
-                         <bool>false</bool>
-                        </property>
-                       </widget>
-                      </item>
-                     </layout>
-                    </item>
-                    <item>
-                     <layout class="QHBoxLayout" name="systemCostRow5">
-                      <property name="spacing">
-                       <number>5</number>
-                      </property>
-                      <property name="leftMargin">
-                       <number>0</number>
-                      </property>
-                      <property name="topMargin">
-                       <number>0</number>
-                      </property>
-                      <property name="rightMargin">
-                       <number>0</number>
-                      </property>
-                      <property name="bottomMargin">
-                       <number>0</number>
-                      </property>
-                      <item>
-                       <widget class="QLabel" name="lblSystemCostName5">
-                        <property name="text">
-                         <string>物流总价</string>
-                        </property>
-                        <property name="visible">
-                         <bool>false</bool>
-                        </property>
-                       </widget>
-                      </item>
-                      <item>
-                       <spacer name="systemCostSpacer5">
+                       <spacer name="systemCostRow6Spacer">
                         <property name="orientation">
                          <enum>Qt::Orientation::Horizontal</enum>
                         </property>
@@ -4476,12 +4475,15 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                        </spacer>
                       </item>
                       <item>
-                       <widget class="QLabel" name="lblSystemCostValue5">
+                       <widget class="QLabel" name="lblSystemCostValue6">
                         <property name="text">
-                         <string>¥110.00</string>
+                         <string>¥40.00</string>
                         </property>
-                        <property name="visible">
-                         <bool>false</bool>
+                        <property name="toolTip">
+                         <string>尾程费用单独显示，并已计入物流总价和系统总成本</string>
+                        </property>
+                        <property name="alignment">
+                         <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
                         </property>
                        </widget>
                       </item>
@@ -4503,7 +4505,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                         <number>0</number>
                        </property>
                        <property name="topMargin">
-                        <number>2</number>
+                        <number>8</number>
                        </property>
                        <property name="rightMargin">
                         <number>0</number>
@@ -4511,54 +4513,74 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                        <property name="bottomMargin">
                         <number>0</number>
                        </property>
-                       <item>
-                        <widget class="QLabel" name="lblSystemTotalName">
-                         <property name="minimumSize">
-                          <size>
-                           <width>64</width>
-                           <height>0</height>
-                          </size>
-                         </property>
-                         <property name="maximumSize">
-                          <size>
-                           <width>64</width>
-                           <height>16777215</height>
-                          </size>
-                         </property>
-                         <property name="text">
-                          <string>总成本</string>
+                      <item>
+                       <widget class="QLabel" name="lblSystemTotalName">
+                        <property name="text">
+                         <string>总成本</string>
                          </property>
                          <property name="totalBold" stdset="0">
                           <bool>true</bool>
                          </property>
-                        </widget>
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="lblSystemTotalRmb">
-                         <property name="sizePolicy">
-                          <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-                           <horstretch>0</horstretch>
-                           <verstretch>0</verstretch>
-                          </sizepolicy>
-                         </property>
-                         <property name="text">
-                          <string>—</string>
-                         </property>
-                         <property name="totalBold" stdset="0">
-                          <bool>true</bool>
-                         </property>
-                        </widget>
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="lblSystemTotalUsd">
-                         <property name="text">
-                          <string>$18.58 USD</string>
-                         </property>
-                         <property name="visible">
-                          <bool>false</bool>
-                         </property>
-                        </widget>
-                       </item>
+                       </widget>
+                      </item>
+                      <item>
+                       <spacer name="systemTotalSpacer">
+                        <property name="orientation">
+                         <enum>Qt::Orientation::Horizontal</enum>
+                        </property>
+                        <property name="sizeType">
+                         <enum>QSizePolicy::Policy::Expanding</enum>
+                        </property>
+                        <property name="sizeHint" stdset="0">
+                         <size>
+                          <width>20</width>
+                          <height>20</height>
+                         </size>
+                        </property>
+                       </spacer>
+                      </item>
+                      <item>
+                       <layout class="QVBoxLayout" name="systemTotalAmountsLayout">
+                        <property name="spacing">
+                         <number>0</number>
+                        </property>
+                        <property name="leftMargin">
+                         <number>0</number>
+                        </property>
+                        <property name="topMargin">
+                         <number>0</number>
+                        </property>
+                        <property name="rightMargin">
+                         <number>0</number>
+                        </property>
+                        <property name="bottomMargin">
+                         <number>0</number>
+                        </property>
+                        <item>
+                         <widget class="QLabel" name="lblSystemTotalRmb">
+                          <property name="text">
+                           <string>—</string>
+                          </property>
+                          <property name="alignment">
+                           <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                          </property>
+                          <property name="totalBold" stdset="0">
+                           <bool>true</bool>
+                          </property>
+                         </widget>
+                        </item>
+                        <item>
+                         <widget class="QLabel" name="lblSystemTotalUsd">
+                          <property name="text">
+                           <string>$18.58</string>
+                          </property>
+                          <property name="alignment">
+                           <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                          </property>
+                         </widget>
+                        </item>
+                       </layout>
+                      </item>
                       </layout>
                      </widget>
                     </item>
@@ -4567,8 +4589,10 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                  </item>
                 </layout>
                </item>
-               <item>
-                <widget class="QFrame" name="profitSection">
+              </layout>
+             </item>
+             <item>
+              <widget class="QFrame" name="profitSection">
                  <property name="card" stdset="0">
                   <bool>true</bool>
                  </property>
