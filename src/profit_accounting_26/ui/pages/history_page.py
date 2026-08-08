@@ -1,3 +1,14 @@
+"""历史页：单一大表格（8 个视觉列），全部读取保存时的快照，不重新计算。
+
+列（从左到右）：序号 / 图片 / 名称 / 成本 / 售价 / 利润 / 包装数据 / 校准内容。
+- 序号仅用于查看排序，不是 record_id；
+- 图片单元格固定显示两个缩略图，第二张缺失时显示等尺寸占位框；
+- 名称下方显示原始商品链接（只读、无边框，可光标移动查看完整 URL）；
+- 校准内容区分“用户主观修正（待实测）”与“真实发货实测（已校准）”。
+
+删除只做软删除（status=archived）：不删除图片、不物理删除、不新增 schema。
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,14 +17,11 @@ from typing import Any
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QScrollArea,
-    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -21,31 +29,55 @@ from PySide6.QtWidgets import (
 )
 
 from profit_accounting_26.application import AppContext
-from profit_accounting_26.application.data_contracts import HistoryRecordV2, record_from_payload
+from profit_accounting_26.application.data_contracts import record_from_payload
 from profit_accounting_26.application.profit_scenario_codec import extract_profit_scenarios
 from profit_accounting_26.ui.pages.calibration_feedback_dialog import CalibrationFeedbackDialog
 from profit_accounting_26.ui.widgets import Card, ImagePreviewDialog, SectionHeader
 
-_THUMB_COLUMN_WIDTH = 64
-_ROW_HEIGHT = 56
+_THUMB_SIZE = 48
+_ROW_HEIGHT = 76
 _PLACEHOLDER_COLOR = QColor("#E7ECF3")
+_RECORD_ID_ROLE = 256
 
-_STRUCTURE_CN = (
-    ("can_fold", "可以折叠"),
-    ("can_compress", "可以压缩"),
-    ("can_coil", "可以缠绕"),
-    ("can_disassemble", "可以拆开"),
-    ("requires_shape_retention", "需要保形"),
+# 轻量本地近义词组：输入组内任一词可命中同组其他名称。需要扩充时直接维护这里。
+_SYNONYM_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("挂绳", "手机绳", "腕带", "手机链", "挂饰", "挂件", "包挂"),
+    ("袜子", "袜", "短袜", "长袜", "五指袜"),
+    ("胸针", "别针", "徽章"),
+    ("钥匙扣", "钥匙链", "钥匙圈"),
+    ("镜子", "化妆镜", "随身镜", "梳妆镜"),
+    ("手套", "半指手套", "健身手套"),
+    ("帽子", "帽", "鸭舌帽", "针织帽"),
+    ("钱包", "零钱包", "卡包", "长钱包"),
+    ("腰带", "皮带", "裤带"),
+    ("扇子", "折扇", "团扇"),
+    ("项链", "锁骨链", "吊坠"),
+    ("手链", "手串", "手镯"),
+    ("耳环", "耳钉", "耳饰"),
+    ("戒指", "指环"),
+    ("发夹", "发箍", "发饰", "发绳"),
 )
 
 
-def _placeholder_icon(size: int = 48) -> QIcon:
+def expand_search_terms(query: str) -> list[str]:
+    """把查询词扩展为本地近义词集合（包含匹配，命中组内任一词即返回整组）。"""
+    text = query.strip().lower()
+    if not text:
+        return []
+    terms = {text}
+    for group in _SYNONYM_GROUPS:
+        if any(text == term or text in term or term in text for term in group):
+            terms.update(group)
+    return sorted(terms)
+
+
+def _placeholder_icon(size: int = _THUMB_SIZE) -> QIcon:
     pixmap = QPixmap(size, size)
     pixmap.fill(_PLACEHOLDER_COLOR)
     return QIcon(pixmap)
 
 
-def _icon_from_path(path: Path | None, size: int = 48) -> QIcon:
+def _icon_from_path(path: Path | None, size: int = _THUMB_SIZE) -> QIcon:
     if path is None or not path.is_file():
         return _placeholder_icon(size)
     pixmap = QPixmap(str(path))
@@ -61,46 +93,63 @@ def _icon_from_path(path: Path | None, size: int = 48) -> QIcon:
     )
 
 
-def _fmt_money(value: Any) -> str:
+def _num(value: Any) -> float | None:
     try:
-        return f"¥{float(value):.2f}"
+        return float(value)
     except (TypeError, ValueError):
+        return None
+
+
+def _fmt(value: Any) -> str:
+    number = _num(value)
+    if number is None:
         return "—"
+    return f"{number:g}"
 
 
-def _fmt_dimensions(values: dict[str, Any]) -> str:
-    parts = [values.get(key) for key in ("length_cm", "width_cm", "height_cm")]
-    if not any(value is not None for value in parts):
+def _fmt_usd(value: Any) -> str:
+    number = _num(value)
+    if number is None:
         return "—"
-    text = "×".join(str(float(value)) if value is not None else "?" for value in parts)
-    return f"{text} cm"
+    return f"${number:.2f}"
 
 
-def _fmt_weight(value: Any) -> str:
-    if value is None:
+def _fmt_rmb(value: Any) -> str:
+    number = _num(value)
+    if number is None:
         return "—"
-    return f"{float(value)} g"
+    return f"¥{number:.2f}"
 
 
-def _rate_text(value: Any, *, legacy_percent: bool) -> str:
-    if value is None:
+def _fmt_percent(value: Any, *, legacy_percent: bool) -> str:
+    number = _num(value)
+    if number is None:
         return "—"
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
+    return f"{number:.2f}%" if legacy_percent else f"{number * 100:.2f}%"
+
+
+def _dims_text(raw: dict[str, Any] | None) -> str:
+    """格式：L×W×H / 重量g；完全缺失返回 —。"""
+    if not isinstance(raw, dict):
         return "—"
-    if legacy_percent:
-        return f"{number:.2f}%"
-    return f"{number * 100:.2f}%"
+    parts = [_fmt(raw.get("length_cm")), _fmt(raw.get("width_cm")), _fmt(raw.get("height_cm"))]
+    weight = raw.get("weight_g")
+    if all(part == "—" for part in parts) and _num(weight) is None:
+        return "—"
+    dims = "×".join(parts)
+    return f"{dims} / {_fmt(weight)}g" if _num(weight) is not None else dims
 
 
 class HistoryPage(QWidget):
     recordRequested = Signal(str)
 
+    COLUMN_COUNT = 8
+    COLUMN_HEADERS = ("序号", "图片", "名称", "成本", "售价", "利润", "包装数据", "校准内容")
+
     def __init__(self, context: AppContext, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.context = context
-        self._detail_values: dict[str, QLabel] = {}
+        self.records: list[dict[str, Any]] = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 18)
         layout.setSpacing(12)
@@ -109,102 +158,285 @@ class HistoryPage(QWidget):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(14, 12, 14, 12)
         card_layout.setSpacing(10)
-        header = SectionHeader("历史记录管理", "查看历史记录、首次 AI 判断与校准反馈")
+        header = SectionHeader("历史记录管理", "裸品 → AI估算 → 当前采用 → 保存 → 实际校准")
+
         self.search = QLineEdit()
-        self.search.setPlaceholderText("按商品名称、记录ID或状态搜索")
-        self.search.setFixedWidth(260)
+        self.search.setPlaceholderText("搜索商品……")
+        self.search.setFixedWidth(240)
+        self.search.setFixedHeight(32)
         self.search.returnPressed.connect(self.refresh)
+        self.search.textChanged.connect(lambda _text: self.refresh())
         refresh = QPushButton("刷新")
-        feedback_button = QPushButton("录入反馈")
-        open_button = QPushButton("返回测算页编辑")
-        open_button.setProperty("primary", True)
-        for button in (refresh, feedback_button, open_button):
+        self.open_button = QPushButton("返回测算页编辑")
+        self.open_button.setProperty("primary", True)
+        self.calibrate_button = QPushButton("实际校准")
+        self.delete_button = QPushButton("删除")
+        for button in (refresh, self.open_button, self.calibrate_button, self.delete_button):
             button.setFixedHeight(32)
         refresh.clicked.connect(self.refresh)
-        feedback_button.clicked.connect(self._open_feedback_dialog)
-        open_button.clicked.connect(self.open_selected)
+        self.open_button.clicked.connect(self.open_selected)
+        self.calibrate_button.clicked.connect(self._open_calibration_dialog)
+        self.delete_button.clicked.connect(self._archive_selected)
         header.right_layout.addWidget(self.search)
         header.right_layout.addWidget(refresh)
-        header.right_layout.addWidget(feedback_button)
-        header.right_layout.addWidget(open_button)
+        header.right_layout.addWidget(self.open_button)
+        header.right_layout.addWidget(self.calibrate_button)
+        header.right_layout.addWidget(self.delete_button)
         card_layout.addWidget(header)
 
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(
-            ["缩略图", "商品名称", "更新时间", "当前包装", "利润", "反馈状态"]
-        )
-        self.table.setColumnWidth(0, _THUMB_COLUMN_WIDTH)
-        self.table.setColumnWidth(1, 230)
-        self.table.setColumnWidth(2, 170)
-        self.table.setColumnWidth(3, 150)
-        self.table.setColumnWidth(4, 110)
+        self.table = QTableWidget(0, self.COLUMN_COUNT)
+        self.table.setHorizontalHeaderLabels(list(self.COLUMN_HEADERS))
+        self.table.setColumnWidth(0, 52)
+        self.table.setColumnWidth(1, _THUMB_SIZE * 2 + 24)
+        self.table.setColumnWidth(2, 240)
+        self.table.setColumnWidth(3, 250)
+        self.table.setColumnWidth(4, 130)
+        self.table.setColumnWidth(5, 170)
+        self.table.setColumnWidth(6, 180)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(_ROW_HEIGHT)
         self.table.setAlternatingRowColors(True)
-        self.table.itemSelectionChanged.connect(self.show_details)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.itemSelectionChanged.connect(self._update_action_states)
         self.table.cellDoubleClicked.connect(lambda _row, _col: self.open_selected())
         card_layout.addWidget(self.table)
-        layout.addWidget(card, 3)
-
-        details_card = Card()
-        details_layout = QVBoxLayout(details_card)
-        details_layout.setContentsMargins(14, 12, 14, 12)
-        details_layout.setSpacing(8)
-        details_layout.addWidget(SectionHeader("记录详情", "结构化只读详情"))
-        self.details_scroll = QScrollArea()
-        self.details_scroll.setWidgetResizable(True)
-        self.details_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.details_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.details_body = QWidget()
-        self.details_body_layout = QVBoxLayout(self.details_body)
-        self.details_body_layout.setContentsMargins(0, 0, 0, 0)
-        self.details_body_layout.setSpacing(8)
-        self.details_scroll.setWidget(self.details_body)
-        details_layout.addWidget(self.details_scroll)
-        layout.addWidget(details_card, 2)
+        layout.addWidget(card, 1)
+        self._update_action_states()
         self.refresh()
 
     # ---------------------------------------------------------------- list
 
     def refresh(self) -> None:
-        self.records = self.context.record_service.list(search=self.search.text())
+        payloads = self.context.record_service.list()
+        terms = expand_search_terms(self.search.text())
+        self.records = [
+            payload
+            for payload in payloads
+            if str(payload.get("status") or "active") != "archived"
+            and self._matches(payload, terms)
+        ]
         self.table.setRowCount(0)
         for payload in self.records:
-            v2 = record_from_payload(payload)
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            thumb = QTableWidgetItem()
-            thumb.setIcon(self._record_icon(v2))
-            thumb.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            thumb.setData(256, v2.record_id)
-            self.table.setItem(row, 0, thumb)
-            self.table.setItem(row, 1, QTableWidgetItem(v2.product_name or "未命名商品"))
-            self.table.setItem(row, 2, QTableWidgetItem(v2.updated_at or ""))
-            self.table.setItem(row, 3, QTableWidgetItem(self._packaging_text(v2)))
-            self.table.setItem(row, 4, QTableWidgetItem(self._profit_text(payload)))
-            self.table.setItem(row, 5, QTableWidgetItem(self._feedback_status(v2)))
+            self._append_row(payload)
+        self._update_action_states()
         if self.records:
             self.table.selectRow(0)
+
+    @staticmethod
+    def _matches(payload: dict[str, Any], terms: list[str]) -> bool:
+        if not terms:
+            return True
+        haystack = " ".join(
+            (
+                str(payload.get("product_name") or ""),
+                str(payload.get("product_link") or ""),
+                str(payload.get("id") or ""),
+            )
+        ).lower()
+        return any(term in haystack for term in terms)
+
+    def _append_row(self, payload: dict[str, Any]) -> None:
+        record_id = str(payload.get("id") or "")
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        anchor = QTableWidgetItem(str(row + 1))
+        anchor.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        anchor.setData(_RECORD_ID_ROLE, record_id)
+        self.table.setItem(row, 0, anchor)
+        self.table.setCellWidget(row, 1, self._build_image_cell(payload))
+        self.table.setCellWidget(row, 2, self._build_name_cell(payload))
+        self.table.setCellWidget(row, 3, self._multiline_cell(self._cost_text(payload)))
+        self.table.setCellWidget(row, 4, self._multiline_cell(self._price_text(payload)))
+        self.table.setCellWidget(row, 5, self._multiline_cell(self._profit_text(payload)))
+        self.table.setCellWidget(row, 6, self._multiline_cell(self._packaging_text(payload)))
+        self.table.setCellWidget(row, 7, self._multiline_cell(self._calibration_text(payload)))
+
+    @staticmethod
+    def _multiline_cell(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        label.setContentsMargins(6, 4, 6, 4)
+        return label
+
+    # ---------------------------------------------------------------- cells
+
+    def _build_image_cell(self, payload: dict[str, Any]) -> QWidget:
+        container = QWidget()
+        row_layout = QHBoxLayout(container)
+        row_layout.setContentsMargins(6, 4, 6, 4)
+        row_layout.setSpacing(6)
+        images = [item for item in (payload.get("images") or []) if isinstance(item, dict)]
+        images.sort(key=lambda item: item.get("order", 0))
+        # 固定两个缩略图位置：第二张缺失时显示等尺寸占位框，保持所有行对齐
+        for index in range(2):
+            item = images[index] if index < len(images) else None
+            button = QPushButton()
+            button.setFixedSize(_THUMB_SIZE, _THUMB_SIZE)
+            button.setIconSize(QSize(_THUMB_SIZE - 8, _THUMB_SIZE - 8))
+            original = self._image_path(item, prefer_thumbnail=False) if item else None
+            thumbnail = self._image_path(item, prefer_thumbnail=True) if item else None
+            if original is None and thumbnail is None:
+                button.setIcon(_placeholder_icon(_THUMB_SIZE - 8))
+            else:
+                button.setIcon(_icon_from_path(thumbnail or original, _THUMB_SIZE - 8))
+                target = original or thumbnail
+                button.clicked.connect(
+                    lambda _checked=False, path=target: ImagePreviewDialog(path, self).exec()
+                )
+            row_layout.addWidget(button)
+        row_layout.addStretch(1)
+        return container
+
+    def _build_name_cell(self, payload: dict[str, Any]) -> QWidget:
+        container = QWidget()
+        column = QVBoxLayout(container)
+        column.setContentsMargins(6, 4, 6, 4)
+        column.setSpacing(2)
+        name = str(payload.get("product_name") or "未命名商品")
+        name_label = QLabel(name)
+        name_label.setWordWrap(False)
+        column.addWidget(name_label)
+        link = str(payload.get("product_link") or "").strip()
+        if link:
+            link_edit = QLineEdit(link)
+            link_edit.setReadOnly(True)
+            link_edit.setFrame(False)
+            link_edit.setProperty("muted", True)
+            link_edit.setFixedHeight(20)
+            link_edit.setToolTip(link)
+            column.addWidget(link_edit)
+        else:
+            placeholder = QLabel("—")
+            placeholder.setProperty("muted", True)
+            column.addWidget(placeholder)
+        return container
+
+    # ---------------------------------------------------------------- texts
+
+    def _cost_text(self, payload: dict[str, Any]) -> str:
+        """成本四行全部读取保存快照；历史页不重新计算旧记录。"""
+        layers = payload.get("layers") if isinstance(payload.get("layers"), dict) else {}
+        calculated = layers.get("calculated") if isinstance(layers.get("calculated"), dict) else {}
+        quote = calculated.get("logistics_quote") if isinstance(calculated.get("logistics_quote"), dict) else {}
+        forwarder_name = str(calculated.get("forwarder_name") or "").strip()
+        total = _fmt_rmb(calculated.get("system_cost_rmb"))
+        domestic = f"{_fmt_rmb(payload.get('product_cost_rmb'))} + {_fmt_rmb(payload.get('domestic_shipping_rmb'))}"
+        if quote and forwarder_name:
+            first_mile = f"{forwarder_name}  {_fmt_rmb(quote.get('weight_fee_rmb'))} + {_fmt_rmb(quote.get('fixed_fee_rmb'))}"
+        else:
+            first_mile = "—"
+        tail_rmb = _num(quote.get("tail_fee_rmb")) if quote else None
+        rate = _num(calculated.get("exchange_rate"))
+        if tail_rmb is None:
+            tail = "—"
+        elif rate:
+            tail = f"${tail_rmb / rate:.2f} / ¥{tail_rmb:.2f}"
+        else:
+            tail = f"— / ¥{tail_rmb:.2f}"
+        return f"总成本    {total}\n国内成本  {domestic}\n头程      {first_mile}\n尾程      {tail}"
+
+    def _price_text(self, payload: dict[str, Any]) -> str:
+        scenarios = extract_profit_scenarios(payload) or {}
+        no_activity = scenarios.get("no_activity") or {}
+        activity = scenarios.get("activity") or {}
+        quote_usd = _fmt_usd(payload.get("shein_quote_usd"))
+        return (
+            f"核价      {quote_usd}\n"
+            f"标价      {_fmt_usd(no_activity.get('sale_price_usd'))}\n"
+            f"活动后    {_fmt_usd(activity.get('sale_price_usd'))}"
+        )
+
+    def _profit_text(self, payload: dict[str, Any]) -> str:
+        scenarios = extract_profit_scenarios(payload) or {}
+        legacy = bool(scenarios.get("_legacy_compatible") or scenarios.get("legacy_compatible"))
+        no_activity = scenarios.get("no_activity") or {}
+        activity = scenarios.get("activity") or {}
+        layers = payload.get("layers") if isinstance(payload.get("layers"), dict) else {}
+        calculated = layers.get("calculated") if isinstance(layers.get("calculated"), dict) else {}
+        normal_rate = no_activity.get("profit_rate_on_cost")
+        if normal_rate is None:
+            normal_rate_text = _fmt_percent(calculated.get("profit_rate_percent"), legacy_percent=True)
+        else:
+            normal_rate_text = _fmt_percent(normal_rate, legacy_percent=legacy)
+        normal = f"{_fmt_rmb(no_activity.get('profit_rmb'))} / {normal_rate_text}"
+        if activity:
+            activity_text = (
+                f"{_fmt_rmb(activity.get('profit_rmb'))} / "
+                f"{_fmt_percent(activity.get('profit_rate_on_cost'), legacy_percent=legacy)}"
+            )
+        else:
+            activity_text = "—"
+        return f"普通      {normal}\n活动      {activity_text}"
+
+    def _packaging_text(self, payload: dict[str, Any]) -> str:
+        layers = payload.get("layers") if isinstance(payload.get("layers"), dict) else {}
+        adopted = layers.get("adopted") if isinstance(layers.get("adopted"), dict) else {}
+        bare = _dims_text(adopted.get("bare"))
+        v2 = record_from_payload(payload)
+        ai_text = "—"
+        ai_initial = v2.ai_initial
+        # 旧记录没有 ai_initial 时安全 fallback，不伪造第一次 AI 数据
+        if isinstance(ai_initial, dict) and "legacy_layers_ai_raw" not in ai_initial:
+            adopted_packaging = ai_initial.get("adopted_packaging")
+            if isinstance(adopted_packaging, dict):
+                ai_text = _dims_text(adopted_packaging.get("normal"))
+        current = _dims_text(v2.current_estimate)
+        return f"裸品    {bare}\nAI      {ai_text}\n当前    {current}"
+
+    def _calibration_text(self, payload: dict[str, Any]) -> str:
+        v2 = record_from_payload(payload)
+        if not v2.calibration_feedback_id:
+            return "未校准"
+        try:
+            feedback = self.context.calibration_feedback_service.load(v2.calibration_feedback_id)
+        except KeyError:
+            return "未校准"
+        note = str(feedback.user_note or "").strip().replace("\n", " ")
+        note_summary = note[:40] if note else ""
+        actual = feedback.actual_logistics
+        if actual is not None and actual.has_content():
+            actual_text = _dims_text(
+                {
+                    **(actual.actual_package_dimensions or {}),
+                    "weight_g": actual.actual_package_weight_g,
+                }
+            )
+            lines = ["已校准", f"实际 {actual_text}"]
+            if note_summary:
+                lines.append(note_summary)
+            return "\n".join(lines)
+        lines = ["已修正·待实测"]
+        if note_summary:
+            lines.append(note_summary)
+        return "\n".join(lines)
+
+    # ---------------------------------------------------------------- actions
 
     def selected_record_id(self) -> str | None:
         row = self.table.currentRow()
         if row < 0:
             return None
         item = self.table.item(row, 0)
-        return str(item.data(256)) if item and item.data(256) else None
+        return str(item.data(_RECORD_ID_ROLE)) if item and item.data(_RECORD_ID_ROLE) else None
+
+    def _update_action_states(self) -> None:
+        enabled = self.selected_record_id() is not None
+        self.open_button.setEnabled(enabled)
+        self.calibrate_button.setEnabled(enabled)
+        self.delete_button.setEnabled(enabled)
 
     def open_selected(self) -> None:
         record_id = self.selected_record_id()
         if not record_id:
-            QMessageBox.information(self, "未选择", "请先选择一条记录。")
             return
         self.recordRequested.emit(record_id)
 
-    def _open_feedback_dialog(self) -> None:
+    def _open_calibration_dialog(self) -> None:
         record_id = self.selected_record_id()
         if not record_id:
-            QMessageBox.information(self, "未选择", "请先选择一条记录。")
             return
         feedback = None
         v2 = self.context.history_record_v2_service.load_v2(record_id)
@@ -216,182 +448,26 @@ class HistoryPage(QWidget):
         dialog = CalibrationFeedbackDialog(self.context, record_id, feedback=feedback, parent=self)
         if dialog.exec():
             self.refresh()
-            self.show_details()
 
-    # ---------------------------------------------------------------- details
-
-    def show_details(self) -> None:
+    def _archive_selected(self) -> None:
+        """软删除：只把 status 置为 archived；不删除图片、不物理删除。"""
         record_id = self.selected_record_id()
-        self._clear_details()
         if not record_id:
             return
+        answer = QMessageBox.question(
+            self,
+            "删除记录",
+            "删除后该记录将从历史列表隐藏（可随时恢复，图片保留）。确定删除吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
         payload = self.context.record_service.load(record_id)
-        v2 = record_from_payload(payload)
-        columns = QHBoxLayout()
-        columns.setContentsMargins(0, 0, 0, 0)
-        columns.setSpacing(10)
-        left = self._build_column()
-        right = self._build_column()
-        self._add_product_section(left, v2)
-        self._add_images_section(left, v2)
-        self._add_current_estimate_section(left, v2)
-        self._add_ai_section(right, v2)
-        self._add_profit_section(right, payload)
-        self._add_feedback_section(right, v2)
-        columns.addWidget(left, 1)
-        columns.addWidget(right, 1)
-        self.details_body_layout.addLayout(columns)
-        self.details_body_layout.addStretch(1)
-
-    def _clear_details(self) -> None:
-        self._detail_values.clear()
-        while self.details_body_layout.count():
-            item = self.details_body_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-            layout = item.layout()
-            if layout is not None:
-                while layout.count():
-                    child = layout.takeAt(0)
-                    child_widget = child.widget()
-                    if child_widget is not None:
-                        child_widget.deleteLater()
-
-    def _build_column(self) -> QWidget:
-        column = QWidget()
-        column_layout = QVBoxLayout(column)
-        column_layout.setContentsMargins(0, 0, 0, 0)
-        column_layout.setSpacing(6)
-        column.setProperty("columnLayout", column_layout)
-        return column
-
-    def _add_section(self, column: QWidget, title: str, subtitle: str = "") -> QFormLayout:
-        layout: QVBoxLayout = column.property("columnLayout")
-        layout.addWidget(SectionHeader(title, subtitle))
-        form = QFormLayout()
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setHorizontalSpacing(16)
-        form.setVerticalSpacing(2)
-        layout.addLayout(form)
-        return form
-
-    def _add_row(self, form: QFormLayout, key: str, label: str, value: str) -> None:
-        label_widget = QLabel(label)
-        label_widget.setProperty("muted", True)
-        value_widget = QLabel(value)
-        value_widget.setWordWrap(True)
-        value_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        form.addRow(label_widget, value_widget)
-        self._detail_values[key] = value_widget
-
-    def _add_product_section(self, column: QWidget, v2: HistoryRecordV2) -> None:
-        form = self._add_section(column, "商品")
-        self._add_row(form, "product_name", "商品名称", v2.product_name or "—")
-        self._add_row(form, "product_link", "商品链接", v2.product_link or "—")
-        self._add_row(form, "created_at", "创建时间", v2.created_at or "—")
-        self._add_row(form, "updated_at", "更新时间", v2.updated_at or "—")
-        self._add_row(form, "revision", "revision", str(v2.revision))
-
-    def _add_images_section(self, column: QWidget, v2: HistoryRecordV2) -> None:
-        layout: QVBoxLayout = column.property("columnLayout")
-        layout.addWidget(SectionHeader("图片", "点击缩略图查看原图"))
-        row_layout = QHBoxLayout()
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(6)
-        images = [item for item in (v2.images or []) if isinstance(item, dict)]
-        images.sort(key=lambda item: item.get("order", 0))
-        if not images:
-            row_layout.addWidget(QLabel("无图片"))
-        for item in images:
-            original = self._image_path(item, prefer_thumbnail=False)
-            thumbnail = self._image_path(item, prefer_thumbnail=True)
-            button = QPushButton()
-            button.setFixedSize(64, 64)
-            button.setIconSize(QSize(56, 56))
-            if original is None and thumbnail is None:
-                button.setIcon(_placeholder_icon(56))
-                button.setEnabled(False)
-            else:
-                button.setIcon(_icon_from_path(thumbnail or original, 56))
-                target = original or thumbnail
-                button.clicked.connect(lambda _checked=False, path=target: ImagePreviewDialog(path, self).exec())
-            row_layout.addWidget(button)
-        row_layout.addStretch(1)
-        layout.addLayout(row_layout)
-
-    def _add_ai_section(self, column: QWidget, v2: HistoryRecordV2) -> None:
-        form = self._add_section(column, "第一次 AI 判断")
-        ai = v2.ai_initial
-        if ai is None or "legacy_layers_ai_raw" in ai:
-            self._add_row(form, "ai_note", "说明", "旧记录：首次 AI 结果不可完整追溯")
-            fallback = self._legacy_ai_fallback(ai)
-            if fallback:
-                self._add_row(form, "ai_fallback", "可获得的旧信息", fallback)
-            return
-        observation = ai.get("observation") if isinstance(ai.get("observation"), dict) else {}
-        self._add_row(form, "ai_model", "模型", str(ai.get("model") or ai.get("provider") or "—"))
-        self._add_row(form, "ai_summary", "商品/结构摘要", self._observation_summary(observation))
-        self._add_row(form, "ai_bare_spec", "裸品尺寸重量", self._bare_spec_text(observation))
-        self._add_row(form, "ai_packaging", "包装判断", self._ai_packaging_text(ai))
-
-    def _add_current_estimate_section(self, column: QWidget, v2: HistoryRecordV2) -> None:
-        form = self._add_section(column, "当前采用估算")
-        estimate = v2.current_estimate or {}
-        self._add_row(
-            form, "est_method", "包装方式",
-            str(estimate.get("packaging_method") or "—"),
-        )
-        self._add_row(form, "est_dims", "长宽高", _fmt_dimensions(estimate))
-        self._add_row(form, "est_weight", "重量", _fmt_weight(estimate.get("weight_g")))
-        self._add_row(
-            form, "est_tier", "当前采用档",
-            str(estimate.get("selected_packaging") or "—"),
-        )
-
-    def _add_profit_section(self, column: QWidget, payload: dict[str, Any]) -> None:
-        form = self._add_section(column, "利润快照", "只读保存值，不重新计算")
-        scenarios = extract_profit_scenarios(payload) or {}
-        legacy = bool(
-            scenarios.get("_legacy_compatible") or scenarios.get("legacy_compatible")
-        )
-        no_activity = scenarios.get("no_activity") or {}
-        activity = scenarios.get("activity") or {}
-        calculated = {}
-        layers = payload.get("layers")
-        if isinstance(layers, dict):
-            calculated = layers.get("calculated") or {}
-        self._add_row(form, "profit_no_activity", "无活动利润", _fmt_money(no_activity.get("profit_rmb")))
-        no_rate = no_activity.get("profit_rate_on_cost")
-        if no_rate is None:
-            no_rate = calculated.get("profit_rate_percent")
-            self._add_row(form, "profit_no_activity_rate", "无活动利润率", _rate_text(no_rate, legacy_percent=True))
-        else:
-            self._add_row(form, "profit_no_activity_rate", "无活动利润率", _rate_text(no_rate, legacy_percent=legacy))
-        self._add_row(form, "profit_activity", "活动场景利润", _fmt_money(activity.get("profit_rmb")))
-        self._add_row(
-            form, "profit_activity_rate", "活动场景利润率",
-            _rate_text(activity.get("profit_rate_on_cost"), legacy_percent=legacy),
-        )
-        hint = self._subsidy_hint(activity)
-        if hint:
-            self._add_row(form, "profit_hint", "活动/补贴", hint)
-
-    def _add_feedback_section(self, column: QWidget, v2: HistoryRecordV2) -> None:
-        form = self._add_section(column, "用户反馈")
-        status = self._feedback_status(v2)
-        self._add_row(form, "feedback_status", "状态", status)
-        if not v2.calibration_feedback_id:
-            self._add_row(form, "feedback_summary", "内容摘要", "—")
-            return
-        try:
-            feedback = self.context.calibration_feedback_service.load(v2.calibration_feedback_id)
-        except KeyError:
-            self._add_row(form, "feedback_summary", "内容摘要", "已关联反馈，但数据缺失")
-            return
-        summary = self._feedback_summary(feedback)
-        self._add_row(form, "feedback_summary", "内容摘要", summary)
-        self._add_row(form, "feedback_note", "备注", feedback.user_note or "—")
+        payload["status"] = "archived"
+        self.context.store.update_record(record_id, payload, snapshot_kind="archive")
+        self.context.diagnostic_logger.event("record_archived", record_id=record_id)
+        self.refresh()
 
     # ---------------------------------------------------------------- helpers
 
@@ -403,144 +479,3 @@ class HistoryPage(QWidget):
             return None
         path = self.context.paths.data_dir / key
         return path if path.is_file() else None
-
-    def _record_icon(self, v2: HistoryRecordV2) -> QIcon:
-        for item in (v2.images or []):
-            if not isinstance(item, dict):
-                continue
-            path = self._image_path(item, prefer_thumbnail=True) or self._image_path(item, prefer_thumbnail=False)
-            if path is not None:
-                return _icon_from_path(path, 44)
-        return _placeholder_icon(44)
-
-    def _packaging_text(self, v2: HistoryRecordV2) -> str:
-        estimate = v2.current_estimate or {}
-        method = str(estimate.get("packaging_method") or "")
-        dims = _fmt_dimensions(estimate)
-        if method and dims != "—":
-            return f"{method} {dims}"
-        return method or dims
-
-    def _profit_text(self, payload: dict[str, Any]) -> str:
-        scenarios = extract_profit_scenarios(payload) or {}
-        no_activity = scenarios.get("no_activity") or {}
-        return _fmt_money(no_activity.get("profit_rmb"))
-
-    def _feedback_status(self, v2: HistoryRecordV2) -> str:
-        if not v2.calibration_feedback_id:
-            return "未反馈"
-        try:
-            feedback = self.context.calibration_feedback_service.load(v2.calibration_feedback_id)
-        except KeyError:
-            return "已反馈"
-        if feedback.calibration_exported_at and feedback.feedback_updated_after_export:
-            return "已更新 · 待导出"
-        if feedback.calibration_exported_at:
-            return "已导出"
-        return "已反馈"
-
-    def _observation_summary(self, observation: dict[str, Any]) -> str:
-        summary = str(observation.get("display_product_summary") or "").strip()
-        if summary:
-            return summary
-        parts = [
-            str(observation.get("product_name") or "").strip(),
-            str(observation.get("product_type") or "").strip(),
-            str(observation.get("material") or "").strip(),
-        ]
-        return "、".join(part for part in parts if part) or "—"
-
-    def _bare_spec_text(self, observation: dict[str, Any]) -> str:
-        dims = _fmt_dimensions(observation)
-        weight = _fmt_weight(observation.get("weight_g"))
-        if dims == "—" and weight == "—":
-            return "—"
-        return f"{dims}，{weight}"
-
-    def _ai_packaging_text(self, ai: dict[str, Any]) -> str:
-        proposal = ai.get("external_ai_packaging_proposal")
-        if isinstance(proposal, dict):
-            scenario = proposal.get("normal")
-            if isinstance(scenario, dict):
-                return self._scenario_text(scenario)
-        adopted = ai.get("adopted_packaging")
-        if isinstance(adopted, dict):
-            return self._scenario_text(adopted)
-        return "—"
-
-    def _scenario_text(self, scenario: dict[str, Any]) -> str:
-        method = str(scenario.get("packaging_method") or "").strip()
-        dims = _fmt_dimensions(scenario)
-        weight = _fmt_weight(scenario.get("weight_g"))
-        reasoning = str(scenario.get("reasoning_summary") or "").strip()
-        parts = [part for part in (method, dims, weight) if part != "—"]
-        text = "；".join(parts) if parts else "—"
-        if reasoning:
-            text = f"{text}（{reasoning[:120]}）"
-        return text
-
-    def _legacy_ai_fallback(self, ai: dict[str, Any] | None) -> str:
-        if not ai or not isinstance(ai.get("legacy_layers_ai_raw"), dict):
-            return ""
-        observation = ai["legacy_layers_ai_raw"].get("observation")
-        if not isinstance(observation, dict):
-            return ""
-        return self._observation_summary(observation)
-
-    def _subsidy_hint(self, activity: dict[str, Any]) -> str:
-        rules = activity.get("rule_status") or {}
-        rule_list = rules.get("rules") if isinstance(rules, dict) else None
-        names = [
-            str(rule.get("name") or "").strip()
-            for rule in (rule_list or [])
-            if isinstance(rule, dict)
-        ]
-        subsidy_names = [name for name in names if "补贴" in name]
-        if subsidy_names:
-            return "活动/补贴：" + "、".join(subsidy_names[:3])
-        if activity.get("profit_rmb"):
-            return "记录包含活动场景利润快照"
-        return ""
-
-    def _feedback_summary(self, feedback: Any) -> str:
-        parts: list[str] = []
-        structure = feedback.structure
-        for key, label in _STRUCTURE_CN:
-            value = getattr(structure, key)
-            if value is True:
-                parts.append(f"{label}=是")
-            elif value is False:
-                parts.append(f"{label}=否")
-        suggested = feedback.suggested_package
-        if suggested is not None and suggested.has_content():
-            method = str(suggested.packaging_method or "").strip()
-            dims = _fmt_dimensions(
-                {
-                    "length_cm": suggested.length_cm,
-                    "width_cm": suggested.width_cm,
-                    "height_cm": suggested.height_cm,
-                }
-            )
-            weight = _fmt_weight(suggested.weight_g)
-            suggested_text = "建议包装：" + "、".join(
-                part for part in (method, dims, weight) if part != "—"
-            )
-            if suggested_text != "建议包装：":
-                parts.append(suggested_text)
-        actual = feedback.actual_logistics
-        if actual is not None and actual.has_content():
-            fee = _fmt_money(actual.actual_first_mile_fee_rmb)
-            chargeable = (
-                f"{float(actual.actual_chargeable_weight_kg)} kg"
-                if actual.actual_chargeable_weight_kg is not None
-                else ""
-            )
-            actual_parts = [
-                f"实际头程 {fee}" if fee != "—" else "",
-                chargeable,
-                f"货代 {actual.actual_forwarder}" if actual.actual_forwarder else "",
-            ]
-            actual_text = "实际物流：" + "、".join(part for part in actual_parts if part)
-            if actual_text != "实际物流：":
-                parts.append(actual_text)
-        return "；".join(parts) or "—"

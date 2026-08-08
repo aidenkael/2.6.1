@@ -1,4 +1,12 @@
-"""校准反馈 Dialog：三态映射 / 建议包装 / 实际物流 0 语义 / 防重复 / revision 不变。"""
+"""极简实际校准 Dialog：只保留尺寸/重量/修正说明；同一 feedback_id 更新；保留原建议。
+
+覆盖任务书第 23-25 项与对话框语义：
+- 实际校准只要求尺寸、重量、修正说明；
+- 数字输入默认真空，空 = 未知，0 是合法值；
+- 更新同一个 feedback_id，不重复创建；
+- 保留主界面已保存的 suggested_package / user_note 相关结构；
+- revision 不因反馈改变；空反馈拒绝保存。
+"""
 
 from __future__ import annotations
 
@@ -43,95 +51,103 @@ def _dialog(context, record_id, feedback=None) -> CalibrationFeedbackDialog:
     return CalibrationFeedbackDialog(context, record_id, feedback=feedback)
 
 
-def test_tri_state_mapping_unknown_true_false(qapp, context):
+def test_dialog_only_exposes_dims_weight_and_note(qapp, context):
+    """第 23 项：对话框只有实际尺寸、实际重量、修正说明三类输入。"""
     record_id = _create_record(context)
     dialog = _dialog(context, record_id)
+    for attr in ("length_edit", "width_edit", "height_edit", "weight_edit", "user_note"):
+        assert hasattr(dialog, attr)
+    # 复杂字段已从用户界面移除
+    for attr in ("tri_state_combos", "suggested_spins", "actual_spins", "actual_forwarder"):
+        assert not hasattr(dialog, attr)
+    # 默认真空（空 = 未知）
+    assert dialog.length_edit.text() == ""
+    assert dialog.weight_edit.text() == ""
     payload = dialog.build_payload()
-    assert payload["structure"] == {
-        "can_fold": "unknown",
-        "can_compress": "unknown",
-        "can_coil": "unknown",
-        "can_disassemble": "unknown",
-        "requires_shape_retention": "unknown",
-    }
-    dialog.tri_state_combos["can_compress"].setCurrentIndex(1)
-    dialog.tri_state_combos["can_fold"].setCurrentIndex(2)
-    payload = dialog.build_payload()
-    assert payload["structure"]["can_compress"] is True
-    assert payload["structure"]["can_fold"] is False
-    assert payload["structure"]["can_coil"] == "unknown"
+    assert "actual_logistics" not in payload
 
 
-def test_note_only_feedback_saves_and_links(qapp, context):
+def test_zero_is_a_legal_measured_value(qapp, context):
     record_id = _create_record(context)
     dialog = _dialog(context, record_id)
-    dialog.user_note.setPlainText("只写一句备注也必须可以保存")
+    dialog.length_edit.setText("0")
+    dialog.weight_edit.setText("0")
+    payload = dialog.build_payload()
+    actual = payload["actual_logistics"]
+    assert actual["actual_package_dimensions"] == {"length_cm": 0.0}
+    assert actual["actual_package_weight_g"] == 0.0
+    assert actual["evidence_level"] == "actual_measured"
+
+
+def test_actual_calibration_saves_and_links(qapp, context):
+    record_id = _create_record(context)
+    dialog = _dialog(context, record_id)
+    dialog.length_edit.setText("23")
+    dialog.width_edit.setText("14")
+    dialog.height_edit.setText("3")
+    dialog.weight_edit.setText("560")
+    dialog.user_note.setPlainText("实际比估算小")
     feedback_id = dialog.save()
-    assert len(context.calibration_feedback_service.for_record(record_id)) == 1
     feedback = context.calibration_feedback_service.load(feedback_id)
-    assert feedback.user_note == "只写一句备注也必须可以保存"
-    assert feedback.source == "user"
+    assert feedback.actual_logistics.actual_package_dimensions == {
+        "length_cm": 23.0,
+        "width_cm": 14.0,
+        "height_cm": 3.0,
+    }
+    assert feedback.actual_logistics.actual_package_weight_g == 560.0
+    assert feedback.actual_logistics.evidence_level == "actual_measured"
+    assert feedback.user_note == "实际比估算小"
     assert context.history_record_v2_service.load_v2(record_id).calibration_feedback_id == feedback_id
 
 
-def test_compress_only_feedback_saves(qapp, context):
-    record_id = _create_record(context)
-    dialog = _dialog(context, record_id)
-    dialog.tri_state_combos["can_compress"].setCurrentIndex(1)
-    feedback_id = dialog.save()
-    feedback = context.calibration_feedback_service.load(feedback_id)
-    assert feedback.structure.can_compress is True
-    assert feedback.structure.can_fold == "unknown"
-
-
-def test_edit_same_feedback_keeps_id_without_duplicate(qapp, context):
+def test_update_same_feedback_id_without_duplicate(qapp, context):
+    """第 24 项：实际校准更新同一个 feedback_id，不重复创建。"""
     record_id = _create_record(context)
     first = _dialog(context, record_id)
     first.user_note.setPlainText("v1")
     first_id = first.save()
     existing = context.calibration_feedback_service.load(first_id)
     second = _dialog(context, record_id, feedback=existing)
-    second.user_note.setPlainText("v2")
+    second.length_edit.setText("30")
     second_id = second.save()
     assert second_id == first_id
     assert len(context.calibration_feedback_service.for_record(record_id)) == 1
-    assert context.calibration_feedback_service.load(first_id).user_note == "v2"
 
 
-def test_suggested_package_evidence_is_user_suggested(qapp, context):
+def test_calibration_preserves_existing_suggested_package(qapp, context):
+    """第 25 项：实际校准保留主界面已保存的 suggested_package。"""
     record_id = _create_record(context)
-    dialog = _dialog(context, record_id)
-    dialog.suggested_method.setText("气泡袋")
-    dialog.suggested_spins["length_cm"].setValue(20.0)
-    payload = dialog.build_payload()
-    assert payload["suggested_package"]["evidence_level"] == "user_suggested"
-    feedback_id = dialog.save()
-    feedback = context.calibration_feedback_service.load(feedback_id)
+    # 主界面语义：先保存一条带 suggested_package / user_note 的反馈
+    first_id = context.calibration_feedback_service.save(
+        {
+            "record_id": record_id,
+            "source": "user",
+            "user_note": "这个包可以压扁",
+            "suggested_package": {
+                "packaging_method": "压扁放平",
+                "length_cm": 25.0,
+                "width_cm": 18.0,
+                "height_cm": 2.0,
+                "weight_g": 300.0,
+                "evidence_level": "user_suggested",
+            },
+        }
+    )
+    context.history_record_v2_service.link_feedback(record_id, first_id)
+    existing = context.calibration_feedback_service.load(first_id)
+    dialog = _dialog(context, record_id, feedback=existing)
+    dialog.length_edit.setText("24")
+    dialog.weight_edit.setText("310")
+    second_id = dialog.save()
+    assert second_id == first_id
+    feedback = context.calibration_feedback_service.load(first_id)
+    # suggested_package 与 user_note 保留，实测数据追加
+    assert feedback.suggested_package is not None
     assert feedback.suggested_package.evidence_level == "user_suggested"
-    assert feedback.suggested_package.length_cm == 20.0
-
-
-def test_actual_logistics_zero_preserved_and_empty_is_none(qapp, context):
-    record_id = _create_record(context)
-    dialog = _dialog(context, record_id)
-    empty = dialog.build_payload()
-    assert empty["actual_logistics"] is None
-    fee = dialog.actual_spins["actual_first_mile_fee_rmb"]
-    fee.setValue(5.0)
-    fee.setValue(0.0)
-    chargeable = dialog.actual_spins["actual_chargeable_weight_kg"]
-    chargeable.setValue(1.0)
-    chargeable.setValue(0.0)
-    payload = dialog.build_payload()
-    actual = payload["actual_logistics"]
-    assert actual["actual_first_mile_fee_rmb"] == 0.0
-    assert actual["actual_chargeable_weight_kg"] == 0.0
-    assert actual["actual_package_dimensions"] is None
-    assert actual["evidence_level"] == "actual_logistics"
-    feedback_id = dialog.save()
-    feedback = context.calibration_feedback_service.load(feedback_id)
-    assert feedback.actual_logistics.actual_first_mile_fee_rmb == 0.0
-    assert feedback.actual_logistics.actual_chargeable_weight_kg == 0.0
+    assert feedback.suggested_package.length_cm == 25.0
+    assert feedback.user_note == "这个包可以压扁"
+    assert feedback.actual_logistics.actual_package_dimensions == {"length_cm": 24.0}
+    assert feedback.actual_logistics.actual_package_weight_g == 310.0
 
 
 def test_save_feedback_does_not_change_revision(qapp, context):
@@ -143,8 +159,9 @@ def test_save_feedback_does_not_change_revision(qapp, context):
     assert context.history_record_v2_service.load_v2(record_id).revision == 1
 
 
-def test_empty_feedback_is_rejected(qapp, context):
+def test_empty_calibration_is_rejected(qapp, context):
     record_id = _create_record(context)
     dialog = _dialog(context, record_id)
+    assert not dialog._has_input()
     with pytest.raises(ValueError, match="反馈内容为空"):
         dialog.save()
