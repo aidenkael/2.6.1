@@ -1,0 +1,20 @@
+{
+  "id": "chatcmpl-syn_03_merchant_shipping_facts",
+  "object": "chat.completion",
+  "model": "synthetic-fixture-v1",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"observation\": {\"product_name\": \"玻璃水杯\", \"product_type\": \"水杯\", \"product_family\": \"杯具\", \"product_type_raw\": \"玻璃水杯\", \"product_type_code\": \"unknown\", \"product_family_code\": \"unknown\", \"material\": \"玻璃\", \"material_family\": \"玻璃\", \"material_family_code\": \"unknown\", \"display_product_summary\": \"玻璃水杯一只\", \"display_packaging_summary\": \"商家展示运输包装\", \"overall_form\": \"hard_3d\", \"packing_actions\": [], \"packing_constraints\": [\"do_not_compress\"], \"rigidity\": \"hard\", \"foldability\": \"none\", \"compressibility\": \"none\", \"packaging_state_hint\": \"moderate_compression\", \"requires_shape_retention\": false, \"has_hard_bottom\": false, \"has_hard_backboard\": false, \"has_frame\": false, \"has_rigid_insert\": false, \"has_rigid_parts\": false, \"retail_box_visible\": false, \"hard_card_visible\": false, \"protrusion_flattenable\": false, \"product_cost_rmb\": 12, \"product_cost_value_type\": \"exact\", \"domestic_shipping_rmb\": 5, \"domestic_shipping_value_type\": \"exact\", \"length_cm\": 20, \"width_cm\": 15, \"height_cm\": 8, \"weight_g\": 350, \"dimension_value_source\": \"image_text\", \"weight_value_source\": \"image_text\", \"dimension_scope\": \"shipping_package_size\", \"weight_scope\": \"packaged_weight\", \"quantity\": 1, \"confidence\": \"high\"}, \"field_evidence\": {\"product_cost_rmb\": {\"source_image_index\": 0, \"raw_text\": \"12元\", \"confidence\": \"high\"}, \"domestic_shipping_rmb\": {\"source_image_index\": 0, \"raw_text\": \"运费5元\", \"confidence\": \"high\"}, \"dimensions\": {\"source_image_index\": 1, \"raw_text\": \"20x15x8cm 单件运输包装\", \"meaning\": \"运输包装外廓\", \"semantic_note\": \"\", \"confidence\": \"high\"}, \"weight\": {\"source_image_index\": 1, \"raw_text\": \"含包装350g\", \"confidence\": \"high\"}, \"structure\": {\"has_hard_bottom\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"has_hard_backboard\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"has_frame\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"has_rigid_insert\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"has_rigid_parts\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"retail_box_visible\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"hard_card_visible\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}}, \"transport_outline\": {\"source_image_index\": 1, \"raw_text\": \"运输包装实拍\", \"visible_features\": [\"纸箱\"], \"region_description\": \"整体\", \"confidence\": \"high\"}}, \"packaging_proposal\": {\"normal\": {\"label\": \"正常档\", \"packaging_state\": \"moderate_compression\", \"packaging_method\": \"运输纸箱\", \"length_cm\": 21, \"width_cm\": 16, \"height_cm\": 9, \"weight_g\": 380, \"reasoning_summary\": \"按运输包装略放宽\", \"confidence\": \"high\", \"needs_review\": false}, \"conservative\": {\"label\": \"保守档\", \"packaging_state\": \"moderate_compression\", \"packaging_method\": \"运输纸箱加护\", \"length_cm\": 23, \"width_cm\": 18, \"height_cm\": 10, \"weight_g\": 400, \"reasoning_summary\": \"保守加护\", \"confidence\": \"medium\", \"needs_review\": false}, \"proposal_source\": \"vision_api\", \"needs_review\": false, \"review_reasons\": []}}"
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 128,
+    "completion_tokens": 256,
+    "total_tokens": 384
+  }
+}

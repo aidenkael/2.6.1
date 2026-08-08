@@ -1,0 +1,69 @@
+{
+  "case_id": "syn_01_acrylic_coaster",
+  "schema_version": "vision-packaging-eval-case-v1",
+  "origin": "synthetic",
+  "model": "synthetic-fixture-v1",
+  "description": "机制回归：硬质薄片，AI 完整候选被基线原样采纳（ai_candidate）。",
+  "images": [],
+  "image_role_note": "synthetic 案例无图片；真实案例在此按张标注 main/dimension/weight/packaging/other",
+  "current_observation": null,
+  "current_packaging_result": null,
+  "ground_truth": {
+    "expected_product_summary": "亚克力杯垫",
+    "expected_material": "亚克力",
+    "expected_structure": "硬质薄片，无折叠能力",
+    "bare_dimensions": {
+      "value": {
+        "length_cm": 12,
+        "width_cm": 10,
+        "height_cm": 1.5
+      },
+      "acceptable_range": {
+        "length_cm": [
+          11,
+          13
+        ],
+        "width_cm": [
+          9,
+          11
+        ],
+        "height_cm": [
+          1,
+          2
+        ]
+      },
+      "unknown": false
+    },
+    "bare_weight": {
+      "value": 80,
+      "acceptable_range": [
+        60,
+        100
+      ],
+      "unknown": false
+    },
+    "normal_packaging": {
+      "length_range": [
+        12,
+        14
+      ],
+      "width_range": [
+        10,
+        12
+      ],
+      "height_range": [
+        2,
+        3
+      ],
+      "weight_range": [
+        90,
+        120
+      ],
+      "acceptable_methods": [
+        "气泡袋",
+        "袋装"
+      ]
+    },
+    "notes": "虚构案例，仅用于评测框架机制回归，不计入真实准确率。"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "chatcmpl-syn_01_acrylic_coaster",
+  "object": "chat.completion",
+  "model": "synthetic-fixture-v1",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"observation\": {\"product_name\": \"亚克力杯垫\", \"product_type\": \"杯垫\", \"product_family\": \"家居小件\", \"product_type_raw\": \"亚克力杯垫\", \"product_type_code\": \"unknown\", \"product_family_code\": \"unknown\", \"material\": \"亚克力\", \"material_family\": \"塑料\", \"material_family_code\": \"unknown\", \"display_product_summary\": \"圆形亚克力杯垫一件\", \"display_packaging_summary\": \"未见零售包装\", \"overall_form\": \"hard_flat\", \"packing_actions\": [], \"packing_constraints\": [], \"rigidity\": \"hard\", \"foldability\": \"none\", \"compressibility\": \"none\", \"packaging_state_hint\": \"moderate_compression\", \"requires_shape_retention\": false, \"has_hard_bottom\": false, \"has_hard_backboard\": false, \"has_frame\": false, \"has_rigid_insert\": false, \"has_rigid_parts\": false, \"retail_box_visible\": false, \"hard_card_visible\": false, \"protrusion_flattenable\": false, \"product_cost_rmb\": 3.5, \"product_cost_value_type\": \"exact\", \"domestic_shipping_rmb\": 0, \"domestic_shipping_value_type\": \"exact\", \"length_cm\": 12, \"width_cm\": 10, \"height_cm\": 1.5, \"weight_g\": 80, \"dimension_value_source\": \"image_text\", \"weight_value_source\": \"image_text\", \"dimension_scope\": \"product_size\", \"weight_scope\": \"net_weight\", \"quantity\": 1, \"confidence\": \"high\"}, \"field_evidence\": {\"product_cost_rmb\": {\"source_image_index\": 0, \"raw_text\": \"3.5元\", \"confidence\": \"high\"}, \"domestic_shipping_rmb\": {\"source_image_index\": 0, \"raw_text\": \"包邮\", \"confidence\": \"medium\"}, \"dimensions\": {\"source_image_index\": 1, \"raw_text\": \"12x10x1.5cm\", \"meaning\": \"单件外廓\", \"semantic_note\": \"\", \"confidence\": \"high\"}, \"weight\": {\"source_image_index\": 1, \"raw_text\": \"80g\", \"confidence\": \"high\"}, \"structure\": {\"has_hard_bottom\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"has_hard_backboard\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"has_frame\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"has_rigid_insert\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"has_rigid_parts\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"retail_box_visible\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}, \"hard_card_visible\": {\"source_image_index\": null, \"raw_text\": \"\", \"region_description\": \"\", \"confidence\": \"low\"}}, \"transport_outline\": {\"source_image_index\": null, \"raw_text\": \"\", \"visible_features\": [], \"region_description\": \"\", \"confidence\": \"low\"}}, \"packaging_proposal\": {\"normal\": {\"label\": \"正常档\", \"packaging_state\": \"moderate_compression\", \"packaging_method\": \"气泡袋+纸卡\", \"length_cm\": 13, \"width_cm\": 11, \"height_cm\": 2.5, \"weight_g\": 100, \"reasoning_summary\": \"硬质薄片加气泡袋\", \"confidence\": \"high\", \"needs_review\": false}, \"conservative\": {\"label\": \"保守档\", \"packaging_state\": \"moderate_compression\", \"packaging_method\": \"气泡袋+硬纸板\", \"length_cm\": 14, \"width_cm\": 12, \"height_cm\": 3.5, \"weight_g\": 115, \"reasoning_summary\": \"保守加护\", \"confidence\": \"medium\", \"needs_review\": false}, \"proposal_source\": \"vision_api\", \"needs_review\": false, \"review_reasons\": []}}"
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 128,
+    "completion_tokens": 256,
+    "total_tokens": 384
+  }
+}

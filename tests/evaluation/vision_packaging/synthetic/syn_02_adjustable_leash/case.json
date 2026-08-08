@@ -1,0 +1,49 @@
+{
+  "case_id": "syn_02_adjustable_leash",
+  "schema_version": "vision-packaging-eval-case-v1",
+  "origin": "synthetic",
+  "model": "synthetic-fixture-v1",
+  "description": "机制回归：可调长度语义问题否决 AI 候选后走 salvage（ai_candidate_salvaged）。",
+  "images": [],
+  "image_role_note": "synthetic 案例无图片；真实案例在此按张标注 main/dimension/weight/packaging/other",
+  "current_observation": null,
+  "current_packaging_result": null,
+  "ground_truth": {
+    "expected_product_summary": "宠物牵引绳",
+    "expected_material": "尼龙",
+    "expected_structure": "柔性绳带，可盘绕",
+    "bare_dimensions": {
+      "unknown": true
+    },
+    "bare_weight": {
+      "value": 120,
+      "acceptable_range": [
+        100,
+        140
+      ],
+      "unknown": false
+    },
+    "normal_packaging": {
+      "length_range": [
+        16,
+        20
+      ],
+      "width_range": [
+        10,
+        14
+      ],
+      "height_range": [
+        3,
+        5
+      ],
+      "weight_range": [
+        130,
+        180
+      ],
+      "acceptable_methods": [
+        "袋装"
+      ]
+    },
+    "notes": "虚构案例；人工标准按 AI 独立包装候选设定，用于演示 post_ai_degradation 计算。"
+  }
+}
