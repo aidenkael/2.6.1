@@ -228,6 +228,27 @@ class ImageStore:
                     return True
         return False
 
+    def delete_image(self, image_id: str) -> bool:
+        """物理删除图片（原图 + 缩略图 + DB 行）。
+
+        仅当没有任何历史记录引用时才删除；仍被引用或不存在时返回 False。
+        """
+        reference = self.get(image_id)
+        if reference is None:
+            return False
+        if self.is_referenced(image_id):
+            return False
+        for key in (reference.storage_key, reference.thumbnail_key):
+            if not key:
+                continue
+            try:
+                (self.data_dir / key).unlink(missing_ok=True)
+            except OSError:
+                pass
+        with self.store.connect() as connection:
+            connection.execute("DELETE FROM images WHERE image_id = ?", (image_id,))
+        return True
+
 
 def _utc_now_iso() -> str:
     from datetime import UTC, datetime

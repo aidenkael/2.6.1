@@ -224,11 +224,11 @@ class TestHistoryEditClosedLoop:
 
     def test_clear_new_exits_edit_mode(self, qapp, page, monkeypatch):
         """第 16 项：清空并新建退出编辑模式并复位全部编辑状态。"""
-        import PySide6.QtWidgets as qw
+        import profit_accounting_26.ui.pages.calculation_page as calculation_page_module
 
         _arm_and_save_new(page, monkeypatch)
         page.load_record_payload(page.record_id)
-        monkeypatch.setattr(qw.QMessageBox, "question", lambda *a, **k: qw.QMessageBox.StandardButton.Yes)
+        monkeypatch.setattr(calculation_page_module, "confirm_action", lambda *a, **k: True)
         page.clear_new()
         assert page.editing_record_id is None
         assert page.record_id is None

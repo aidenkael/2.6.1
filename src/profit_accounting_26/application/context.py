@@ -75,6 +75,7 @@ class AppContext:
                 paths,
                 image_store=image_store,
                 history_service=history_record_v2_service,
+                feedback_service=calibration_feedback_service,
             ),
             import_export_service=ImportExportService(store),
             calibration_manager=calibration_manager,

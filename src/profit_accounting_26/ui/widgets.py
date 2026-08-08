@@ -39,6 +39,53 @@ class Card(QFrame):
         self.update()
 
 
+# ----------------------------------------------------------------------
+# 中文弹窗 helper：按钮文案完全可控，不依赖 Qt 默认英文按钮
+# ----------------------------------------------------------------------
+
+
+def confirm_action(
+    parent: QWidget | None,
+    title: str,
+    text: str,
+    *,
+    confirm_text: str = "确定",
+    cancel_text: str = "取消",
+    danger: bool = False,
+) -> bool:
+    """中文确认弹窗；返回用户是否点击了确认按钮。"""
+    box = QMessageBox(parent)
+    box.setWindowTitle(title)
+    box.setText(text)
+    box.setIcon(QMessageBox.Icon.Warning if danger else QMessageBox.Icon.Question)
+    confirm_button = box.addButton(confirm_text, QMessageBox.ButtonRole.AcceptRole)
+    box.addButton(cancel_text, QMessageBox.ButtonRole.RejectRole)
+    box.exec()
+    return box.clickedButton() is confirm_button
+
+
+def show_notice(
+    parent: QWidget | None,
+    title: str,
+    text: str,
+    *,
+    ok_text: str = "确定",
+    level: str = "info",
+) -> None:
+    """中文单按钮提示弹窗；level: info / warning / error。"""
+    box = QMessageBox(parent)
+    box.setWindowTitle(title)
+    box.setText(text)
+    icons = {
+        "info": QMessageBox.Icon.Information,
+        "warning": QMessageBox.Icon.Warning,
+        "error": QMessageBox.Icon.Critical,
+    }
+    box.setIcon(icons.get(level, QMessageBox.Icon.Information))
+    box.addButton(ok_text, QMessageBox.ButtonRole.AcceptRole)
+    box.exec()
+
+
 class SectionHeader(QWidget):
     def __init__(self, title: str, subtitle: str = "", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -254,21 +301,20 @@ class ImageSlotWidget(Card):
     def _confirm_replace(self) -> bool:
         if self.path is None:
             return True
-        answer = QMessageBox.question(
+        return confirm_action(
             self,
             "覆盖图片",
             "当前图片框已有图片，是否覆盖？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            confirm_text="覆盖",
+            cancel_text="取消",
         )
-        return answer == QMessageBox.StandardButton.Yes
 
     def load_path(self, path: Path) -> None:
         if not path.is_file() or not self._confirm_replace():
             return
         pixmap = QPixmap(str(path))
         if pixmap.isNull():
-            QMessageBox.warning(self, "无法读取", "该文件不是可读取的图片。")
+            show_notice(self, "无法读取", "该文件不是可读取的图片。", level="warning")
             return
         self.path = path
         self.preview.setText("")
@@ -316,7 +362,8 @@ class QuoteCard(Card):
         self._name = name
         layout = QVBoxLayout(self)
         layout.setContentsMargins(9, 7, 9, 8)
-        layout.setSpacing(4)
+        # 货代区释放尾程输入行后，适当增加行距（不明显增加页面高度）
+        layout.setSpacing(7)
         title_row = QHBoxLayout()
         self.select_button = QPushButton(f"○ {name}")
         self.select_button.setCheckable(True)

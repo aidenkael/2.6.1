@@ -123,6 +123,14 @@ class CalibrationFeedbackService:
             ).fetchall()
         return [CalibrationFeedback.from_dict(json.loads(row["payload_json"])) for row in rows]
 
+    def delete_for_record(self, record_id: str) -> int:
+        """永久删除某条记录绑定的全部校准反馈（配合历史记录永久删除）。"""
+        with self.store.connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM calibration_feedback WHERE record_id = ?", (record_id,)
+            )
+        return cursor.rowcount or 0
+
     def list_all(self) -> list[CalibrationFeedback]:
         with self.store.connect() as connection:
             rows = connection.execute(

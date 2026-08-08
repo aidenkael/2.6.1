@@ -1,4 +1,4 @@
-"""HistoryPage 单一大表格：8 视觉列 / 两缩略图 / 来源链接 / 本地搜索 / 软删除。
+"""HistoryPage 单一大表格：8 视觉列 / 两缩略图 / 来源链接 / 本地搜索 / 永久删除。
 
 覆盖任务书第 18-22、26-29 项：
 - HistoryPage 只有 8 个视觉主列；
@@ -6,8 +6,8 @@
 - 原始链接不新增独立列；
 - 搜索“挂绳”命中本地近义词商品；
 - 成本/售价/利润读取保存快照，不重新计算；
-- 未实测与已实测在历史页状态区分；
-- 软删除不删除图片；
+- 校准列用户层面只有未校准/已校准两态；
+- 永久删除：记录+反馈+独占图片物理删除，共享图片保留；
 - 旧 2.6.1 / 旧 V2 记录仍可打开；
 - recordRequested 返回主页链路不变。
 """
@@ -344,11 +344,13 @@ def test_calibration_states_uncalibrated_corrected_measured(qapp, context):
     page = HistoryPage(context)
     assert _cell_label(page, _row_for(page, uncalibrated), 7).text() == "未校准"
     corrected_text = _cell_label(page, _row_for(page, corrected), 7).text()
-    assert corrected_text.startswith("已修正·待实测")
+    # 用户层面只有两态：仅文字反馈也归为已校准，尺寸回退到当前采用
+    assert corrected_text.startswith("已校准")
     assert "肩带可拆" in corrected_text
     measured_text = _cell_label(page, _row_for(page, measured), 7).text()
     assert measured_text.startswith("已校准")
-    assert "实际 23×14×3 / 560g" in measured_text
+    assert "23×14×3 / 560g" in measured_text
+    assert "实测更小" in measured_text
 
 
 # ---------------------------------------------------------------- 21. 本地搜索
@@ -381,29 +383,68 @@ def test_search_matches_record_id_and_link(qapp, context):
     assert page.table.rowCount() == 1
 
 
-# ---------------------------------------------------------------- 27. 软删除
+# ---------------------------------------------------------------- 27. 永久删除
 
 
-def test_soft_delete_hides_record_and_keeps_images(qapp, context, tmp_path, monkeypatch):
-    import PySide6.QtWidgets as qw
+def test_permanent_delete_removes_record_feedback_and_exclusive_image(qapp, context, tmp_path, monkeypatch):
+    import profit_accounting_26.ui.pages.history_page as history_page_module
 
-    monkeypatch.setattr(qw.QMessageBox, "question", lambda *a, **k: qw.QMessageBox.StandardButton.Yes)
-    png = _make_png(tmp_path / "keep.png")
-    image = SessionImage(png, ImageType.MAIN, "sha-keep", png.name)
+    monkeypatch.setattr(history_page_module, "confirm_action", lambda *a, **k: True)
+    png = _make_png(tmp_path / "gone.png")
+    image = SessionImage(png, ImageType.MAIN, "sha-gone", png.name)
     record_id = _create_v2(context, images=[image])
+    fid = context.calibration_feedback_service.save({"record_id": record_id, "user_note": "待删"})
+    context.history_record_v2_service.link_feedback(record_id, fid)
     page = HistoryPage(context)
     v2 = context.history_record_v2_service.load_v2(record_id)
     original_path = page._image_path(v2.images[0], prefer_thumbnail=False)
     assert original_path is not None and original_path.is_file()
     page.table.selectRow(_row_for(page, record_id))
     page._archive_selected()
-    # 从正常列表消失
+    # 列表消失且记录本体物理删除（无回收站）
     assert page.table.rowCount() == 0
-    # 图片文件保留（不做 GC、不物理删除）
-    assert original_path.is_file()
-    # 记录本体仍在库中，只是 status=archived
-    raw = context.record_service.load(record_id)
-    assert raw["status"] == "archived"
+    with pytest.raises(KeyError):
+        context.record_service.load(record_id)
+    # 绑定校准反馈一并删除
+    assert context.calibration_feedback_service.for_record(record_id) == []
+    # 独占图片物理删除
+    assert not original_path.exists()
+
+
+def test_permanent_delete_keeps_shared_image_until_last_reference(qapp, context, tmp_path, monkeypatch):
+    import profit_accounting_26.ui.pages.history_page as history_page_module
+
+    monkeypatch.setattr(history_page_module, "confirm_action", lambda *a, **k: True)
+    png = _make_png(tmp_path / "shared.png")
+    # 相同字节内容 → ImageStore 内容寻址只存一份，两条记录共享
+    image_a = SessionImage(png, ImageType.MAIN, "sha-shared", png.name)
+    image_b = SessionImage(png, ImageType.MAIN, "sha-shared", png.name)
+    first = _create_v2(context, product_name="共享甲", images=[image_a])
+    second = _create_v2(context, product_name="共享乙", images=[image_b])
+    page = HistoryPage(context)
+    v2 = context.history_record_v2_service.load_v2(first)
+    shared_path = page._image_path(v2.images[0], prefer_thumbnail=False)
+    assert shared_path is not None and shared_path.is_file()
+    page.table.selectRow(_row_for(page, first))
+    page._archive_selected()
+    # 仍被另一条记录引用 → 图片保留
+    assert shared_path.is_file()
+    page.table.selectRow(_row_for(page, second))
+    page._archive_selected()
+    # 最后一条引用删除后才物理删除
+    assert not shared_path.exists()
+
+
+def test_permanent_delete_cancel_keeps_everything(qapp, context, monkeypatch):
+    import profit_accounting_26.ui.pages.history_page as history_page_module
+
+    monkeypatch.setattr(history_page_module, "confirm_action", lambda *a, **k: False)
+    record_id = _create_v2(context)
+    page = HistoryPage(context)
+    page.table.selectRow(_row_for(page, record_id))
+    page._archive_selected()
+    assert page.table.rowCount() == 1
+    assert context.record_service.load(record_id)["id"] == record_id
 
 
 def test_action_buttons_disabled_without_selection(qapp, context):

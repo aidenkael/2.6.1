@@ -55,7 +55,7 @@ from profit_accounting_26.ui.binders.calculation_binder import CalculationBinder
 from profit_accounting_26.ui.controllers.forwarder_cards_controller import ForwarderCardsController
 from profit_accounting_26.ui.controllers.image_slots_controller import ImageSlotsController
 from profit_accounting_26.ui.ui_loader import load_main_window
-from profit_accounting_26.ui.widgets import Card, ImageSlotWidget, QuoteCard
+from profit_accounting_26.ui.widgets import Card, ImageSlotWidget, QuoteCard, confirm_action
 from profit_accounting_26.ui.input_editing import install_blank_click_focus_filter
 
 
@@ -383,6 +383,7 @@ class CalculationPage(QWidget):
         if bottom_layout is not None:
             bottom_layout.insertWidget(2, self.edit_state_label)
         self._apply_adopted_flow_ui()
+        self._apply_round3_ui_polish()
 
     def _cost_spin(self, name: str, *, maximum: float) -> _SpinAdapter:
         spin = self._root.findChild(QDoubleSpinBox, name)
@@ -425,8 +426,14 @@ class CalculationPage(QWidget):
             subtitle.setFixedHeight(18)
             subtitle.setProperty("hint", True)
             if isinstance(layout, QGridLayout):
-                layout.addWidget(title_label, 0, 0, 1, 2)
-                layout.addWidget(subtitle, 0, 2, 1, 1)
+                # 副标题放到标题下方浅灰小字（不改卡内字段列结构）
+                header_box = QWidget()
+                header_stack = QVBoxLayout(header_box)
+                header_stack.setContentsMargins(0, 0, 0, 0)
+                header_stack.setSpacing(0)
+                header_stack.addWidget(title_label)
+                header_stack.addWidget(subtitle)
+                layout.addWidget(header_box, 0, 0, 1, 3)
         # 2) 左卡 AI估算全部只读；右卡 当前采用全部可编辑
         for key in ("length", "width", "height", "weight"):
             self.normal_fields[key].spin.setReadOnly(True)
@@ -446,6 +453,9 @@ class CalculationPage(QWidget):
         method_label = f(QLabel, "lblConservativeMethod")
         if method_label is not None:
             method_label.setText("包装方式")
+            # 当前采用不再展示包装方式输入（后台字段保留，仅隐藏控件）
+            method_label.setVisible(False)
+        method_edit.setVisible(False)
         conservative_card = self.conservative_fields["card"]
         conservative_card.setProperty("frozen", False)
         conservative_card.style().unpolish(conservative_card)
@@ -482,6 +492,64 @@ class CalculationPage(QWidget):
                 name_label.setVisible(False)
             if value_label is not None:
                 value_label.setVisible(False)
+
+    def _apply_round3_ui_polish(self) -> None:
+        """第三轮 UI 精修：尾程输入移到系统成本区；利润规则状态放标题上方。
+
+        只移动既有控件，不改任何计算逻辑与算法。
+        """
+        f = self._root.findChild
+        # 1) 尾程费用（$USD 可编辑 + ¥RMB）从货代方案顶部移到系统成本卡尾程行
+        freight_layout = f(QVBoxLayout, "freightLayout")
+        tail_grid = f(QGridLayout, "tailFreightLayout")
+        usd_box = f(QHBoxLayout, "layout_spinTailFreightUsd")
+        rmb_box = f(QHBoxLayout, "layout_spinTailFreightRmb")
+        tail_title = f(QLabel, "lblTailFreight")
+        if tail_grid is not None:
+            # 先取出全部子项再移除空网格：removeItem 会删除无主的子布局对象
+            while tail_grid.count():
+                tail_grid.takeAt(0)
+        if freight_layout is not None and tail_grid is not None:
+            freight_layout.removeItem(tail_grid)
+        if tail_title is not None:
+            tail_title.setVisible(False)
+        value6 = self.system_rows.get("tail")
+        if value6 is not None:
+            value6.setVisible(False)
+        row6 = f(QHBoxLayout, "systemCostRow6")
+        if row6 is not None:
+            if usd_box is not None:
+                row6.addLayout(usd_box, 1)
+            if rmb_box is not None:
+                row6.addLayout(rmb_box, 1)
+        # 2) 利润区规则状态放字段标题上方；字号用 QFont（binder 用 setStyleSheet 只覆盖颜色）
+        profit_grid = f(QGridLayout, "profitFieldsGrid")
+        if profit_grid is not None:
+            for layout_name in ("layoutNoActivityProfitTitle", "layoutActivityProfitTitle"):
+                hbox = f(QHBoxLayout, layout_name)
+                if hbox is None or hbox.count() < 2:
+                    continue
+                index = profit_grid.indexOf(hbox)
+                if index < 0:
+                    continue
+                row, col, row_span, col_span = profit_grid.getItemPosition(index)
+                # 先取出控件再移除空布局：removeItem 会删除无主的子布局对象
+                title_widget = hbox.takeAt(0).widget()
+                status_widget = hbox.takeAt(0).widget()
+                profit_grid.removeItem(hbox)
+                if status_widget is not None:
+                    status_font = status_widget.font()
+                    if status_font.pointSize() > 8:
+                        status_font.setPointSize(status_font.pointSize() - 1)
+                    status_widget.setFont(status_font)
+                stack = QVBoxLayout()
+                stack.setContentsMargins(0, 0, 0, 0)
+                stack.setSpacing(1)
+                if status_widget is not None:
+                    stack.addWidget(status_widget)
+                if title_widget is not None:
+                    stack.addWidget(title_widget)
+                profit_grid.addLayout(stack, row, col, row_span, col_span)
 
     def _build_dynamic_regions(self) -> None:
         """清除 Designer 预览控件，准备动态图片框与货代卡片容器。"""
@@ -1069,14 +1137,11 @@ class CalculationPage(QWidget):
             QMessageBox.information(self, "需要先识图", "请先完成一次 AI识图，再根据摘要进行局部重估。")
             return
         if self._image_fingerprint() != self._recognized_image_fingerprint:
-            answer = QMessageBox.question(
+            if confirm_action(
                 self,
                 "图片已修改",
                 "图片已修改，是否使用新图片重新识图？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes,
-            )
-            if answer == QMessageBox.StandardButton.Yes:
+            ):
                 # Overall recognition is explicit; never start another visual
                 # request as a side effect of clicking local reestimate.
                 return
@@ -1661,14 +1726,11 @@ class CalculationPage(QWidget):
 
     def clear_new(self) -> None:
         if self.dirty:
-            answer = QMessageBox.question(
+            if not confirm_action(
                 self,
                 "清空并新建",
                 "当前存在未保存修改，确定清空并新建吗？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
+            ):
                 return
         self._updating = True
         self.record_id = None

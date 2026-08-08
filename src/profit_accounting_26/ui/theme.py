@@ -94,6 +94,10 @@ QTableWidget {{
     border-radius: 8px;
     gridline-color: #EDF1F6;
 }}
+QTableWidget::item:selected {{
+    background: #EAF2FF;
+    color: {TEXT};
+}}
 QHeaderView::section {{
     background: #F7F9FC;
     border: none;

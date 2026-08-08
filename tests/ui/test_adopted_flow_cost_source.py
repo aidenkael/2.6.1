@@ -183,9 +183,9 @@ class TestAdoptedFlow:
 
     def test_clear_new_allows_new_first_ai(self, qapp, page, monkeypatch):
         """第 6 项：新商品清空后允许重新建立新的第一次 AI估算。"""
-        import PySide6.QtWidgets as qw
+        import profit_accounting_26.ui.pages.calculation_page as calculation_page_module
 
-        monkeypatch.setattr(qw.QMessageBox, "question", lambda *a, **k: qw.QMessageBox.StandardButton.Yes)
+        monkeypatch.setattr(calculation_page_module, "confirm_action", lambda *a, **k: True)
         _simulate_ai(page)
         page.clear_new()
         assert page.initial_ai_snapshot is None

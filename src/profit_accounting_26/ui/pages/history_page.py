@@ -6,7 +6,8 @@
 - 名称下方显示原始商品链接（只读、无边框，可光标移动查看完整 URL）；
 - 校准内容区分“用户主观修正（待实测）”与“真实发货实测（已校准）”。
 
-删除只做软删除（status=archived）：不删除图片、不物理删除、不新增 schema。
+删除为永久删除：记录 + 快照 + 绑定校准反馈 + 独占图片；
+内容寻址共享图片仅当无其他记录引用时才物理删除，不实现回收站。
 """
 
 from __future__ import annotations
@@ -18,9 +19,9 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -32,7 +33,7 @@ from profit_accounting_26.application import AppContext
 from profit_accounting_26.application.data_contracts import record_from_payload
 from profit_accounting_26.application.profit_scenario_codec import extract_profit_scenarios
 from profit_accounting_26.ui.pages.calibration_feedback_dialog import CalibrationFeedbackDialog
-from profit_accounting_26.ui.widgets import Card, ImagePreviewDialog, SectionHeader
+from profit_accounting_26.ui.widgets import Card, ImagePreviewDialog, SectionHeader, confirm_action
 
 _THUMB_SIZE = 48
 _ROW_HEIGHT = 76
@@ -186,14 +187,22 @@ class HistoryPage(QWidget):
 
         self.table = QTableWidget(0, self.COLUMN_COUNT)
         self.table.setHorizontalHeaderLabels(list(self.COLUMN_HEADERS))
+        # 列宽重分配：序号/图片窄固定；名称与包装数据吃多余空间；不 Stretch 尾列
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         self.table.setColumnWidth(0, 52)
         self.table.setColumnWidth(1, _THUMB_SIZE * 2 + 24)
-        self.table.setColumnWidth(2, 240)
+        self.table.setColumnWidth(2, 260)
         self.table.setColumnWidth(3, 250)
-        self.table.setColumnWidth(4, 130)
-        self.table.setColumnWidth(5, 170)
-        self.table.setColumnWidth(6, 180)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setColumnWidth(4, 120)
+        self.table.setColumnWidth(5, 160)
+        self.table.setColumnWidth(6, 200)
+        self.table.setColumnWidth(7, 190)
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(_ROW_HEIGHT)
         self.table.setAlternatingRowColors(True)
@@ -387,6 +396,10 @@ class HistoryPage(QWidget):
         return f"裸品    {bare}\nAI      {ai_text}\n当前    {current}"
 
     def _calibration_text(self, payload: dict[str, Any]) -> str:
+        """用户层面只有两态：未校准 / 已校准 + dims + note。
+
+        dims 优先级：实测 > 用户建议 > 当前采用。
+        """
         v2 = record_from_payload(payload)
         if not v2.calibration_feedback_id:
             return "未校准"
@@ -394,23 +407,30 @@ class HistoryPage(QWidget):
             feedback = self.context.calibration_feedback_service.load(v2.calibration_feedback_id)
         except KeyError:
             return "未校准"
-        note = str(feedback.user_note or "").strip().replace("\n", " ")
-        note_summary = note[:40] if note else ""
+        dims_raw: dict[str, Any] | None = None
         actual = feedback.actual_logistics
         if actual is not None and actual.has_content():
-            actual_text = _dims_text(
-                {
-                    **(actual.actual_package_dimensions or {}),
-                    "weight_g": actual.actual_package_weight_g,
-                }
-            )
-            lines = ["已校准", f"实际 {actual_text}"]
-            if note_summary:
-                lines.append(note_summary)
-            return "\n".join(lines)
-        lines = ["已修正·待实测"]
-        if note_summary:
-            lines.append(note_summary)
+            dims_raw = {
+                **(actual.actual_package_dimensions or {}),
+                "weight_g": actual.actual_package_weight_g,
+            }
+        suggested = feedback.suggested_package
+        if dims_raw is None and suggested is not None and suggested.has_content():
+            dims_raw = {
+                "length_cm": suggested.length_cm,
+                "width_cm": suggested.width_cm,
+                "height_cm": suggested.height_cm,
+                "weight_g": suggested.weight_g,
+            }
+        if dims_raw is None and isinstance(v2.current_estimate, dict):
+            dims_raw = dict(v2.current_estimate)
+        lines = ["已校准"]
+        dims_text = _dims_text(dims_raw)
+        if dims_text != "—":
+            lines.append(dims_text)
+        note = str(feedback.user_note or "").strip().replace("\n", " ")
+        if note:
+            lines.append(note[:40])
         return "\n".join(lines)
 
     # ---------------------------------------------------------------- actions
@@ -450,23 +470,21 @@ class HistoryPage(QWidget):
             self.refresh()
 
     def _archive_selected(self) -> None:
-        """软删除：只把 status 置为 archived；不删除图片、不物理删除。"""
+        """永久删除：记录 + 绑定校准反馈 + 独占图片；不实现回收站。"""
         record_id = self.selected_record_id()
         if not record_id:
             return
-        answer = QMessageBox.question(
+        confirmed = confirm_action(
             self,
             "删除记录",
-            "删除后该记录将从历史列表隐藏（可随时恢复，图片保留）。确定删除吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            "确定永久删除这条历史记录吗？删除后无法恢复。",
+            confirm_text="删除",
+            danger=True,
         )
-        if answer != QMessageBox.StandardButton.Yes:
+        if not confirmed:
             return
-        payload = self.context.record_service.load(record_id)
-        payload["status"] = "archived"
-        self.context.store.update_record(record_id, payload, snapshot_kind="archive")
-        self.context.diagnostic_logger.event("record_archived", record_id=record_id)
+        self.context.record_service.delete_record(record_id)
+        self.context.diagnostic_logger.event("record_deleted", record_id=record_id)
         self.refresh()
 
     # ---------------------------------------------------------------- helpers

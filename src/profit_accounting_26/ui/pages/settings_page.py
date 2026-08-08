@@ -56,6 +56,7 @@ from profit_accounting_26.domain.rules import (
 )
 from profit_accounting_26.shared import ApplicationPaths
 from profit_accounting_26.ui.ui_loader import load_settings_page
+from profit_accounting_26.ui.widgets import confirm_action
 
 
 class SettingsPage(QWidget):
@@ -454,12 +455,7 @@ class SettingsPage(QWidget):
         msg = f"确定永久删除配置「{display_name}」及其 API Key 吗？"
         if in_use:
             msg += f"\n\n该配置正在被以下功能使用：{', '.join(in_use)}\n删除后将清空对应绑定，需重新选择配置。"
-        answer = QMessageBox.question(
-            self, "删除配置", msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+        if not confirm_action(self, "删除配置", msg, confirm_text="删除", danger=True):
             return
         # 删除配置和 key
         stores = [self.context.api_profile_store]

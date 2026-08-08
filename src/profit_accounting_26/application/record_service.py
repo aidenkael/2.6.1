@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from profit_accounting_26.application.calibration_feedback_service import CalibrationFeedbackService
 from profit_accounting_26.application.history_record_service import HistoryRecordV2Service
 from profit_accounting_26.application.image_session import SessionImage
 from profit_accounting_26.shared.paths import ApplicationPaths
@@ -21,11 +22,13 @@ class RecordService:
         *,
         image_store: ImageStore | None = None,
         history_service: HistoryRecordV2Service | None = None,
+        feedback_service: CalibrationFeedbackService | None = None,
     ) -> None:
         self.store = store
         self.paths = paths
         self.image_store = image_store
         self.history_service = history_service
+        self.feedback_service = feedback_service
 
     def _persist_images(self, record_id: str, images: list[SessionImage]) -> list[dict[str, Any]]:
         if self.image_store is not None:
@@ -122,6 +125,36 @@ class RecordService:
 
     def snapshots(self, record_id: str) -> list[dict[str, Any]]:
         return self.store.list_snapshots(record_id)
+
+    def delete_record(self, record_id: str) -> None:
+        """永久删除：记录 + 快照 + 绑定校准反馈 + 独占图片。
+
+        内容寻址图片仅当无其他记录引用时才物理删除；
+        legacy 图片位于 images/<record_id>/ 独占目录，直接删除。
+        """
+        payload = self.store.load_record(record_id)
+        images = payload.get("images") if isinstance(payload.get("images"), list) else []
+        if self.feedback_service is not None:
+            self.feedback_service.delete_for_record(record_id)
+        self.store.delete_record(record_id)
+        legacy_dir = self.paths.images_dir / record_id
+        for item in images:
+            if not isinstance(item, dict):
+                continue
+            image_id = item.get("image_id")
+            if image_id and self.image_store is not None:
+                # 本记录已删；仍被引用则 delete_image 内部拒绝
+                self.image_store.delete_image(str(image_id))
+                continue
+            relative = item.get("relative_path")
+            if relative:
+                target = self.paths.data_dir / str(relative)
+                try:
+                    target.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        if legacy_dir.is_dir():
+            shutil.rmtree(legacy_dir, ignore_errors=True)
 
 
 def _current_estimate_from_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
