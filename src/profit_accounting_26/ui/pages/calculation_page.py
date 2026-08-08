@@ -819,7 +819,11 @@ class CalculationPage(QWidget):
         if self._updating:
             return
         value = widget.value()
-        self.session.confirm_value(key, value if value > 0 or key == "domestic_shipping_rmb" else None)
+        # 金额字段 0 是合法数值（样品/赠品、免运费），只有尺寸/重量仍把 0 视为未填写
+        if key in ("product_cost_rmb", "domestic_shipping_rmb"):
+            self.session.confirm_value(key, value)
+        else:
+            self.session.confirm_value(key, value if value > 0 else None)
         self.recalculate()
 
     def _confirmed_facts(self) -> dict[str, dict[str, Any]]:
@@ -1122,7 +1126,7 @@ class CalculationPage(QWidget):
         observation.width_cm = self.bare_width.value() or None
         observation.height_cm = self.bare_height.value() or None
         observation.weight_g = self.bare_weight.value() or None
-        observation.product_cost_rmb = self.product_cost.value() or None
+        observation.product_cost_rmb = self.product_cost.value()
         observation.domestic_shipping_rmb = self.domestic_shipping.value()
         return observation
 
@@ -1478,9 +1482,7 @@ class CalculationPage(QWidget):
         scenario = self.current_scenario()
         forwarders = self.context.settings_service.forwarders_from_settings(self.settings)
         enabled = [item for item in forwarders if item.enabled and not item.archived]
-        if self.product_cost.value() <= 0:
-            self._clear_calculation("请填写有效商品成本。")
-            return
+        # 0 是合法金额：商品成本/国内运费为 0 不阻止物流与总成本计算
         if not scenario.is_complete() or not enabled:
             self._clear_calculation("请补全当前包装档的尺寸、重量，并确保至少启用一家货代。")
             return

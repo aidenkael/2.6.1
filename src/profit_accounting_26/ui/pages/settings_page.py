@@ -457,16 +457,13 @@ class SettingsPage(QWidget):
             msg += f"\n\n该配置正在被以下功能使用：{', '.join(in_use)}\n删除后将清空对应绑定，需重新选择配置。"
         if not confirm_action(self, "删除配置", msg, confirm_text="删除", danger=True):
             return
-        # 删除配置和 key
+        # 删除配置和 key（delete_profile 一次完成 profile/key/绑定 的真实持久化删除）
         stores = [self.context.api_profile_store]
         pending_data_dir = ApplicationPaths.configured_data_dir()
         if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
             stores.append(ApiProfileStore(pending_data_dir))
         for store in stores:
             store.delete_profile(profile_id)
-            if in_use:
-                store.bind(VISUAL_AI, "")
-                store.bind(LOCAL_REESTIMATE, "")
         self._refresh_api_profiles()
         self._new_api_profile()
 
@@ -666,8 +663,35 @@ class SettingsPage(QWidget):
         if answer != QMessageBox.StandardButton.Yes:
             return
         self.forwarder_table.removeRow(row)
-        self._mark_dirty()
+        # 永久删除 = 立即持久化，不等待“保存货代设置”
+        self._persist_forwarders_now()
+
+    def _persist_forwarders_now(self) -> bool:
+        """把当前表格的完整货代列表立即写入 settings.json。
+
+        用于：永久删除后的立即落盘、普通“保存货代设置”。
+        若 selected_forwarder_id 失效则重选第一个启用货代或清空。
+        """
+        try:
+            forwarders = self.collect_forwarders()
+        except ValueError as exc:
+            QMessageBox.warning(self, "无法保存", str(exc))
+            return False
+        latest = self.context.settings_service.load()
+        enabled_ids = [item["id"] for item in forwarders if item["enabled"] and not item["archived"]]
+        selected = latest.get("selected_forwarder_id")
+        if selected not in enabled_ids:
+            selected = enabled_ids[0] if enabled_ids else ""
+        latest["forwarders"] = forwarders
+        latest["selected_forwarder_id"] = selected
+        self.context.settings_service.save(latest)
+        pending_data_dir = ApplicationPaths.configured_data_dir()
+        if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
+            SettingsService.save_copy(latest, pending_data_dir / "settings.json")
+        self.settings = latest
+        self.forwardersSaved.emit()
         self._update_forwarder_counts()
+        return True
 
     def filter_forwarders(self, archived: bool) -> None:
         self._show_archived_forwarders = archived
@@ -716,21 +740,10 @@ class SettingsPage(QWidget):
         return output
 
     def save_forwarders_only(self) -> None:
-        try:
-            forwarders = self.collect_forwarders()
-        except ValueError as exc:
-            QMessageBox.warning(self, "无法保存", str(exc))
+        if not self._persist_forwarders_now():
             return
-        latest = self.context.settings_service.load()
-        enabled_ids = [item["id"] for item in forwarders if item["enabled"] and not item["archived"]]
-        selected = latest.get("selected_forwarder_id")
-        if selected not in enabled_ids:
-            selected = enabled_ids[0] if enabled_ids else ""
-        latest["forwarders"] = forwarders
-        latest["selected_forwarder_id"] = selected
-        self.context.settings_service.save(latest)
-        self.settings.update({"forwarders": forwarders, "selected_forwarder_id": selected})
-        self.forwardersSaved.emit()
+        self.dirty = False
+        self.dirtyChanged.emit(False)
         QMessageBox.information(self, "已保存", "货代设置已保存。")
 
     # ------------------------------------------------------------------
@@ -889,10 +902,40 @@ class SettingsPage(QWidget):
             return
         deleted_id = self.rules_data[row].get("id")
         del self.rules_data[row]
+        # 删除的是当前主页面选中的规则：重选一个启用规则或清空
         if self.settings.get("selected_profit_rule_id") == deleted_id:
-            self.settings["selected_profit_rule_id"] = ""
+            enabled = [
+                item for item in self.rules_data
+                if item.get("enabled", True) and not item.get("archived", False)
+            ]
+            self.settings["selected_profit_rule_id"] = enabled[0].get("id", "") if enabled else ""
+        # 删除 = 立即持久化，不等待总“保存设置”
+        self._persist_rules_now()
+
+    def _persist_rules_now(self) -> None:
+        """把当前 rules_data 立即写入 settings.json 并同步主页面。
+
+        若 selected_profit_rule_id 失效则重选第一个启用规则或清空。
+        """
+        latest = self.context.settings_service.load()
+        enabled_rule_ids = [
+            str(item.get("id"))
+            for item in self.rules_data
+            if item.get("enabled", True) and not item.get("archived", False)
+        ]
+        selected_rule = str(latest.get("selected_profit_rule_id") or "")
+        if selected_rule not in enabled_rule_ids:
+            selected_rule = enabled_rule_ids[0] if enabled_rule_ids else ""
+        latest["profit_rules"] = self.rules_data
+        latest["selected_profit_rule_id"] = selected_rule
+        self.context.settings_service.save(latest)
+        pending_data_dir = ApplicationPaths.configured_data_dir()
+        if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
+            SettingsService.save_copy(latest, pending_data_dir / "settings.json")
+        self.settings = latest
         self.refresh_rule_list()
-        self._mark_dirty()
+        # 最窄刷新机制：主页面货代卡与利润规则下拉立即同步，不改动脏状态
+        self.forwardersSaved.emit()
 
     # ------------------------------------------------------------------
     # 保存全部设置
