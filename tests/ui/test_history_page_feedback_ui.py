@@ -166,8 +166,12 @@ def _row_for(page: HistoryPage, record_id: str) -> int:
 
 def _cell_label(page: HistoryPage, row: int, column: int) -> QLabel:
     widget = page.table.cellWidget(row, column)
-    assert isinstance(widget, QLabel)
-    return widget
+    if isinstance(widget, QLabel):
+        return widget
+    # 顶部对齐改造后文字列为容器 + 内部 QLabel
+    label = widget.findChild(QLabel) if widget is not None else None
+    assert isinstance(label, QLabel)
+    return label
 
 
 # ---------------------------------------------------------------- 18. 8 列

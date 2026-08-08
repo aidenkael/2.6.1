@@ -4165,31 +4165,27 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                       </property>
                       <item>
                        <widget class="QLabel" name="lblSystemCostName0">
+                        <property name="minimumSize">
+                         <size>
+                          <width>64</width>
+                          <height>0</height>
+                         </size>
+                        </property>
+                        <property name="maximumSize">
+                         <size>
+                          <width>64</width>
+                          <height>16777215</height>
+                         </size>
+                        </property>
                         <property name="text">
-                         <string>包装档</string>
+                         <string>采购成本</string>
                         </property>
                        </widget>
                       </item>
                       <item>
-                       <spacer name="systemCostSpacer0">
-                        <property name="orientation">
-                         <enum>Qt::Orientation::Horizontal</enum>
-                        </property>
-                        <property name="sizeType">
-                         <enum>QSizePolicy::Policy::Expanding</enum>
-                        </property>
-                        <property name="sizeHint" stdset="0">
-                         <size>
-                          <width>20</width>
-                          <height>20</height>
-                         </size>
-                        </property>
-                       </spacer>
-                      </item>
-                      <item>
                        <widget class="QLabel" name="lblSystemCostValue0">
                         <property name="text">
-                         <string>正常档</string>
+                         <string>—</string>
                         </property>
                        </widget>
                       </item>
@@ -4214,31 +4210,27 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                       </property>
                       <item>
                        <widget class="QLabel" name="lblSystemCostName1">
+                        <property name="minimumSize">
+                         <size>
+                          <width>64</width>
+                          <height>0</height>
+                         </size>
+                        </property>
+                        <property name="maximumSize">
+                         <size>
+                          <width>64</width>
+                          <height>16777215</height>
+                         </size>
+                        </property>
                         <property name="text">
-                         <string>当前货代</string>
+                         <string>国内运费</string>
                         </property>
                        </widget>
                       </item>
                       <item>
-                       <spacer name="systemCostSpacer1">
-                        <property name="orientation">
-                         <enum>Qt::Orientation::Horizontal</enum>
-                        </property>
-                        <property name="sizeType">
-                         <enum>QSizePolicy::Policy::Expanding</enum>
-                        </property>
-                        <property name="sizeHint" stdset="0">
-                         <size>
-                          <width>20</width>
-                          <height>20</height>
-                         </size>
-                        </property>
-                       </spacer>
-                      </item>
-                      <item>
                        <widget class="QLabel" name="lblSystemCostValue1">
                         <property name="text">
-                         <string>深圳货代</string>
+                         <string>—</string>
                         </property>
                        </widget>
                       </item>
@@ -4263,31 +4255,27 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                       </property>
                       <item>
                        <widget class="QLabel" name="lblSystemCostName2">
+                        <property name="minimumSize">
+                         <size>
+                          <width>64</width>
+                          <height>0</height>
+                         </size>
+                        </property>
+                        <property name="maximumSize">
+                         <size>
+                          <width>64</width>
+                          <height>16777215</height>
+                         </size>
+                        </property>
                         <property name="text">
-                         <string>实际重</string>
+                         <string>头程</string>
                         </property>
                        </widget>
                       </item>
                       <item>
-                       <spacer name="systemCostSpacer2">
-                        <property name="orientation">
-                         <enum>Qt::Orientation::Horizontal</enum>
-                        </property>
-                        <property name="sizeType">
-                         <enum>QSizePolicy::Policy::Expanding</enum>
-                        </property>
-                        <property name="sizeHint" stdset="0">
-                         <size>
-                          <width>20</width>
-                          <height>20</height>
-                         </size>
-                        </property>
-                       </spacer>
-                      </item>
-                      <item>
                        <widget class="QLabel" name="lblSystemCostValue2">
                         <property name="text">
-                         <string>0.750 kg</string>
+                         <string>—</string>
                         </property>
                        </widget>
                       </item>
@@ -4312,31 +4300,27 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                       </property>
                       <item>
                        <widget class="QLabel" name="lblSystemCostName3">
+                        <property name="minimumSize">
+                         <size>
+                          <width>64</width>
+                          <height>0</height>
+                         </size>
+                        </property>
+                        <property name="maximumSize">
+                         <size>
+                          <width>64</width>
+                          <height>16777215</height>
+                         </size>
+                        </property>
                         <property name="text">
-                         <string>体积重</string>
+                         <string>服务费</string>
                         </property>
                        </widget>
                       </item>
                       <item>
-                       <spacer name="systemCostSpacer3">
-                        <property name="orientation">
-                         <enum>Qt::Orientation::Horizontal</enum>
-                        </property>
-                        <property name="sizeType">
-                         <enum>QSizePolicy::Policy::Expanding</enum>
-                        </property>
-                        <property name="sizeHint" stdset="0">
-                         <size>
-                          <width>20</width>
-                          <height>20</height>
-                         </size>
-                        </property>
-                       </spacer>
-                      </item>
-                      <item>
                        <widget class="QLabel" name="lblSystemCostValue3">
                         <property name="text">
-                         <string>0.720 kg</string>
+                         <string>—</string>
                         </property>
                        </widget>
                       </item>
@@ -4364,6 +4348,9 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                         <property name="text">
                          <string>计费重</string>
                         </property>
+                        <property name="visible">
+                         <bool>false</bool>
+                        </property>
                        </widget>
                       </item>
                       <item>
@@ -4386,6 +4373,9 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                        <widget class="QLabel" name="lblSystemCostValue4">
                         <property name="text">
                          <string>0.750 kg</string>
+                        </property>
+                        <property name="visible">
+                         <bool>false</bool>
                         </property>
                        </widget>
                       </item>
@@ -4410,26 +4400,22 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                       </property>
                       <item>
                        <widget class="QLabel" name="lblSystemCostName6">
-                        <property name="text">
-                         <string>尾程费用</string>
-                        </property>
-                       </widget>
-                      </item>
-                      <item>
-                       <spacer name="systemCostSpacer6">
-                        <property name="orientation">
-                         <enum>Qt::Orientation::Horizontal</enum>
-                        </property>
-                        <property name="sizeType">
-                         <enum>QSizePolicy::Policy::Expanding</enum>
-                        </property>
-                        <property name="sizeHint" stdset="0">
+                        <property name="minimumSize">
                          <size>
-                          <width>20</width>
-                          <height>20</height>
+                          <width>64</width>
+                          <height>0</height>
                          </size>
                         </property>
-                       </spacer>
+                        <property name="maximumSize">
+                         <size>
+                          <width>64</width>
+                          <height>16777215</height>
+                         </size>
+                        </property>
+                        <property name="text">
+                         <string>尾程</string>
+                        </property>
+                       </widget>
                       </item>
                       <item>
                        <widget class="QLabel" name="lblSystemCostValue6">
@@ -4438,6 +4424,9 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                         </property>
                         <property name="toolTip">
                          <string>尾程费用单独显示，并已计入物流总价和系统总成本</string>
+                        </property>
+                        <property name="visible">
+                         <bool>false</bool>
                         </property>
                        </widget>
                       </item>
@@ -4465,6 +4454,9 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                         <property name="text">
                          <string>物流总价</string>
                         </property>
+                        <property name="visible">
+                         <bool>false</bool>
+                        </property>
                        </widget>
                       </item>
                       <item>
@@ -4488,6 +4480,9 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                         <property name="text">
                          <string>¥110.00</string>
                         </property>
+                        <property name="visible">
+                         <bool>false</bool>
+                        </property>
                        </widget>
                       </item>
                      </layout>
@@ -4495,49 +4490,62 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                     <item>
                      <widget class="QFrame" name="systemTotalBox">
                       <property name="sizePolicy">
-                       <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                       <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
                         <horstretch>0</horstretch>
                         <verstretch>0</verstretch>
                        </sizepolicy>
                       </property>
-                      <property name="minimumSize">
-                       <size>
-                        <width>0</width>
-                        <height>48</height>
-                       </size>
-                      </property>
-                      <property name="maximumSize">
-                       <size>
-                        <width>16777215</width>
-                        <height>58</height>
-                       </size>
-                      </property>
-                      <property name="card" stdset="0">
-                       <bool>true</bool>
-                      </property>
-                      <layout class="QVBoxLayout" name="systemTotalLayout">
+                      <layout class="QHBoxLayout" name="systemTotalLayout">
                        <property name="spacing">
-                        <number>1</number>
+                        <number>5</number>
                        </property>
                        <property name="leftMargin">
-                        <number>8</number>
+                        <number>0</number>
                        </property>
                        <property name="topMargin">
-                        <number>6</number>
+                        <number>2</number>
                        </property>
                        <property name="rightMargin">
-                        <number>8</number>
+                        <number>0</number>
                        </property>
                        <property name="bottomMargin">
-                        <number>6</number>
+                        <number>0</number>
                        </property>
                        <item>
-                        <widget class="QLabel" name="lblSystemTotalRmb">
-                         <property name="text">
-                          <string>系统总成本    ¥133.80</string>
+                        <widget class="QLabel" name="lblSystemTotalName">
+                         <property name="minimumSize">
+                          <size>
+                           <width>64</width>
+                           <height>0</height>
+                          </size>
                          </property>
-                         <property name="alignment">
-                          <set>Qt::AlignmentFlag::AlignCenter</set>
+                         <property name="maximumSize">
+                          <size>
+                           <width>64</width>
+                           <height>16777215</height>
+                          </size>
+                         </property>
+                         <property name="text">
+                          <string>总成本</string>
+                         </property>
+                         <property name="totalBold" stdset="0">
+                          <bool>true</bool>
+                         </property>
+                        </widget>
+                       </item>
+                       <item>
+                        <widget class="QLabel" name="lblSystemTotalRmb">
+                         <property name="sizePolicy">
+                          <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+                           <horstretch>0</horstretch>
+                           <verstretch>0</verstretch>
+                          </sizepolicy>
+                         </property>
+                         <property name="text">
+                          <string>—</string>
+                         </property>
+                         <property name="totalBold" stdset="0">
+                          <bool>true</bool>
                          </property>
                         </widget>
                        </item>
@@ -4546,8 +4554,8 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          <property name="text">
                           <string>$18.58 USD</string>
                          </property>
-                         <property name="alignment">
-                          <set>Qt::AlignmentFlag::AlignCenter</set>
+                         <property name="visible">
+                          <bool>false</bool>
                          </property>
                         </widget>
                        </item>

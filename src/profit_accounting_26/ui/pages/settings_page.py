@@ -287,10 +287,46 @@ class SettingsPage(QWidget):
         self.forwarder_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for col in (1, 2, 3):
             self.forwarder_table.setColumnWidth(col, 160)
-        self.forwarder_table.setColumnWidth(4, 110)
-        self.forwarder_table.setColumnWidth(5, 100)
+        self.forwarder_table.setColumnWidth(4, 80)
+        self.forwarder_table.setColumnWidth(5, 170)
+        # 固定行高：容纳复选框与操作按钮垂直居中，不新增横向滚动条
+        self.forwarder_table.verticalHeader().setDefaultSectionSize(44)
         self.forwarder_table.setColumnHidden(6, True)
         self.forwarder_table.setColumnHidden(7, True)
+
+    @staticmethod
+    def _center_cell(widget: QWidget) -> QWidget:
+        """表格单元格容器：让内部控件水平 + 垂直居中。"""
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(0)
+        layout.addWidget(widget, 0, Qt.AlignmentFlag.AlignCenter)
+        return container
+
+    def _build_forwarder_op_widget(self, identifier: str, archived: bool) -> QWidget:
+        """操作列容器：按钮水平 + 垂直居中，最小宽度保证文字不裁切。"""
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(4)
+        layout.addStretch(1)
+        if archived:
+            btn_restore = QPushButton("恢复")
+            btn_restore.setMinimumWidth(56)
+            btn_restore.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
+            layout.addWidget(btn_restore)
+            btn_delete = QPushButton("永久删除")
+            btn_delete.setMinimumWidth(76)
+            btn_delete.clicked.connect(lambda _checked=False, fid=identifier: self._delete_forwarder_permanently(fid))
+            layout.addWidget(btn_delete)
+        else:
+            btn_archive = QPushButton("归档")
+            btn_archive.setMinimumWidth(56)
+            btn_archive.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
+            layout.addWidget(btn_archive)
+        layout.addStretch(1)
+        return container
 
     # ------------------------------------------------------------------
     # 脏标记
@@ -540,27 +576,11 @@ class SettingsPage(QWidget):
         enabled_box.setChecked(bool(data.get("enabled", True)) and not is_archived)
         enabled_box.setEnabled(not is_archived)
         enabled_box.toggled.connect(lambda _checked: self._mark_dirty())
-        self.forwarder_table.setCellWidget(row, 4, enabled_box)
+        self.forwarder_table.setCellWidget(row, 4, self._center_cell(enabled_box))
 
         # 操作列：活动行=归档按钮，已归档行=恢复+永久删除
         identifier = str(data.get("id") or f"forwarder_{uuid4().hex}")
-        op_layout = QHBoxLayout()
-        op_layout.setContentsMargins(2, 2, 2, 2)
-        op_layout.setSpacing(4)
-        op_widget = QWidget()
-        if is_archived:
-            btn_restore = QPushButton("恢复")
-            btn_restore.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
-            op_layout.addWidget(btn_restore)
-            btn_delete = QPushButton("永久删除")
-            btn_delete.clicked.connect(lambda _checked=False, fid=identifier: self._delete_forwarder_permanently(fid))
-            op_layout.addWidget(btn_delete)
-        else:
-            btn_archive = QPushButton("归档")
-            btn_archive.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
-            op_layout.addWidget(btn_archive)
-        op_widget.setLayout(op_layout)
-        self.forwarder_table.setCellWidget(row, 5, op_widget)
+        self.forwarder_table.setCellWidget(row, 5, self._build_forwarder_op_widget(identifier, is_archived))
         self.forwarder_table.setItem(row, 6, QTableWidgetItem(identifier))
         self.forwarder_table.setItem(row, 7, QTableWidgetItem("1" if data.get("archived", False) else "0"))
         if raw is None:
@@ -581,8 +601,9 @@ class SettingsPage(QWidget):
         if is_archived:
             # 恢复：无需确认
             self.forwarder_table.item(row, 7).setText("0")
-            enabled_box = self.forwarder_table.cellWidget(row, 4)
-            if isinstance(enabled_box, QCheckBox):
+            enabled_container = self.forwarder_table.cellWidget(row, 4)
+            enabled_box = enabled_container.findChild(QCheckBox) if enabled_container is not None else None
+            if enabled_box is not None:
                 enabled_box.setChecked(True)
                 enabled_box.setEnabled(True)
             for col in range(4):
@@ -590,34 +611,15 @@ class SettingsPage(QWidget):
                 if item is not None:
                     item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
             # 重建操作按钮（归档）
-            op_widget = self.forwarder_table.cellWidget(row, 5)
-            if isinstance(op_widget, QWidget):
-                old_layout = op_widget.layout()
-                while old_layout and old_layout.count():
-                    it = old_layout.takeAt(0)
-                    if it.widget():
-                        it.widget().deleteLater()
-                op_layout = QHBoxLayout()
-                op_layout.setContentsMargins(2, 2, 2, 2)
-                op_layout.setSpacing(4)
-                btn_archive = QPushButton("归档")
-                btn_archive.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
-                op_layout.addWidget(btn_archive)
-                op_widget.setLayout(op_layout)
+            self.forwarder_table.setCellWidget(row, 5, self._build_forwarder_op_widget(identifier, archived=False))
         else:
             # 归档
-            answer = QMessageBox.question(
-                self,
-                "归档货代",
-                "归档后该货代将从当前测算与使用中列表移除，确定继续吗？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
+            if not confirm_action(self, "归档货代", "归档后该货代将从当前测算与使用中列表移除，确定继续吗？"):
                 return
             self.forwarder_table.item(row, 7).setText("1")
-            enabled_box = self.forwarder_table.cellWidget(row, 4)
-            if isinstance(enabled_box, QCheckBox):
+            enabled_container = self.forwarder_table.cellWidget(row, 4)
+            enabled_box = enabled_container.findChild(QCheckBox) if enabled_container is not None else None
+            if enabled_box is not None:
                 enabled_box.setChecked(False)
                 enabled_box.setEnabled(False)
             for col in range(4):
@@ -625,23 +627,7 @@ class SettingsPage(QWidget):
                 if item is not None:
                     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             # 重建操作按钮（恢复+永久删除）
-            op_widget = self.forwarder_table.cellWidget(row, 5)
-            if isinstance(op_widget, QWidget):
-                old_layout = op_widget.layout()
-                while old_layout and old_layout.count():
-                    it = old_layout.takeAt(0)
-                    if it.widget():
-                        it.widget().deleteLater()
-                op_layout = QHBoxLayout()
-                op_layout.setContentsMargins(2, 2, 2, 2)
-                op_layout.setSpacing(4)
-                btn_restore = QPushButton("恢复")
-                btn_restore.clicked.connect(lambda _checked=False, fid=identifier: self.toggle_forwarder_archive(fid))
-                op_layout.addWidget(btn_restore)
-                btn_delete = QPushButton("永久删除")
-                btn_delete.clicked.connect(lambda _checked=False, fid=identifier: self._delete_forwarder_permanently(fid))
-                op_layout.addWidget(btn_delete)
-                op_widget.setLayout(op_layout)
+            self.forwarder_table.setCellWidget(row, 5, self._build_forwarder_op_widget(identifier, archived=True))
         self._mark_dirty()
         self.filter_forwarders(self._show_archived_forwarders)
 
@@ -654,13 +640,13 @@ class SettingsPage(QWidget):
             QMessageBox.warning(self, "无法删除", "只能删除已归档的货代，使用中的货代请先归档。")
             return
         name = self.forwarder_table.item(row, 0).text()
-        answer = QMessageBox.question(
-            self, "永久删除",
+        if not confirm_action(
+            self,
+            "永久删除",
             f"确定永久删除货代「{name}」吗？\n\n历史记录将继续使用其保存的物流快照，不会被修改。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+            confirm_text="删除",
+            danger=True,
+        ):
             return
         self.forwarder_table.removeRow(row)
         # 永久删除 = 立即持久化，不等待“保存货代设置”
@@ -721,7 +707,8 @@ class SettingsPage(QWidget):
     def collect_forwarders(self) -> list[dict]:
         output = []
         for row in range(self.forwarder_table.rowCount()):
-            enabled_box = self.forwarder_table.cellWidget(row, 4)
+            enabled_container = self.forwarder_table.cellWidget(row, 4)
+            enabled_box = enabled_container.findChild(QCheckBox) if enabled_container is not None else None
             archived = self.forwarder_table.item(row, 7).text() == "1"
             try:
                 forwarder = Forwarder(
@@ -871,14 +858,7 @@ class SettingsPage(QWidget):
         row = self.current_rule_source_index()
         if row < 0:
             return
-        answer = QMessageBox.question(
-            self,
-            "归档规则",
-            "归档后该规则将从当前列表和主界面利润规则中移除，确定继续吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+        if not confirm_action(self, "归档规则", "归档后该规则将从当前列表和主界面利润规则中移除，确定继续吗？"):
             return
         self.rules_data[row]["archived"] = True
         self.rules_data[row]["enabled"] = False
@@ -891,14 +871,7 @@ class SettingsPage(QWidget):
         row = self.current_rule_source_index()
         if row < 0:
             return
-        answer = QMessageBox.question(
-            self,
-            "删除规则",
-            "确定永久删除当前规则吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+        if not confirm_action(self, "删除规则", "确定永久删除当前规则吗？", confirm_text="删除", danger=True):
             return
         deleted_id = self.rules_data[row].get("id")
         del self.rules_data[row]

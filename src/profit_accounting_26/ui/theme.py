@@ -45,6 +45,8 @@ QLabel[primary="true"] {{ color: {PRIMARY}; font-weight: 600; }}
 QLabel[success="true"] {{ color: {SUCCESS}; font-weight: 600; }}
 QLabel[danger="true"] {{ color: {DANGER}; font-weight: 600; }}
 QLabel[warning="true"] {{ color: {WARNING}; font-weight: 600; }}
+QLabel[zeroWarn="true"] {{ color: {DANGER}; }}
+QLabel[totalBold="true"] {{ font-weight: 600; }}
 QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox, QTextEdit {{
     background: #FFFFFF;
     border: 1px solid {BORDER};

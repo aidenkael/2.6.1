@@ -244,10 +244,10 @@ class TestSingleCostSource:
         _simulate_ai(page)
         page.recalculate()
         shenzhen_total = _total_from_label(page)
-        assert "深圳货代" in page.system_rows["forwarder"].text()
+        assert "深圳货代" in page.system_rows["first_mile"].text()
         page.selected_forwarder_id = yiwu_id
         page.recalculate()
-        assert "义乌货代" in page.system_rows["forwarder"].text()
+        assert "义乌货代" in page.system_rows["first_mile"].text()
         assert _total_from_label(page) != pytest.approx(shenzhen_total)
 
     def test_tail_usd_and_rate_change_sync_rmb_and_total(self, page):
@@ -273,10 +273,10 @@ class TestSingleCostSource:
         shown = _total_from_label(page)
         assert page.current_system_cost == pytest.approx(shown, abs=0.01)
         assert page.profit_binder._calculation_total_cost_rmb == pytest.approx(shown, abs=0.01)
-        # 四行唯一成本显示：国内成本 / 头程 / 尾程
-        assert "¥66.80" in page.system_rows["package"].text()
-        assert "¥28.00" in page.system_rows["package"].text()
-        assert "深圳货代" in page.system_rows["forwarder"].text()
+        # 六行唯一成本显示：采购成本 / 国内运费 / 头程(带货代名) / 服务费 / 尾程
+        assert "¥66.80" in page.system_rows["product"].text()
+        assert "¥28.00" in page.system_rows["domestic"].text()
+        assert "深圳货代" in page.system_rows["first_mile"].text()
         assert "$" in page.system_rows["tail"].text() and "¥" in page.system_rows["tail"].text()
 
 

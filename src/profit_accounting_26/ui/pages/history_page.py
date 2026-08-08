@@ -36,7 +36,7 @@ from profit_accounting_26.ui.pages.calibration_feedback_dialog import Calibratio
 from profit_accounting_26.ui.widgets import Card, ImagePreviewDialog, SectionHeader, confirm_action
 
 _THUMB_SIZE = 48
-_ROW_HEIGHT = 76
+_ROW_HEIGHT = 84
 _PLACEHOLDER_COLOR = QColor("#E7ECF3")
 _RECORD_ID_ROLE = 256
 
@@ -263,12 +263,18 @@ class HistoryPage(QWidget):
         self.table.setCellWidget(row, 7, self._multiline_cell(self._calibration_text(payload)))
 
     @staticmethod
-    def _multiline_cell(text: str) -> QLabel:
+    def _multiline_cell(text: str) -> QWidget:
+        """多行文字单元格：所有文字列第一行从统一顶部基线开始，不垂直居中。"""
         label = QLabel(text)
         label.setWordWrap(True)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        label.setContentsMargins(6, 4, 6, 4)
-        return label
+        container = QWidget()
+        column = QVBoxLayout(container)
+        column.setContentsMargins(6, 4, 6, 4)
+        column.setSpacing(0)
+        column.addWidget(label)
+        column.addStretch(1)
+        return container
 
     # ---------------------------------------------------------------- cells
 
@@ -321,6 +327,8 @@ class HistoryPage(QWidget):
             placeholder = QLabel("—")
             placeholder.setProperty("muted", True)
             column.addWidget(placeholder)
+        # 与其他文字列一致：内容顶部对齐
+        column.addStretch(1)
         return container
 
     # ---------------------------------------------------------------- texts

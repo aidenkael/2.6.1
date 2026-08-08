@@ -46,10 +46,16 @@ def temp_context(tmp_path, monkeypatch):
 
 @pytest.fixture
 def accept_all_dialogs(monkeypatch):
-    """所有 QMessageBox.question 返回 Yes（中文确认弹窗内部走 confirm_action 的不受影响）。"""
+    """确认类弹窗全部返回确认：中文弹窗走 confirm_action，旧路径兼容 question。"""
     monkeypatch.setattr(
         QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes)
     )
+    import profit_accounting_26.ui.pages.settings_page as spm
+
+    monkeypatch.setattr(spm, "confirm_action", lambda *a, **k: True)
+    # 永久删除后的 information 提示不阻塞
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
 
 
 def _install_two_forwarders(context):

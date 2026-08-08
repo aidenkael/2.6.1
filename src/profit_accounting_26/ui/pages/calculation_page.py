@@ -351,24 +351,21 @@ class CalculationPage(QWidget):
         # 系统成本
         self.btn_system_calculate = f(QPushButton, "btnSystemCalculate")
         self.system_rows: dict[str, QLabel] = {
-            "package": f(QLabel, "lblSystemCostValue0"),
-            "forwarder": f(QLabel, "lblSystemCostValue1"),
-            "actual": f(QLabel, "lblSystemCostValue2"),
-            "volume": f(QLabel, "lblSystemCostValue3"),
-            "chargeable": f(QLabel, "lblSystemCostValue4"),
-            "logistics": f(QLabel, "lblSystemCostValue5"),
+            # 六行固定排版：采购成本 / 国内运费 / 头程 / 服务费 / 尾程 / 总成本
+            "product": f(QLabel, "lblSystemCostValue0"),
+            "domestic": f(QLabel, "lblSystemCostValue1"),
+            "first_mile": f(QLabel, "lblSystemCostValue2"),
+            "service": f(QLabel, "lblSystemCostValue3"),
             "tail": f(QLabel, "lblSystemCostValue6"),
         }
         self.system_total = f(QLabel, "lblSystemTotalRmb")
         self.system_total_usd = f(QLabel, "lblSystemTotalUsd")
         # 系统成本名称列（与 system_rows 一一对应）
         self.system_names: dict[str, QLabel] = {
-            "package": f(QLabel, "lblSystemCostName0"),
-            "forwarder": f(QLabel, "lblSystemCostName1"),
-            "actual": f(QLabel, "lblSystemCostName2"),
-            "volume": f(QLabel, "lblSystemCostName3"),
-            "chargeable": f(QLabel, "lblSystemCostName4"),
-            "logistics": f(QLabel, "lblSystemCostName5"),
+            "product": f(QLabel, "lblSystemCostName0"),
+            "domestic": f(QLabel, "lblSystemCostName1"),
+            "first_mile": f(QLabel, "lblSystemCostName2"),
+            "service": f(QLabel, "lblSystemCostName3"),
             "tail": f(QLabel, "lblSystemCostName6"),
         }
         # 底部
@@ -481,17 +478,8 @@ class CalculationPage(QWidget):
         else:  # 防御：布局缺失时仍保证字段可用
             self.user_correction = _TextAdapter(QTextEdit())
         self.user_correction.textChanged.connect(lambda _text: self._user_calibration_changed())
-        # 4) 系统成本卡收敛为唯一成本来源四行：总成本 / 国内成本 / 头程 / 尾程
-        self.system_names["package"].setText("国内成本")
-        self.system_names["forwarder"].setText("头程")
-        self.system_names["tail"].setText("尾程")
-        for key in ("actual", "volume", "chargeable", "logistics"):
-            name_label = self.system_names.get(key)
-            value_label = self.system_rows.get(key)
-            if name_label is not None:
-                name_label.setVisible(False)
-            if value_label is not None:
-                value_label.setVisible(False)
+        # 4) 系统成本卡固定六行：采购成本 / 国内运费 / 头程 / 服务费 / 尾程 / 总成本；
+        # 标签与金额对齐由静态 UI 统一宽度完成，旧的重量/计费重/物流总价行保持静态隐藏
 
     def _apply_round3_ui_polish(self) -> None:
         """第三轮 UI 精修：尾程输入移到系统成本区；利润规则状态放标题上方。
@@ -1466,6 +1454,7 @@ class CalculationPage(QWidget):
         for value in self.system_rows.values():
             if value is not None:
                 value.setText("—")
+                self._set_zero_warn(value, False)
         if self.system_total is not None:
             self.system_total.setText("—")
         if self.system_total_usd is not None:
@@ -1506,25 +1495,39 @@ class CalculationPage(QWidget):
             return
         self.current_quote = selected_quote
         self.current_forwarder = selected_forwarder
-        system_cost = self.product_cost.value() + self.domestic_shipping.value() + selected_quote.total_logistics_rmb
+        product_cost = self.product_cost.value()
+        domestic_shipping = self.domestic_shipping.value()
+        system_cost = product_cost + domestic_shipping + selected_quote.total_logistics_rmb
         self.current_system_cost = system_cost
-        # 唯一成本来源四行：国内成本 = 商品成本 + 国内运费；
-        # 头程 = 头程费 + 当前货代固定服务费；尾程 USD 仅供查看，参与计算的是尾程人民币。
-        self._set_system_row("package", f"¥{self.product_cost.value():.2f} + ¥{self.domestic_shipping.value():.2f}")
-        self._set_system_row("forwarder", f"{selected_forwarder.name}  ¥{selected_quote.weight_fee_rmb:.2f} + ¥{selected_quote.fixed_fee_rmb:.2f}")
+        # 六行只读当前正式 Calculation 结果，不在 UI 重新实现成本公式；
+        # 采购成本/国内运费为 0 时仅用红色弱提醒，不阻止计算。
+        self._set_system_row("product", f"¥{product_cost:.2f}", zero_warn=product_cost == 0)
+        self._set_system_row("domestic", f"¥{domestic_shipping:.2f}", zero_warn=domestic_shipping == 0)
+        self._set_system_row("first_mile", f"{selected_forwarder.name}  ¥{selected_quote.weight_fee_rmb:.2f}")
+        self._set_system_row("service", f"¥{selected_quote.fixed_fee_rmb:.2f}")
         self._set_system_row("tail", f"${self.tail_fee_usd.value():.2f} / ¥{self.tail_fee_rmb.value():.2f}")
         rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
         if self.system_total is not None:
-            self.system_total.setText(f"总成本    ¥{system_cost:.2f}")
+            self.system_total.setText(f"¥{system_cost:.2f}")
         if self.system_total_usd is not None:
             self.system_total_usd.setText(f"${system_cost / rate:.2f}" if rate > 0 else "—")
         self.profit_binder.set_calculation_cost(system_cost)
         self.context.diagnostic_logger.event("forwarder_calculated", package=scenario.to_dict(), forwarder_id=selected_forwarder.id, quote=asdict(selected_quote), system_cost=system_cost)
 
-    def _set_system_row(self, key: str, text: str) -> None:
+    def _set_system_row(self, key: str, text: str, *, zero_warn: bool = False) -> None:
         label = self.system_rows.get(key)
         if label is not None:
             label.setText(text)
+            self._set_zero_warn(label, zero_warn)
+
+    @staticmethod
+    def _set_zero_warn(label: QLabel, enabled: bool) -> None:
+        """0 金额红色弱提醒：只改动态属性，不弹错、不改值、不阻止计算。"""
+        if label.property("zeroWarn") == enabled:
+            return
+        label.setProperty("zeroWarn", enabled)
+        label.style().unpolish(label)
+        label.style().polish(label)
 
     # ------------------------------------------------------------------
     # 记录
