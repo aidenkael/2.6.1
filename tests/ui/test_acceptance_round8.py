@@ -157,10 +157,10 @@ class TestTailFeeUsdLiveLink:
         """填充完整计算场景（成本 + 包装 + 货代），使 recalculate 产生实际报价。"""
         page.product_cost.spin.setValue(50.0)
         page.domestic_shipping.spin.setValue(5.0)
+        # 当前采用（右卡）是唯一正式包装计算输入
         for key in ("length", "width", "height"):
-            page.normal_fields[key].spin.setValue(20.0)
-        page.normal_fields["weight"].spin.setValue(500.0)
-        page.normal_fields["radio"].setChecked(True)
+            page.conservative_fields[key].spin.setValue(20.0)
+        page.conservative_fields["weight"].spin.setValue(500.0)
 
         # 添加两个启用的测试货代
         settings = page.context.settings_service.load()

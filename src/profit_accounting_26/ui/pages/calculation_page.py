@@ -219,6 +219,7 @@ class CalculationPage(QWidget):
         self._local_dialog: QDialog | None = None
         self._ai_baseline: dict[str, Any] | None = None
         self.initial_ai_snapshot: dict[str, Any] | None = None
+        self.current_feedback_id: str | None = None
         self._recognized_image_fingerprint: tuple[tuple[str, str], ...] = ()
         self._accepted_bare_fields: set[str] = set()
         self._pending_confirmed_normal: dict[str, Any] = {}
@@ -313,9 +314,9 @@ class CalculationPage(QWidget):
         self.bare_width = self._dim_spin("spinBareWidthCm")
         self.bare_height = self._dim_spin("spinBareHeightCm")
         self.bare_weight = self._weight_spin("spinBareWeightG")
-        # 正常档包装（方式由 AI/CAL 生成，只读）
+        # AI估算（原正常档位置）：第一次 AI 结果，全部只读，不参与正式计算
         self.normal_fields: dict[str, Any] = {
-            "name": "正常档",
+            "name": "AI估算",
             "card": f(QWidget, "normalPackageCard"),
             "radio": f(QRadioButton, "radioNormalPackage"),
             "method": _TextAdapter(f(QTextEdit, "txtNormalReminder")),
@@ -324,9 +325,9 @@ class CalculationPage(QWidget):
             "height": self._dim_spin("spinNormalHeightCm"),
             "weight": self._weight_spin("spinNormalWeightG"),
         }
-        # 保守档包装（方式与尺寸均可编辑）
+        # 当前采用（原保守档位置）：唯一正式包装输入，用户可手动修正
         self.conservative_fields: dict[str, Any] = {
-            "name": "保守档",
+            "name": "当前采用",
             "card": f(QWidget, "conservativePackageCard"),
             "radio": f(QRadioButton, "radioConservativePackage"),
             "method": _TextAdapter(f(QLineEdit, "txtConservativeMethod")),
@@ -354,10 +355,21 @@ class CalculationPage(QWidget):
         }
         self.system_total = f(QLabel, "lblSystemTotalRmb")
         self.system_total_usd = f(QLabel, "lblSystemTotalUsd")
+        # 系统成本名称列（与 system_rows 一一对应）
+        self.system_names: dict[str, QLabel] = {
+            "package": f(QLabel, "lblSystemCostName0"),
+            "forwarder": f(QLabel, "lblSystemCostName1"),
+            "actual": f(QLabel, "lblSystemCostName2"),
+            "volume": f(QLabel, "lblSystemCostName3"),
+            "chargeable": f(QLabel, "lblSystemCostName4"),
+            "logistics": f(QLabel, "lblSystemCostName5"),
+            "tail": f(QLabel, "lblSystemCostName6"),
+        }
         # 底部
         self.product_link = f(QLineEdit, "txtProductLink")
         self.btn_save_record = f(QPushButton, "btnSaveCurrentRecord")
         self.btn_clear_new = f(QPushButton, "btnClearAndNew")
+        self._apply_adopted_flow_ui()
 
     def _cost_spin(self, name: str, *, maximum: float) -> _SpinAdapter:
         spin = self._root.findChild(QDoubleSpinBox, name)
@@ -376,6 +388,87 @@ class CalculationPage(QWidget):
         spin.setRange(0.0, 100_000.0)
         spin.setDecimals(1)
         return _SpinAdapter(spin)
+
+    def _apply_adopted_flow_ui(self) -> None:
+        """把双档收敛为 AI估算 / 当前采用：隐藏选档、左卡只读冻结、右卡可编辑、增加用户修正。
+
+        不改变主界面左右布局，只复用现有两个包装卡的位置；
+        旧 normal/conservative 控件与数据字段保留兼容。
+        """
+        f = self._root.findChild
+        # 1) 标题与副标题：隐藏 radio，在原位置放固定文案
+        for fields, title, subtitle_text in (
+            (self.normal_fields, "AI估算", "第一次 AI 估算结果 · 只读"),
+            (self.conservative_fields, "当前采用", "用户可手动修正"),
+        ):
+            radio = fields.get("radio")
+            if radio is not None:
+                radio.setVisible(False)
+            layout = fields["card"].layout()
+            title_label = QLabel(title)
+            title_label.setFixedHeight(20)
+            title_label.setStyleSheet("font-weight: 600;")
+            subtitle = QLabel(subtitle_text)
+            subtitle.setFixedHeight(18)
+            subtitle.setProperty("hint", True)
+            if isinstance(layout, QGridLayout):
+                layout.addWidget(title_label, 0, 0, 1, 2)
+                layout.addWidget(subtitle, 0, 2, 1, 1)
+        # 2) 左卡 AI估算全部只读；右卡 当前采用全部可编辑
+        for key in ("length", "width", "height", "weight"):
+            self.normal_fields[key].spin.setReadOnly(True)
+        self.normal_fields["method"]._widget.setPlaceholderText("AI估算包装方式（第一次 AI 结果，只读）")
+        for key in ("length", "width", "height", "weight"):
+            spin = self.conservative_fields[key].spin
+            spin.setReadOnly(False)
+            spin.setProperty("preview", False)
+            spin.style().unpolish(spin)
+            spin.style().polish(spin)
+        method_edit = self.conservative_fields["method"]._widget
+        method_edit.setReadOnly(False)
+        method_edit.setProperty("preview", False)
+        method_edit.setPlaceholderText("当前采用包装方式（可修改）")
+        method_edit.style().unpolish(method_edit)
+        method_edit.style().polish(method_edit)
+        method_label = f(QLabel, "lblConservativeMethod")
+        if method_label is not None:
+            method_label.setText("包装方式")
+        conservative_card = self.conservative_fields["card"]
+        conservative_card.setProperty("frozen", False)
+        conservative_card.style().unpolish(conservative_card)
+        conservative_card.style().polish(conservative_card)
+        self._style_card(self.normal_fields, selected=False)
+        self._style_card(self.conservative_fields, selected=True)
+        # 3) 当前采用框底部增加“用户修正”自然语言输入（属于用户观察/修正，不是实测数据）
+        grid = f(QGridLayout, "conservativePackageLayout")
+        if grid is not None:
+            note_label = QLabel("用户修正")
+            note_label.setFixedHeight(20)
+            note_edit = QTextEdit()
+            note_edit.setFixedHeight(52)
+            note_edit.setMinimumWidth(90)
+            note_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            note_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            note_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+            note_edit.setAcceptRichText(False)
+            note_edit.setPlaceholderText("这个包可以压扁，肩带可以拆下来单独放")
+            grid.addWidget(note_label, 5, 0, 1, 3)
+            grid.addWidget(note_edit, 6, 0, 1, 3)
+            self.user_correction = _TextAdapter(note_edit)
+        else:  # 防御：布局缺失时仍保证字段可用
+            self.user_correction = _TextAdapter(QTextEdit())
+        self.user_correction.textChanged.connect(lambda _text: self._mark_dirty())
+        # 4) 系统成本卡收敛为唯一成本来源四行：总成本 / 国内成本 / 头程 / 尾程
+        self.system_names["package"].setText("国内成本")
+        self.system_names["forwarder"].setText("头程")
+        self.system_names["tail"].setText("尾程")
+        for key in ("actual", "volume", "chargeable", "logistics"):
+            name_label = self.system_names.get(key)
+            value_label = self.system_rows.get(key)
+            if name_label is not None:
+                name_label.setVisible(False)
+            if value_label is not None:
+                value_label.setVisible(False)
 
     def _build_dynamic_regions(self) -> None:
         """清除 Designer 预览控件，准备动态图片框与货代卡片容器。"""
@@ -444,9 +537,12 @@ class CalculationPage(QWidget):
     def _connect_calculation_signals(self) -> None:
         for widget in (self.product_cost, self.domestic_shipping, self.tail_fee_usd, self.tail_fee_rmb):
             widget.valueChanged.connect(lambda _value: self._mark_dirty())
+        # 商品成本 / 国内运费实时联动：修改后立即重算唯一总成本，不等编辑完成
+        self.product_cost.valueChanged.connect(lambda _value: self.recalculate())
+        self.domestic_shipping.valueChanged.connect(lambda _value: self.recalculate())
         self.product_link.textChanged.connect(lambda _text: self._mark_dirty())
 
-        for name, fields in (("正常档", self.normal_fields), ("保守档", self.conservative_fields)):
+        for name, fields in (("AI估算", self.normal_fields), ("当前采用", self.conservative_fields)):
             fields["method"].textChanged.connect(lambda _text, n=name: self._scenario_manually_changed(n))
             for key in ("length", "width", "height", "weight"):
                 fields[key].valueChanged.connect(lambda _value, n=name: self._scenario_manually_changed(n))
@@ -477,8 +573,6 @@ class CalculationPage(QWidget):
         self.btn_system_calculate.clicked.connect(self.recalculate)
         self.btn_save_record.clicked.connect(self.save_record)
         self.btn_clear_new.clicked.connect(self.clear_new)
-        self.normal_fields["radio"].clicked.connect(lambda: self._select_package("正常档", user=True))
-        self.conservative_fields["radio"].clicked.connect(lambda: self._select_package("保守档", user=True))
 
     def _on_no_structure_toggled(self, checked: bool) -> None:
         if self._updating:
@@ -1116,12 +1210,16 @@ class CalculationPage(QWidget):
     def apply_proposal(self, proposal: PackagingProposal) -> None:
         previous_updating = self._updating
         self._updating = True
-        for scenario, fields in ((proposal.normal, self.normal_fields), (proposal.conservative, self.conservative_fields)):
-            fields["method"].setText(scenario.packaging_method)
-            fields["length"].setValue(scenario.length_cm or 0)
-            fields["width"].setValue(scenario.width_cm or 0)
-            fields["height"].setValue(scenario.height_cm or 0)
-            fields["weight"].setValue(scenario.weight_g or 0)
+        # 只在第一次 AI（initial_ai_snapshot 尚未捕获）时写入两框：
+        # AI估算与当前采用复制完全相同的首次 AI 数据；
+        # 同会话再次 AI / 局部重估不得静默覆盖已冻结的首次结果或用户已编辑的当前采用。
+        if self.initial_ai_snapshot is None:
+            for fields in (self.normal_fields, self.conservative_fields):
+                fields["method"].setText(proposal.normal.packaging_method)
+                fields["length"].setValue(proposal.normal.length_cm or 0)
+                fields["width"].setValue(proposal.normal.width_cm or 0)
+                fields["height"].setValue(proposal.normal.height_cm or 0)
+                fields["weight"].setValue(proposal.normal.weight_g or 0)
         self._updating = previous_updating
         if proposal.needs_review:
             self.review_badge.setText("需要复核")
@@ -1161,14 +1259,10 @@ class CalculationPage(QWidget):
         self.recalculate()
 
     def _select_package(self, name: str, *, user: bool) -> None:
-        normal_selected = name == "正常档"
-        self.normal_fields["radio"].setChecked(normal_selected)
-        self.conservative_fields["radio"].setChecked(not normal_selected)
-        if user:
-            self.package_selection_changed = True
-            self._mark_dirty()
-        self._style_card(self.normal_fields, selected=normal_selected)
-        self._style_card(self.conservative_fields, selected=not normal_selected)
+        """旧选档入口（兼容调用）：当前采用是唯一正式输入，不再存在选档操作。"""
+        del name, user
+        self._style_card(self.normal_fields, selected=False)
+        self._style_card(self.conservative_fields, selected=True)
         self.recalculate()
 
     @staticmethod
@@ -1183,21 +1277,21 @@ class CalculationPage(QWidget):
         card.update()
 
     def current_scenario(self) -> PackagingScenario:
-        fields = self.normal_fields if self.normal_fields["radio"].isChecked() else self.conservative_fields
+        """当前采用（右卡）是唯一正式包装计算输入；AI估算只作对照，不参与计算。"""
+        fields = self.conservative_fields
         label = str(fields["name"])
-        source = None
-        if self._adopted_packaging():
-            source = self._adopted_packaging().normal if label == "正常档" else self._adopted_packaging().conservative
+        source = self._adopted_packaging().conservative if self._adopted_packaging() else None
         manual = label in self.manual_scenarios
+        method_text = fields["method"].text().strip() if fields.get("method") else ""
         return PackagingScenario(
             label=label,
             packaging_state=source.packaging_state if source else self.observation_to_state(),
-            packaging_method=source.packaging_method if source else "",
+            packaging_method=method_text or (source.packaging_method if source else ""),
             length_cm=fields["length"].value() or None,
             width_cm=fields["width"].value() or None,
             height_cm=fields["height"].value() or None,
             weight_g=fields["weight"].value() or None,
-            reasoning_summary=self._adopted_packaging().normal.reasoning_summary if (source and label == "正常档") else (fields["method"].text() if fields.get("method") else ""),
+            reasoning_summary=method_text or (source.reasoning_summary if source else ""),
             confidence="low" if manual else (source.confidence if source else "low"),
             needs_review=True if manual else (source.needs_review if source else True),
             default_fields_used=list(source.default_fields_used) if source else [],
@@ -1322,16 +1416,14 @@ class CalculationPage(QWidget):
         self.current_forwarder = selected_forwarder
         system_cost = self.product_cost.value() + self.domestic_shipping.value() + selected_quote.total_logistics_rmb
         self.current_system_cost = system_cost
-        self._set_system_row("package", scenario.label)
-        self._set_system_row("forwarder", selected_forwarder.name)
-        self._set_system_row("actual", f"{selected_quote.actual_weight_kg:.3f} kg")
-        self._set_system_row("volume", f"{selected_quote.volume_weight_kg:.3f} kg")
-        self._set_system_row("chargeable", f"{selected_quote.chargeable_weight_kg:.3f} kg")
-        self._set_system_row("logistics", f"¥{selected_quote.total_logistics_rmb:.2f}")
-        self._set_system_row("tail", f"¥{self.tail_fee_rmb.value():.2f}")
+        # 唯一成本来源四行：国内成本 = 商品成本 + 国内运费；
+        # 头程 = 头程费 + 当前货代固定服务费；尾程 USD 仅供查看，参与计算的是尾程人民币。
+        self._set_system_row("package", f"¥{self.product_cost.value():.2f} + ¥{self.domestic_shipping.value():.2f}")
+        self._set_system_row("forwarder", f"{selected_forwarder.name}  ¥{selected_quote.weight_fee_rmb:.2f} + ¥{selected_quote.fixed_fee_rmb:.2f}")
+        self._set_system_row("tail", f"${self.tail_fee_usd.value():.2f} / ¥{self.tail_fee_rmb.value():.2f}")
         rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
         if self.system_total is not None:
-            self.system_total.setText(f"¥{system_cost:.2f}")
+            self.system_total.setText(f"总成本    ¥{system_cost:.2f}")
         if self.system_total_usd is not None:
             self.system_total_usd.setText(f"${system_cost / rate:.2f}" if rate > 0 else "—")
         self.profit_binder.set_calculation_cost(system_cost)
@@ -1357,8 +1449,9 @@ class CalculationPage(QWidget):
             height_cm=self.normal_fields["height"].value() or None,
             weight_g=self.normal_fields["weight"].value() or None,
             reasoning_summary=self._adopted_packaging().normal.reasoning_summary if self._adopted_packaging() else "",
-            confidence="low" if "正常档" in self.manual_scenarios else "medium",
-            needs_review="正常档" in self.manual_scenarios,
+            # AI估算（左卡）只读，永远不会被人工修改
+            confidence="medium",
+            needs_review=False,
         )
         conservative = PackagingScenario(
             label="保守档",
@@ -1369,8 +1462,9 @@ class CalculationPage(QWidget):
             height_cm=self.conservative_fields["height"].value() or None,
             weight_g=self.conservative_fields["weight"].value() or None,
             reasoning_summary=self._adopted_packaging().conservative.reasoning_summary if self._adopted_packaging() else "",
-            confidence="low" if "保守档" in self.manual_scenarios else "medium",
-            needs_review="保守档" in self.manual_scenarios,
+            # 当前采用（右卡）是唯一正式输入；用户修改即需要复核
+            confidence="low" if ("当前采用" in self.manual_scenarios or "保守档" in self.manual_scenarios) else "medium",
+            needs_review="当前采用" in self.manual_scenarios or "保守档" in self.manual_scenarios,
         )
         profit_scenarios = self.profit_binder.export_profit_scenarios()
         no_activity = profit_scenarios.get("no_activity", {})
@@ -1406,7 +1500,9 @@ class CalculationPage(QWidget):
                     },
                     "normal": normal.to_dict(),
                     "conservative": conservative.to_dict(),
-                    "selected_packaging": scenario.label,
+                    # 当前采用是唯一正式输入；固定指向 conservative 槽，
+                    # 使 record_service 派生的 current_estimate 始终等于当前采用。
+                    "selected_packaging": "保守档",
                     "selected_forwarder_id": self.selected_forwarder_id,
                     "calculation_cost_rmb": adopted_cost,
                     "packaging_estimate_stale": self.packaging_stale,
@@ -1457,6 +1553,11 @@ class CalculationPage(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "保存失败", str(exc))
             return
+        try:
+            self._save_user_feedback()
+        except Exception as exc:
+            self.context.diagnostic_logger.event("user_feedback_save_failed", record_id=self.record_id, error=str(exc))
+            QMessageBox.warning(self, "用户修正未保存", f"记录已保存，但用户修正保存失败：{exc}")
         self.mark_saved()
         self.context.diagnostic_logger.event("record_saved", record_id=self.record_id)
         # The local reestimate baseline belongs to one unsaved measurement
@@ -1468,6 +1569,60 @@ class CalculationPage(QWidget):
         self.ai_button.setEnabled(True)
         self.saved.emit(self.record_id)
         QMessageBox.information(self, "保存成功", f"记录已保存：{self.record_id}")
+
+    def _save_user_feedback(self) -> None:
+        """把用户修正/当前采用差异保存为 CalibrationFeedback（source=user）。
+
+        主界面的当前采用属于用户修正，不是实际发货实测：
+        绝不写 actual_logistics，也不标记 actual_measured。
+        已有 feedback 时更新同一个 feedback_id，并保留其中已录入的实测数据。
+        """
+        if not self.record_id:
+            return
+        note = self.user_correction.text().strip() or None
+        adopted = self._card_package_dict(self.conservative_fields)
+        ai_estimate = self._card_package_dict(self.normal_fields)
+        keys = ("packaging_method", "length_cm", "width_cm", "height_cm", "weight_g")
+        adopted_filled = any(adopted[key] is not None for key in keys)
+        left_empty = not any(ai_estimate[key] is not None for key in keys)
+        # 当前采用与 AI估算 一致且左侧有数据时不重复保存建议值
+        suggested = None
+        if adopted_filled and (left_empty or adopted != ai_estimate):
+            suggested = dict(adopted)
+            suggested["evidence_level"] = "user_suggested"
+        if note is None and suggested is None:
+            return
+        data: dict[str, Any] = {"record_id": self.record_id, "source": "user", "user_note": note}
+        if suggested is not None:
+            data["suggested_package"] = suggested
+        if self.current_feedback_id:
+            try:
+                existing = self.context.calibration_feedback_service.load(self.current_feedback_id)
+            except KeyError:
+                self.current_feedback_id = None
+            else:
+                # 更新时保留对话框已录入的实际测量与结构反馈，禁止互相清掉
+                data["feedback_id"] = existing.feedback_id
+                if existing.actual_logistics is not None and existing.actual_logistics.has_content():
+                    data["actual_logistics"] = existing.actual_logistics.to_dict()
+                if existing.structure.has_content():
+                    data["structure"] = existing.structure.to_dict()
+        feedback_id = self.context.calibration_feedback_service.save(data)
+        if feedback_id != self.current_feedback_id:
+            self.current_feedback_id = feedback_id
+            self.context.history_record_v2_service.link_feedback(self.record_id, feedback_id)
+
+    @staticmethod
+    def _card_package_dict(fields: dict[str, Any]) -> dict[str, Any]:
+        """读取一个包装卡片为五字段 dict（空值归一为 None）。"""
+        method_text = str(fields["method"].text()).strip() if fields.get("method") else ""
+        return {
+            "packaging_method": method_text or None,
+            "length_cm": fields["length"].value() or None,
+            "width_cm": fields["width"].value() or None,
+            "height_cm": fields["height"].value() or None,
+            "weight_g": fields["weight"].value() or None,
+        }
 
     def clear_new(self) -> None:
         if self.dirty:
@@ -1487,6 +1642,8 @@ class CalculationPage(QWidget):
         self.session = CalculationSession()
         self._ai_baseline = None
         self.initial_ai_snapshot = None
+        self.current_feedback_id = None
+        self.user_correction.clear()
         self._recognized_image_fingerprint = ()
         self._accepted_bare_fields.clear()
         self._pending_confirmed_normal = {}
@@ -1564,20 +1721,39 @@ class CalculationPage(QWidget):
         self.bare_width.setValue(float(bare.get("width_cm") or 0))
         self.bare_height.setValue(float(bare.get("height_cm") or 0))
         self.bare_weight.setValue(float(bare.get("weight_g") or 0))
-        for key, fields in (("normal", self.normal_fields), ("conservative", self.conservative_fields)):
-            raw = adopted.get(key, {})
-            fields["method"].setText(str(raw.get("packaging_method") or ""))
-            fields["length"].setValue(float(raw.get("length_cm") or 0))
-            fields["width"].setValue(float(raw.get("width_cm") or 0))
-            fields["height"].setValue(float(raw.get("height_cm") or 0))
-            fields["weight"].setValue(float(raw.get("weight_g") or 0))
-            if raw.get("needs_review"):
-                self.manual_scenarios.add("正常档" if key == "normal" else "保守档")
-            if key == "normal" and raw.get("needs_review") and not self.observation.display_packaging_summary:
-                legacy_instruction = str(raw.get("packaging_method") or "").strip()
-                if legacy_instruction:
-                    self.observation.display_packaging_summary = legacy_instruction
-                    self.structure_summary.setText(legacy_instruction)
+        # AI估算（左卡）：优先第一次 AI 结果（_v2.ai_initial），旧记录回退 adopted.normal
+        v2 = record.get("_v2") if isinstance(record.get("_v2"), dict) else {}
+        ai_initial = v2.get("ai_initial") if isinstance(v2.get("ai_initial"), dict) else {}
+        ai_initial_pkg = ai_initial.get("adopted_packaging") if isinstance(ai_initial.get("adopted_packaging"), dict) else {}
+        left_raw = ai_initial_pkg.get("normal") if isinstance(ai_initial_pkg.get("normal"), dict) else None
+        self._fill_package_fields(self.normal_fields, left_raw or adopted.get("normal", {}))
+        # 当前采用（右卡）：优先 current_estimate，旧记录回退 selected 槽（不伪造第一次 AI 数据）
+        current_estimate = v2.get("current_estimate")
+        right_raw = None
+        if isinstance(current_estimate, dict) and any(current_estimate.get(key) is not None for key in ("packaging_method", "length_cm", "width_cm", "height_cm", "weight_g")):
+            right_raw = current_estimate
+        else:
+            selected_slot = str(adopted.get("selected_packaging") or "正常档")
+            right_raw = adopted.get("conservative" if selected_slot == "保守档" else "normal", {})
+        self._fill_package_fields(self.conservative_fields, right_raw)
+        if adopted.get("conservative", {}).get("needs_review"):
+            self.manual_scenarios.add("当前采用")
+        if adopted.get("normal", {}).get("needs_review") and not self.observation.display_packaging_summary:
+            legacy_instruction = str(adopted.get("normal", {}).get("packaging_method") or "").strip()
+            if legacy_instruction:
+                self.observation.display_packaging_summary = legacy_instruction
+                self.structure_summary.setText(legacy_instruction)
+        # 用户修正与 feedback 关联恢复（同一 feedback_id 更新语义）
+        self.current_feedback_id = str(v2.get("calibration_feedback_id") or "") or None
+        self.user_correction.clear()
+        if self.current_feedback_id:
+            try:
+                feedback = self.context.calibration_feedback_service.load(self.current_feedback_id)
+            except KeyError:
+                self.current_feedback_id = None
+            else:
+                if feedback.user_note:
+                    self.user_correction.setText(feedback.user_note)
         selected_package = str(adopted.get("selected_packaging") or "正常档")
         self.selected_forwarder_id = str(adopted.get("selected_forwarder_id") or self.selected_forwarder_id)
         calculated = layers.get("calculated", {})
@@ -1637,6 +1813,16 @@ class CalculationPage(QWidget):
         finally:
             self.profit_binder._loading_record = False
         self.mark_saved()
+
+    @staticmethod
+    def _fill_package_fields(fields: dict[str, Any], raw: dict[str, Any]) -> None:
+        """把包装 dict 写入卡片字段（缺失归一为 0/空）。"""
+        raw = raw if isinstance(raw, dict) else {}
+        fields["method"].setText(str(raw.get("packaging_method") or ""))
+        fields["length"].setValue(float(raw.get("length_cm") or 0))
+        fields["width"].setValue(float(raw.get("width_cm") or 0))
+        fields["height"].setValue(float(raw.get("height_cm") or 0))
+        fields["weight"].setValue(float(raw.get("weight_g") or 0))
 
     def set_product_link(self, link: str) -> None:
         if self.product_link is not None and link.strip():
