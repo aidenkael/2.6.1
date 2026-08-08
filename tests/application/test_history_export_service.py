@@ -240,6 +240,24 @@ def test_sanitization_strips_secrets_and_paths(env):
     assert cleaned == {"nested": {"ok": 1}, "path": "a.jpg"}
 
 
+@pytest.mark.parametrize(
+    "path_text",
+    [
+        r"C:\Users\User\a.jpg",
+        "C:/Users/User/a.jpg",
+        r"\\server\share\folder\a.jpg",
+        "/home/user/a.jpg",
+    ],
+)
+def test_sanitize_absolute_paths_cross_platform(path_text):
+    assert sanitize_for_export(path_text) == "a.jpg"
+
+
+def test_sanitize_plain_strings_unchanged():
+    assert sanitize_for_export("soft handbag") == "soft handbag"
+    assert sanitize_for_export("model-name") == "model-name"
+
+
 def test_export_aborts_when_secret_pattern_remains(env):
     store, feedback, exporter, tmp_path = env
     record_id = _record(store, "泄漏")

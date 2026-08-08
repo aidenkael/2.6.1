@@ -23,7 +23,7 @@ import json
 import re
 import zipfile
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 from uuid import uuid4
 
@@ -47,6 +47,16 @@ _SECRET_PATTERNS = (
 )
 
 
+def _basename_for_export(text: str) -> str:
+    """跨平台提取绝对路径的 basename，普通字符串原样返回。"""
+    if re.fullmatch(r"[A-Za-z]:[\\/].*", text) or text.startswith("\\\\"):
+        # Windows 风格绝对路径 / UNC：无论运行平台都按 Windows 分隔符解析
+        return PureWindowsPath(text).name
+    if text.startswith("/"):
+        return PurePosixPath(text).name
+    return text
+
+
 def sanitize_for_export(value: Any) -> Any:
     """递归脱敏：剥离敏感键、替换 data URL、去除路径中的目录信息。"""
     if isinstance(value, dict):
@@ -63,7 +73,7 @@ def sanitize_for_export(value: Any) -> Any:
         if text.lower().startswith("data:image"):
             return "[image base64 omitted]"
         if re.fullmatch(r"[A-Za-z]:[\\/].*", text) or text.startswith(("/", "\\\\")):
-            return Path(text).name  # 绝对路径只保留文件名
+            return _basename_for_export(text)  # 绝对路径只保留文件名
         return value
     return value
 
