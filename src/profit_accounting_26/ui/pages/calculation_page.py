@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from profit_accounting_26.application import AppContext, CalculationService, ImageSession
+from profit_accounting_26.application.api_profile_store import VISUAL_AI
 from profit_accounting_26.application.calculation_session import CalculationSession
 from profit_accounting_26.application.category_normalizer import normalize_observation
 from profit_accounting_26.application.packaging_presentation import normal_reminder, packaging_summary, product_summary
@@ -217,6 +218,7 @@ class CalculationPage(QWidget):
         self._local_worker: LocalReestimateWorker | None = None
         self._local_dialog: QDialog | None = None
         self._ai_baseline: dict[str, Any] | None = None
+        self.initial_ai_snapshot: dict[str, Any] | None = None
         self._recognized_image_fingerprint: tuple[tuple[str, str], ...] = ()
         self._accepted_bare_fields: set[str] = set()
         self._pending_confirmed_normal: dict[str, Any] = {}
@@ -791,6 +793,45 @@ class CalculationPage(QWidget):
         for label in self._recognition_dialog.findChildren(QLabel):
             label.setText("正在终止 AI识图…")
 
+    # ------------------------------------------------------------------
+    # 第一次 AI 初始快照（History V2 ai_initial 唯一来源）
+    # ------------------------------------------------------------------
+
+    def _capture_initial_ai_snapshot(
+        self,
+        observation: AIObservation,
+        external_proposal: PackagingProposal | None,
+    ) -> dict[str, Any]:
+        """第一次完整视觉识图成功后捕获 AI 初始快照；无法可靠获得的字段不写、不猜。"""
+        adopted = self._adopted_packaging()
+        provider = None
+        try:
+            bound = self.context.api_profile_store.bound_profile(VISUAL_AI)
+            if bound:
+                profile, _ = bound
+                provider = getattr(profile, "provider", None)
+        except Exception:
+            provider = None
+        return {
+            "provider": str(provider).strip() or None,
+            "model": observation.model or None,
+            "prompt_version": observation.prompt_version or None,
+            "engine_version": self.context.packaging_service.ENGINE_VERSION,
+            "calibration_version": self.context.packaging_service.calibration_version,
+            "observation": observation.to_dict(),
+            "external_ai_packaging_proposal": external_proposal.to_dict() if external_proposal else None,
+            "adopted_packaging": adopted.to_dict() if adopted else None,
+        }
+
+    def _maybe_capture_initial_ai_snapshot(
+        self,
+        observation: AIObservation,
+        external_proposal: PackagingProposal | None,
+    ) -> None:
+        """只在 snapshot 尚不存在时捕获；第二次识图/局部重估/人工修改均不得覆盖。"""
+        if self.initial_ai_snapshot is None:
+            self.initial_ai_snapshot = self._capture_initial_ai_snapshot(observation, external_proposal)
+
     @Slot(object, object)
     def _recognition_completed(self, observation: AIObservation, external_proposal: PackagingProposal | None) -> None:
         conflicts = self.session.protect_confirmed_values(observation)
@@ -808,6 +849,7 @@ class CalculationPage(QWidget):
         self._apply_observation(observation)
         self._refresh_display_summaries(observation, self._adopted_packaging())
         self.apply_proposal(self._adopted_packaging())
+        self._maybe_capture_initial_ai_snapshot(observation, external_proposal)
         self._ai_baseline = {
             "summary": self._current_summary(),
             "product_summary": self.product_summary.text(),
@@ -1407,7 +1449,10 @@ class CalculationPage(QWidget):
                 images.add_path(slot.path, slot.image_type())
         try:
             self.record_id = self.context.record_service.save(
-                self.build_record_payload(), images=images.images, record_id=self.record_id
+                self.build_record_payload(),
+                images=images.images,
+                record_id=self.record_id,
+                ai_initial=(self.initial_ai_snapshot if self.record_id is None else None),
             )
         except Exception as exc:
             QMessageBox.critical(self, "保存失败", str(exc))
@@ -1441,6 +1486,7 @@ class CalculationPage(QWidget):
         self.proposal = None
         self.session = CalculationSession()
         self._ai_baseline = None
+        self.initial_ai_snapshot = None
         self._recognized_image_fingerprint = ()
         self._accepted_bare_fields.clear()
         self._pending_confirmed_normal = {}
@@ -1491,6 +1537,8 @@ class CalculationPage(QWidget):
         self._updating = True
         self.manual_scenarios.clear()
         self.record_id = record_id
+        # 打开历史记录不把当前 layers.ai_raw 当成新的第一次 AI；历史更新由 V2Service 保留 ai_initial
+        self.initial_ai_snapshot = None
         self.product_summary.setText(str(record.get("product_name") or ""))
         if self.product_link is not None:
             self.product_link.setText(str(record.get("product_link") or ""))
