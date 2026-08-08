@@ -156,7 +156,8 @@ class TestUserCorrectionPlaceholder:
             assert not hasattr(page, "user_correction_hint")
             card = page.conservative_fields["card"]
             texts = [label.text() for label in card.findChildren(QLabel)]
-            assert not any("纯头程" in text or "当前：" in text for text in texts)
+            # 动态“当前：{货代}，纯头程…”提示已删除；示例文字里的“纯头程”是两行示例内容
+            assert not any(text.startswith("当前：") for text in texts)
         finally:
             page.deleteLater()
             qapp.processEvents()
@@ -164,10 +165,14 @@ class TestUserCorrectionPlaceholder:
     def test_user_correction_placeholder_is_two_line_example(self, qapp, temp_context):
         page = CalculationPage(temp_context)
         try:
-            placeholder = page.user_correction._widget.placeholderText()
-            assert "深圳货代纯头程26元" in placeholder
-            assert "义乌货代纯头程10元" in placeholder
-            assert "\n" in placeholder
+            edit = page.user_correction._widget
+            example = edit.example.text()
+            assert "深圳货代纯头程26元" in example
+            assert "义乌货代纯头程10元" in example
+            assert "\n" in example
+            # 示例是 viewport 子控件且不影响真实内容
+            assert edit.example.parent() is edit.viewport()
+            assert edit.toPlainText() == ""
         finally:
             page.deleteLater()
             qapp.processEvents()

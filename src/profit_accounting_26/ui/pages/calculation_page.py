@@ -193,6 +193,59 @@ class _TextAdapter(QObject):
         self.setText("")
 
 
+class _UserCorrectionEdit(QTextEdit):
+    """带“示例文字层”的用户修正输入框。
+
+    QTextEdit 原生 placeholder 在 Windows 上按单行绘制且不换行，长示例显示不全；
+    这里改为 viewport 内的只读 QLabel 示例层：内容为空时显示、有真实输入时隐藏。
+    示例绝不出现在 toPlainText()，不写入 user_note，不触发校准 dirty。
+    """
+
+    EXAMPLE_TEXT = (
+        "这个包可以压扁，肩带可以拆下来，深圳货代纯头程26元\n"
+        "这种小商品通常可以缠绕打包，预计袋装即可，义乌货代纯头程10元"
+    )
+    MIN_HEIGHT = 104
+    MAX_HEIGHT = 148
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.mirror_widget: QTextEdit | None = None
+        self.example = QLabel(self.EXAMPLE_TEXT, self.viewport())
+        self.example.setWordWrap(True)
+        self.example.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.example.setProperty("muted", True)
+        self.example.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.example.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.example.setStyleSheet("background: transparent;")
+        self.setAcceptRichText(False)
+        self.viewport().installEventFilter(self)
+        self.textChanged.connect(self._sync_example)
+        self._sync_example()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if watched is self.viewport() and event.type() == QEvent.Type.Resize:
+            self._layout_example()
+        return super().eventFilter(watched, event)
+
+    def _sync_example(self) -> None:
+        """内容为空显示示例，有真实输入立即隐藏；程序化 setText/clear 同样生效。"""
+        self.example.setVisible(not self.toPlainText())
+        self._layout_example()
+
+    def _layout_example(self) -> None:
+        viewport = self.viewport()
+        width = max(40, viewport.width() - 22)
+        self.example.setGeometry(10, 7, width, max(0, viewport.height() - 14))
+        needed = self.example.heightForWidth(width)
+        target = min(max(self.MIN_HEIGHT, 7 + needed + 9), self.MAX_HEIGHT)
+        if self.height() != target:
+            self.setFixedHeight(target)
+        if self.mirror_widget is not None and self.mirror_widget.height() != target:
+            self.mirror_widget.setFixedHeight(target)
+        self.example.setGeometry(10, 7, width, max(0, self.height() - 14))
+
+
 class CalculationPage(QWidget):
     dirtyChanged = Signal(bool)
     saved = Signal(str)
@@ -480,13 +533,10 @@ class CalculationPage(QWidget):
                 note_edit.setReadOnly(True)
                 note_edit.setPlaceholderText("AI估算包装方式（第一次 AI 结果，只读）")
             else:
-                note_edit = QTextEdit()
-                note_edit.setPlaceholderText(
-                    "这个包可以压扁，肩带可以拆下来，深圳货代纯头程26元\n"
-                    "这种小商品通常可以缠绕打包，预计袋装即可，义乌货代纯头程10元"
-                )
+                note_edit = _UserCorrectionEdit()
                 self.user_correction = _TextAdapter(note_edit)
-            note_edit.setFixedHeight(104)
+            if not isinstance(note_edit, _UserCorrectionEdit):
+                note_edit.setFixedHeight(104)
             note_edit.setMinimumWidth(90)
             note_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             note_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -496,6 +546,12 @@ class CalculationPage(QWidget):
         if not hasattr(self, "user_correction"):  # 防御：布局缺失时仍保证字段可用
             self.user_correction = _TextAdapter(QTextEdit())
         self.user_correction.textChanged.connect(lambda _text: self._user_calibration_changed())
+        # 示例层与左卡“包装方式”框镜像同高（随 viewport 宽度重算）
+        right_bottom = self.user_correction._widget
+        left_bottom = self.normal_fields["method"]._widget
+        if isinstance(right_bottom, _UserCorrectionEdit):
+            right_bottom.mirror_widget = left_bottom
+            right_bottom._layout_example()
         # 3) 左卡 AI估算全部只读；右卡 当前采用全部可编辑；旧方法输入行隐藏
         for key in ("length", "width", "height", "weight"):
             self.normal_fields[key].spin.setReadOnly(True)

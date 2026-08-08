@@ -154,9 +154,10 @@ class TestUserCorrectionPlaceholderGeometry:
     def test_placeholder_has_real_newline_and_wrap(self, shown_page, qapp):
         edit = shown_page.user_correction._widget
         assert isinstance(edit, QTextEdit)
-        assert "\n" in edit.placeholderText()
-        assert "深圳货代纯头程26元" in edit.placeholderText()
-        assert "义乌货代纯头程10元" in edit.placeholderText()
+        example = edit.example.text()
+        assert "\n" in example
+        assert "深圳货代纯头程26元" in example
+        assert "义乌货代纯头程10元" in example
         assert edit.lineWrapMode() == QTextEdit.LineWrapMode.WidgetWidth
         assert edit.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
 
