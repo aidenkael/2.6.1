@@ -51,6 +51,7 @@ from profit_accounting_26.domain.models import (
     PackagingScenario,
 )
 from profit_accounting_26.ui.binders.calculation_binder import CalculationBinder
+from profit_accounting_26.ui.controllers.forwarder_cards_controller import ForwarderCardsController
 from profit_accounting_26.ui.controllers.image_slots_controller import ImageSlotsController
 from profit_accounting_26.ui.ui_loader import load_main_window
 from profit_accounting_26.ui.widgets import Card, ImageSlotWidget, QuoteCard
@@ -202,13 +203,10 @@ class CalculationPage(QWidget):
         self.dirty = False
         self.packaging_stale = False
         self._updating = False
-        self.quote_cards: dict[str, QuoteCard] = {}
         self.current_quote = None
         self.current_forwarder = None
         self.current_system_cost: float | None = None
-        self.selected_forwarder_id = str(self.settings.get("selected_forwarder_id") or "")
         self.selected_profit_rule_id = str(self.settings.get("selected_profit_rule_id") or "")
-        self.forwarder_selection_changed = False
         self.package_selection_changed = False
         self.manual_scenarios: set[str] = set()
         self._recognition_thread: QThread | None = None
@@ -239,6 +237,20 @@ class CalculationPage(QWidget):
             settings_provider=lambda: self.settings,
             image_changed_callback=self._image_changed,
             mark_dirty_callback=self._mark_dirty,
+        )
+
+        # 动态货代卡与货代选择状态委托 ForwarderCardsController（第二阶段
+        # Controller 拆分）；settings 同样以 provider 注入，语义与
+        # ImageSlotsController 完全一致。quote_insert_index 的定义仍由
+        # _build_dynamic_regions 持有，此处只传入插入位置。
+        self.forwarder_cards_controller = ForwarderCardsController(
+            self._root,
+            self.context.settings_service,
+            settings_provider=lambda: self.settings,
+            insert_index=self.quote_insert_index,
+            selected_forwarder_id=str(self.settings.get("selected_forwarder_id") or ""),
+            mark_dirty_callback=self._mark_dirty,
+            recalculate_callback=self.recalculate,
         )
 
         # 利润区委托 CalculationBinder（双场景 driver 状态机）
@@ -543,6 +555,36 @@ class CalculationPage(QWidget):
 
     def paste_from_clipboard(self) -> bool:
         return self.image_slots_controller.paste_from_clipboard()
+
+    # ------------------------------------------------------------------
+    # 货代卡兼容代理（状态由 ForwarderCardsController 持有）
+    # ------------------------------------------------------------------
+
+    @property
+    def quote_cards(self) -> dict[str, QuoteCard]:
+        return self.forwarder_cards_controller.quote_cards
+
+    @property
+    def selected_forwarder_id(self) -> str:
+        return self.forwarder_cards_controller.selected_forwarder_id
+
+    @selected_forwarder_id.setter
+    def selected_forwarder_id(self, value: str) -> None:
+        self.forwarder_cards_controller.selected_forwarder_id = str(value)
+
+    @property
+    def forwarder_selection_changed(self) -> bool:
+        return self.forwarder_cards_controller.forwarder_selection_changed
+
+    @forwarder_selection_changed.setter
+    def forwarder_selection_changed(self, value: bool) -> None:
+        self.forwarder_cards_controller.forwarder_selection_changed = bool(value)
+
+    def rebuild_quote_cards(self) -> None:
+        return self.forwarder_cards_controller.rebuild_quote_cards()
+
+    def select_forwarder(self, forwarder_id: str) -> None:
+        return self.forwarder_cards_controller.select_forwarder(forwarder_id)
 
     def _image_changed(self) -> None:
         self._mark_dirty()
@@ -1126,37 +1168,6 @@ class CalculationPage(QWidget):
     # ------------------------------------------------------------------
     # 货代与成本
     # ------------------------------------------------------------------
-
-    def rebuild_quote_cards(self) -> None:
-        if self.forwarder_cards_layout is None:
-            return
-        for card in self.quote_cards.values():
-            self.forwarder_cards_layout.removeWidget(card)
-            card.deleteLater()
-        self.quote_cards = {}
-        forwarders = self.context.settings_service.forwarders_from_settings(self.settings)
-        enabled = [item for item in forwarders if item.enabled and not item.archived]
-        priority = {"义乌货代": 0, "深圳货代": 1}
-        enabled.sort(key=lambda item: (priority.get(item.name, 9), item.name))
-        if enabled and self.selected_forwarder_id not in {item.id for item in enabled}:
-            self.selected_forwarder_id = enabled[0].id
-        for offset, forwarder in enumerate(enabled):
-            card = QuoteCard(forwarder.id, forwarder.name)
-            card.selected.connect(self.select_forwarder)
-            card.set_checked(
-                forwarder.id == self.selected_forwarder_id,
-                user_changed=self.forwarder_selection_changed,
-            )
-            self.quote_cards[forwarder.id] = card
-            self.forwarder_cards_layout.insertWidget(self.quote_insert_index + offset, card, 1)
-
-    def select_forwarder(self, forwarder_id: str) -> None:
-        self.selected_forwarder_id = forwarder_id
-        self.forwarder_selection_changed = True
-        for identifier, card in self.quote_cards.items():
-            card.set_checked(identifier == forwarder_id, user_changed=True)
-        self._mark_dirty()
-        self.recalculate()
 
     def _tail_usd_changed(self) -> None:
         rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
