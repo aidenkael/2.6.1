@@ -847,8 +847,8 @@ class SettingsPage(QWidget):
             QMessageBox.warning(self, "规则无效", str(exc))
             return
         self.rules_data[row] = SettingsService.rule_to_dict(rule)
-        self.refresh_rule_list()
-        self._mark_dirty()
+        # 保存规则 = 立即持久化，不等待总“保存设置”
+        self._persist_rules_now()
 
     def archive_current_rule(self) -> None:
         row = self.current_rule_source_index()
@@ -860,8 +860,8 @@ class SettingsPage(QWidget):
         self.rules_data[row]["enabled"] = False
         if self.settings.get("selected_profit_rule_id") == self.rules_data[row].get("id"):
             self.settings["selected_profit_rule_id"] = ""
-        self.refresh_rule_list()
-        self._mark_dirty()
+        # 归档规则 = 立即持久化，与 delete 语义一致
+        self._persist_rules_now()
 
     def delete_current_rule(self) -> None:
         row = self.current_rule_source_index()

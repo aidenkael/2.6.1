@@ -656,8 +656,7 @@ class CalculationPage(QWidget):
                     stack.addWidget(title_widget)
                 profit_grid.addLayout(stack, row, col, row_span, col_span)
 
-            # 统一标题和值的视觉中心；在无活动/活动两大功能组前增加两条
-            # 不占新网格列的浅色细分隔线，保持利润区整体高度与宽度不变。
+            # 统一标题和值的视觉中心
             for label_name in (
                 "lblSheinPrice", "lblCalculatedCost", "lblProfitRate",
                 "lblNoActivityPrice", "lblListPriceProfitRateTitle",
@@ -666,26 +665,31 @@ class CalculationPage(QWidget):
                 label = f(QLabel, label_name)
                 if label is not None:
                     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            for label_name in ("lblNoActivityPrice", "lblActivityPrice"):
-                label = f(QLabel, label_name)
-                if label is not None:
-                    label.setStyleSheet(
-                        "border-left:1px solid #E1E7EF; padding-left:6px;"
-                    )
-            for layout_name in (
-                "layout_txtNoActivityPriceRmb", "layout_txtNoActivityPriceUsd",
-                "layout_txtActivityPriceRmb", "layout_txtActivityPriceUsd",
-            ):
-                row_layout = f(QHBoxLayout, layout_name)
-                if row_layout is None:
-                    continue
-                separator = QFrame()
-                separator.setObjectName(f"separator_{layout_name}")
-                separator.setFrameShape(QFrame.Shape.VLine)
-                separator.setStyleSheet("color:#E1E7EF;")
-                separator.setFixedWidth(1)
-                row_layout.insertWidget(0, separator)
-                row_layout.setSpacing(5)
+
+            # 增加 2 条浅色竖向分隔线，将利润区分为三个逻辑组：
+            # 基础数据 | 标价/利润目标 | 活动相关
+            # 通过向 Grid 插入新列实现，不影响现有字段 objectName 和功能。
+            items_info = []
+            for i in range(profit_grid.count()):
+                item = profit_grid.itemAt(i)
+                r, c, rs, cs = profit_grid.getItemPosition(i)
+                items_info.append((item, r, c, rs, cs))
+            while profit_grid.count():
+                profit_grid.takeAt(0)
+            for item, r, c, rs, cs in items_info:
+                new_c = c
+                if c >= 6:
+                    new_c += 2
+                elif c >= 2:
+                    new_c += 1
+                profit_grid.addItem(item, r, new_c, rs, cs)
+            for sep_col in (2, 7):
+                sep = QFrame()
+                sep.setObjectName(f"profitSeparator_col{sep_col}")
+                sep.setFrameShape(QFrame.Shape.VLine)
+                sep.setStyleSheet("color:#E1E7EF;")
+                sep.setFixedWidth(1)
+                profit_grid.addWidget(sep, 0, sep_col, 3, 1, Qt.AlignmentFlag.AlignHCenter)
         # 此结论仅重复利润区标题提示，且在紧凑窗口中占用无效的独立行。
         # 计算与字段布局完全不依赖它，因此隐藏该显示冗余项。
         profit_conclusion = f(QLabel, "lblProfitConclusion")

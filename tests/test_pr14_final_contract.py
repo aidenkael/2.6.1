@@ -275,7 +275,84 @@ def test_profit_ui_object_names_and_separators_survive(qapp, app_context):
             "txtActivityProfitRmb", "txtActivityProfitUsd",
         ):
             assert page._root.findChild(QWidget, name) is not None
-        assert page._root.findChild(QWidget, "separator_layout_txtNoActivityPriceRmb") is not None
-        assert page._root.findChild(QWidget, "separator_layout_txtActivityPriceRmb") is not None
+        # 利润区 2 条完整竖向分隔线（Grid 级别，非 HBox 内插）
+        assert page._root.findChild(QWidget, "profitSeparator_col2") is not None
+        assert page._root.findChild(QWidget, "profitSeparator_col7") is not None
+    finally:
+        page.deleteLater()
+
+
+def test_save_current_rule_persists_to_settings_service(qapp, app_context):
+    """save_current_rule 必须立即将规则写入 SettingsService，而非仅内存。"""
+    page = SettingsPage(app_context)
+    try:
+        page.rule_list.setCurrentRow(0)
+        original_count = len(page.rules_data)
+        # 新增规则
+        page.add_rule()
+        new_rule_row = page.rule_list.count() - 1
+        page.rule_list.setCurrentRow(new_rule_row)
+        # 修改规则名称
+        page.rule_name.setText("测试持久化规则")
+        page.rule_condition_value.setValue(10.0)
+        page.rule_value.setValue(5.0)
+        # 保存规则 —— 必须立即持久化
+        page.save_current_rule()
+        # 验证：从 SettingsService 重新加载，规则存在
+        fresh_settings = SettingsService(app_context.paths.settings_path).load()
+        rule_names = [r.get("name") for r in fresh_settings.get("profit_rules", [])]
+        assert "测试持久化规则" in rule_names
+        # 验证：规则总数正确（原有 + 新增）
+        assert len(fresh_settings.get("profit_rules", [])) == original_count + 1
+    finally:
+        page.deleteLater()
+
+
+def test_saved_rule_survives_settings_page_recreation(qapp, app_context):
+    """保存规则后重新创建 SettingsPage，规则仍存在。"""
+    page = SettingsPage(app_context)
+    try:
+        page.add_rule()
+        page.rule_list.setCurrentRow(page.rule_list.count() - 1)
+        page.rule_name.setText("跨页面存活规则")
+        page.rule_condition_value.setValue(20.0)
+        page.rule_value.setValue(3.0)
+        page.save_current_rule()
+    finally:
+        page.deleteLater()
+    # 重新创建 SettingsPage
+    page2 = SettingsPage(app_context)
+    try:
+        rule_names = [r.get("name") for r in page2.rules_data]
+        assert "跨页面存活规则" in rule_names
+    finally:
+        page2.deleteLater()
+
+
+def test_archive_current_rule_persists_immediately(qapp, app_context, monkeypatch):
+    """archive_current_rule 必须立即持久化归档状态。"""
+    # 模拟确认弹窗：必须在 settings_page 模块中 monkeypatch
+    monkeypatch.setattr(
+        "profit_accounting_26.ui.pages.settings_page.confirm_action",
+        lambda *a, **k: True,
+    )
+    page = SettingsPage(app_context)
+    try:
+        # 确保至少有一条规则
+        if not page.rules_data:
+            page.add_rule()
+            page.rule_list.setCurrentRow(page.rule_list.count() - 1)
+            page.rule_name.setText("待归档规则")
+            page.save_current_rule()
+        page.rule_list.setCurrentRow(0)
+        rule_id = page.rules_data[page.visible_rule_indices[0]].get("id")
+        page.archive_current_rule()
+        # 验证：从 SettingsService 重新加载，规则已归档
+        fresh_settings = SettingsService(app_context.paths.settings_path).load()
+        archived_rules = [
+            r for r in fresh_settings.get("profit_rules", [])
+            if r.get("id") == rule_id and r.get("archived")
+        ]
+        assert len(archived_rules) == 1
     finally:
         page.deleteLater()
