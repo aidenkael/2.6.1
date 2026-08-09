@@ -157,10 +157,10 @@ class TestTailFeeUsdLiveLink:
         """填充完整计算场景（成本 + 包装 + 货代），使 recalculate 产生实际报价。"""
         page.product_cost.spin.setValue(50.0)
         page.domestic_shipping.spin.setValue(5.0)
+        # 当前采用（右卡）是唯一正式包装计算输入
         for key in ("length", "width", "height"):
-            page.normal_fields[key].spin.setValue(20.0)
-        page.normal_fields["weight"].spin.setValue(500.0)
-        page.normal_fields["radio"].setChecked(True)
+            page.conservative_fields[key].spin.setValue(20.0)
+        page.conservative_fields["weight"].spin.setValue(500.0)
 
         # 添加两个启用的测试货代
         settings = page.context.settings_service.load()
@@ -197,10 +197,11 @@ class TestTailFeeUsdLiveLink:
             # 冻结 RMB 立即变成 72.00
             assert rmb_spin.value() == pytest.approx(72.0, abs=0.01), f"RMB={rmb_spin.value()} != 72.00"
 
-            # 两家货代物流总价改变
+            # 两家货代“头程总费用”不随尾程变化（货代卡只显示头程口径）；尾程金额不显示
             for fid, card in page.quote_cards.items():
-                assert card.rows["total"].text() != cards_before.get(fid, ""), \
-                    f"货代 {fid} 物流总价未改变: {card.rows['total'].text()}"
+                assert card.rows["total"].text() == cards_before.get(fid, ""), \
+                    f"货代 {fid} 头程总费用不应随尾程变化: {card.rows['total'].text()}"
+                assert card.rows["tail"].text() == ""
 
             # 系统总成本改变
             assert page.system_total is not None

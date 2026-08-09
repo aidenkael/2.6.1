@@ -109,6 +109,39 @@ class ApiProfileStore:
             keys.pop(profile.profile_id, None)
         self._atomic_write(self.key_path, keys)
 
+    def delete_profile(self, profile_id: str) -> bool:
+        """真实持久化删除一个 API 配置。
+
+        一次操作完成：
+        1. 从 api_profiles.json 的 profiles 中删除该 profile；
+        2. 从 api_keys.local.json 删除该 profile 的 API Key；
+        3. VISUAL_AI / LOCAL_REESTIMATE 若绑定该 profile 则清空绑定；
+        4. 两个文件均原子写入；不影响其他配置；
+        5. profile 不存在时安全返回 False，不崩溃。
+        """
+        if not profile_id:
+            return False
+        public = self.load_public()
+        profiles = [item for item in public["profiles"] if isinstance(item, dict)]
+        remaining = [item for item in profiles if item.get("profile_id") != profile_id]
+        existed = len(remaining) != len(profiles)
+        public["profiles"] = remaining
+        bindings = public["button_bindings"]
+        binding_cleared = False
+        for action in (VISUAL_AI, LOCAL_REESTIMATE):
+            if bindings.get(action) == profile_id:
+                bindings[action] = None
+                binding_cleared = True
+        keys = self.load_keys()
+        key_existed = profile_id in keys
+        if key_existed:
+            keys.pop(profile_id, None)
+        if not (existed or binding_cleared or key_existed):
+            return False
+        self._atomic_write(self.public_path, public)
+        self._atomic_write(self.key_path, keys)
+        return existed
+
     def bind(self, action: str, profile_id: str | None) -> None:
         if action not in {VISUAL_AI, LOCAL_REESTIMATE}:
             raise ValueError("未知 API 绑定")

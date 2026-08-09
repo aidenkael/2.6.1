@@ -197,6 +197,9 @@ def test_page_compat_proxies_and_clear_new_reset(page, monkeypatch):
     assert controller.forwarder_selection_changed is False
 
     # 用户切换货代 → flag 置位；clear_new 后复位
+    import profit_accounting_26.ui.pages.calculation_page as calculation_page_module
+
+    monkeypatch.setattr(calculation_page_module, "confirm_action", lambda *args, **kwargs: True)
     monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
     page.select_forwarder("forwarder_shenzhen_default")
     assert page.forwarder_selection_changed is True

@@ -5,6 +5,43 @@ import re
 from profit_accounting_26.domain.models import AIObservation, PackagingProposal, PackagingState
 
 
+_PACKAGING_METHOD_ZH = {
+    "polybag": "塑料袋包装",
+    "poly mailer": "快递袋包装",
+    "bubble mailer": "气泡袋包装",
+    "bubble bag": "气泡袋包装",
+    "vacuum bag": "真空袋包装",
+    "self-sealing bag": "自封袋包装",
+    "opp bag": "OPP袋包装",
+    "cardboard box": "纸箱包装",
+    "carton": "纸箱包装",
+    "box": "纸箱包装",
+    "mailer": "邮寄袋包装",
+    "envelope": "信封包装",
+    "bag": "袋装",
+    "pallet": "托盘包装",
+    "stretch wrap": "缠绕膜包装",
+}
+
+
+def packaging_method_zh(method: str | None) -> str:
+    """仅显示层中文化：把 AI 返回的英文包装方式映射为中文，不修改原始数据。"""
+    text = str(method or "").strip()
+    if not text:
+        return ""
+    # 已含中文（如 AI 直接返回中文）时原样保留
+    if any("\u4e00" <= char <= "\u9fff" for char in text):
+        return text
+    lowered = text.lower()
+    if lowered in _PACKAGING_METHOD_ZH:
+        return _PACKAGING_METHOD_ZH[lowered]
+    # 常见附加描述（如 "polybag 30*40cm"）按最长 token 命中
+    for token, label in sorted(_PACKAGING_METHOD_ZH.items(), key=lambda item: len(item[0]), reverse=True):
+        if token in lowered:
+            return label
+    return "其他包装"
+
+
 def _compact(text: str, limit: int) -> str:
     text = re.sub(r"\s+", "", str(text or "")).strip("；;，,、|｜")
     return text if len(text) <= limit else ""

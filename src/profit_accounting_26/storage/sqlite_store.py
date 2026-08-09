@@ -152,6 +152,14 @@ class SQLiteStore:
             for row in rows
         ]
 
+    def delete_record(self, record_id: str) -> None:
+        """永久删除记录及其全部快照（snapshots 外键无 CASCADE，需先删）。"""
+        with self.connect() as connection:
+            connection.execute("DELETE FROM snapshots WHERE record_id = ?", (record_id,))
+            cursor = connection.execute("DELETE FROM records WHERE id = ?", (record_id,))
+            if cursor.rowcount != 1:
+                raise KeyError(record_id)
+
     def set_setting(self, key: str, value: Any) -> None:
         now = datetime.now(UTC).isoformat()
         serialized = json.dumps(value, ensure_ascii=False, sort_keys=True)
