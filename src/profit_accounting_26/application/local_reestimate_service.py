@@ -66,6 +66,7 @@ class LocalReestimateService:
     @classmethod
     def _context(cls, *, product_name: str, confirmed_facts: dict[str, Any],
                  current_shipment: dict[str, Any], user_correction: str,
+                 include_json_shape: bool = True,
                  **_ignored: Any) -> str:
         payload = {
             "product_name": str(product_name or "").strip(),
@@ -73,15 +74,31 @@ class LocalReestimateService:
             "current_shipment": current_shipment,
             "user_correction": str(user_correction or "").strip(),
         }
-        return (
+        prompt = (
             "你是跨境电商发货判断助手。你看不到图片。"
             "根据商品名称、当前已确认的裸品事实、当前采用的发货尺寸/重量和用户修正，"
             "重新判断一套最可能的实际发货状态、外部尺寸和发货总重量。"
             "用户已确认的数据不得修改。只完成发货判断，不要计算或推理其余事项。"
             "不要输出商品事实补丁、多候选方案、物流费用、利润、货代、CAL、规则编号或证据链。"
-            "只返回符合给定 JSON Schema 的一个 JSON 对象，不要 Markdown。输入：\n"
-            + json.dumps(payload, ensure_ascii=False)
         )
+        if include_json_shape:
+            prompt += "严格按以下 JSON 结构返回一个对象，不要 Markdown：\n" + json.dumps(
+                {
+                    "shipment": {
+                        "length_cm": 0,
+                        "width_cm": 0,
+                        "height_cm": 0,
+                        "weight_g": 0,
+                        "state": "",
+                    },
+                    "note": "",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        else:
+            prompt += "只返回符合给定 JSON Schema 的一个 JSON 对象，不要 Markdown。"
+        return prompt + "\n输入：\n" + json.dumps(payload, ensure_ascii=False)
 
     def reestimate(self, **context: Any) -> LocalReestimateResult:
         if not str(context.get("user_correction") or "").strip():
@@ -93,12 +110,13 @@ class LocalReestimateService:
         endpoint = self._endpoint(profile.api_url)
         if not endpoint or not api_key.strip() or not profile.model_name.strip():
             raise RecognitionUnavailableError("按修正重估API配置不完整。")
+        uses_openai_schema = str(getattr(profile, "provider", "") or "").strip().casefold() == "openai"
         body = {
             "model": profile.model_name,
             "temperature": 0,
-            "messages": [{"role": "user", "content": self._context(**context)}],
+            "messages": [{"role": "user", "content": self._context(**context, include_json_shape=not uses_openai_schema)}],
         }
-        if getattr(profile, "provider", "") == "OpenAI":
+        if uses_openai_schema:
             body["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {"name": "corrected_shipment_v1", "strict": True, "schema": self.RESPONSE_SCHEMA},

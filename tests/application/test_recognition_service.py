@@ -6,6 +6,94 @@ from profit_accounting_26.application.diagnostic_logger import DiagnosticLogger
 from profit_accounting_26.application.recognition_service import RecognitionResponseError, RecognitionService
 
 
+def _v1_response() -> dict:
+    return {
+        "choices": [{"message": {"content": json.dumps({
+            "product_name": "女士单肩包",
+            "observed": {
+                "product_price_rmb": None, "page_shipping_rmb": None,
+                "bare_dimensions_cm": {"length": None, "width": None, "height": None},
+                "bare_weight_g": None,
+            },
+            "shipment": {"length_cm": 17, "width_cm": 32, "height_cm": 17, "weight_g": 720, "state": "袋装"},
+            "note": "",
+        }, ensure_ascii=False)}}],
+    }
+
+
+def _recognition_service_for_provider(provider: str):
+    class Settings:
+        @staticmethod
+        def load():
+            return {"vision_api_timeout_seconds": 30}
+
+    class Profile:
+        api_url = "https://example.invalid"
+        model_name = "vision-test"
+
+    Profile.provider = provider
+
+    class Store:
+        @staticmethod
+        def bound_profile(_purpose):
+            return Profile(), "secret"
+
+    return RecognitionService(Settings(), Store())
+
+
+def test_openai_vision_request_keeps_strict_schema_and_simple_prompt(tmp_path, monkeypatch):
+    image = tmp_path / "product.png"
+    image.write_bytes(b"image")
+    captured = {}
+    service = _recognition_service_for_provider("OpenAI")
+    monkeypatch.setattr(service, "_request_payload", lambda **kwargs: captured.update(kwargs) or _v1_response())
+
+    observation, proposal = service.recognize([{"path": str(image)}])
+
+    assert observation.product_name == "女士单肩包"
+    assert proposal is not None and proposal.normal.weight_g == 720
+    assert captured["response_format"]["json_schema"]["strict"] is True
+    prompt = captured["content"][0]["text"]
+    assert '"bare_dimensions_cm"' not in prompt
+    assert "符合给定 JSON Schema" in prompt
+
+
+@pytest.mark.parametrize("provider", ["DeepSeek", "GLM", "阿里云百炼", "自定义"])
+def test_non_openai_vision_request_uses_prompt_contract_without_response_format(tmp_path, monkeypatch, provider):
+    image = tmp_path / "product.png"
+    image.write_bytes(b"image")
+    captured = {}
+    service = _recognition_service_for_provider(provider)
+    monkeypatch.setattr(service, "_request_payload", lambda **kwargs: captured.update(kwargs) or _v1_response())
+
+    service.recognize(
+        [{"path": str(image)}],
+        user_context={"product_name": {"value": "用户确认名称", "source": "user_confirmed"}},
+    )
+
+    assert captured["response_format"] is None
+    prompt = captured["content"][0]["text"]
+    for field in ("product_name", "product_price_rmb", "page_shipping_rmb", "bare_dimensions_cm", "bare_weight_g", "shipment", "length_cm", "weight_g", "state", "note"):
+        assert field in prompt
+
+
+def test_recognition_request_sends_confirmed_facts_at_one_level(tmp_path, monkeypatch):
+    image = tmp_path / "product.png"
+    image.write_bytes(b"image")
+    captured = {}
+    service = _recognition_service_for_provider("DeepSeek")
+    monkeypatch.setattr(service, "_request_payload", lambda **kwargs: captured.update(kwargs) or _v1_response())
+
+    service.recognize(
+        [{"path": str(image)}],
+        user_context={"confirmed_facts": {"weight_g": {"value": 580, "source": "user_confirmed"}}},
+    )
+
+    fact_text = next(item["text"] for item in captured["content"] if item["type"] == "text" and item["text"].startswith("confirmed_facts"))
+    assert fact_text.count('"confirmed_facts"') == 0
+    assert '"weight_g"' in fact_text
+
+
 def test_parse_openai_compatible_vision_payload():
     content = {
         "observation": {

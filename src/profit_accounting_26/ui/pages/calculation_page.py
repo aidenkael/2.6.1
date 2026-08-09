@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any
 
 from PySide6.QtCore import QEvent, QObject, QThread, Qt, QSignalBlocker, Signal, Slot
@@ -1043,7 +1043,7 @@ class CalculationPage(QWidget):
             image_items,
             self._recognition_cancellation,
             self._diagnostic_operation,
-            {"confirmed_facts": confirmed_facts},
+            confirmed_facts,
         )
         self._recognition_worker.moveToThread(self._recognition_thread)
         self._recognition_thread.started.connect(self._recognition_worker.run)
@@ -1131,39 +1131,44 @@ class CalculationPage(QWidget):
 
     @Slot(object, object)
     def _recognition_completed(self, observation: AIObservation, external_proposal: PackagingProposal | None) -> None:
+        is_first_visual_result = self.initial_ai_snapshot is None
         conflicts = self.session.protect_confirmed_values(observation)
         self.session.ai_raw_response = observation.raw_payload
         self.session.ai_raw_observation = dict(observation.raw_payload.get("observation") or {})
         self.session.normalized_observation = observation
         self.session.money_candidates = list(observation.raw_payload.get("money_candidates") or [])
-        self.session.ai_packaging_proposal = external_proposal
+        if is_first_visual_result:
+            self.session.ai_packaging_proposal = external_proposal
         self.session.observation = observation
         self.observation = self.session.observation
         runtime_proposal = external_proposal or RecognitionService.proposal_from_shipment({})
-        self._adopt_packaging(runtime_proposal)
+        if is_first_visual_result:
+            self._adopt_packaging(runtime_proposal)
         if conflicts:
             self._adopted_packaging().review_reasons.append("user confirmed facts conflict with image evidence")
         self._apply_observation(observation)
         self._refresh_display_summaries(observation, self._adopted_packaging())
         self.apply_proposal(self._adopted_packaging())
-        self._maybe_capture_initial_ai_snapshot(observation, external_proposal)
-        self._ai_baseline = {
-            "summary": self._current_summary(),
-            "product_summary": self.product_summary.text(),
-            "packaging_summary": self.structure_summary.text(),
-            "bare_spec": {
-                "length_cm": observation.length_cm, "width_cm": observation.width_cm,
-                "height_cm": observation.height_cm, "weight_g": observation.weight_g,
-            },
-            "normal_packaging": self._scenario_data(self.normal_fields),
-        }
-        self._accepted_bare_fields.clear()
-        self._pending_confirmed_normal = {}
+        if is_first_visual_result:
+            self._maybe_capture_initial_ai_snapshot(observation, external_proposal)
+            self._ai_baseline = {
+                "summary": self._current_summary(),
+                "product_summary": self.product_summary.text(),
+                "packaging_summary": self.structure_summary.text(),
+                "bare_spec": {
+                    "length_cm": observation.length_cm, "width_cm": observation.width_cm,
+                    "height_cm": observation.height_cm, "weight_g": observation.weight_g,
+                },
+                "normal_packaging": self._scenario_data(self.normal_fields),
+            }
+            self._accepted_bare_fields.clear()
+            self._pending_confirmed_normal = {}
         self._recognized_image_fingerprint = self._image_fingerprint()
         self.ai_button.setText("AI识图")
         self.ai_button.setEnabled(False)
-        self.packaging_stale = False
-        self.manual_scenarios.clear()
+        if is_first_visual_result:
+            self.packaging_stale = False
+            self.manual_scenarios.clear()
         self._mark_dirty()
         self.recalculate()
         payload = observation.to_dict()
@@ -1350,7 +1355,11 @@ class CalculationPage(QWidget):
                 op.summary(status="cancelled", returned_fields=["shipment"], missing_fields=[], field_evidence={}, parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=True, normal_packaging=scenario.to_dict(), conservative_packaging=None, not_generated_reason=[], entered_logistics=False, logistics_skip_reason="候选已取消，当前采用未改变", logistics_inputs=None, logistics_outputs=None, page_filled_fields=[], page_empty_fields=[], warnings=[])
             return
 
-        self._adopt_packaging(proposal)
+        baseline = self._adopted_packaging()
+        if baseline is None:
+            return
+        adopted_current = replace(scenario, label="当前采用")
+        self._adopt_packaging(replace(baseline, conservative=adopted_current))
         previous_updating = self._updating
         self._updating = True
         try:
@@ -1720,7 +1729,12 @@ class CalculationPage(QWidget):
             "layers": {
                 "ai_raw": {
                     "observation": self.collect_observation().to_dict(),
-                    "packaging_proposal": self._adopted_packaging().to_dict() if self._adopted_packaging() else {},
+                    "packaging_proposal": (
+                        self.session.ai_packaging_proposal.to_dict()
+                        if self.session.ai_packaging_proposal else (
+                            self._adopted_packaging().to_dict() if self._adopted_packaging() else {}
+                        )
+                    ),
                 },
                 "adopted": {
                     "bare": {

@@ -80,6 +80,11 @@ def _simulate_ai(page, dims=(17.0, 32.0, 17.0, 720.0), method="AI建议包装"):
     return proposal
 
 
+def _complete_visual_ai(page, observation, proposal):
+    page._diagnostic_operation = page.context.diagnostic_logger.begin_operation("test-ai-runtime-v1")
+    page._recognition_completed(observation, proposal)
+
+
 def _ensure_forwarders(page):
     settings = page.context.settings_service.load()
     shenzhen = SettingsService.new_forwarder("深圳货代", 80.0, 10.0, 8000.0)
@@ -182,6 +187,53 @@ class TestAdoptedFlow:
         assert page.normal_fields["method"].text() == "AI建议包装"
         assert page.conservative_fields["length"].value() == pytest.approx(25.0)
 
+    def test_confirmed_product_name_survives_second_ai_in_ui_and_saved_payload(self, page):
+        first = _make_proposal((17, 32, 17, 720), "首次AI包装")
+        _complete_visual_ai(page, AIObservation(
+            product_name="女士单肩包", display_product_summary="女士单肩包",
+            raw_payload={"product_name": "女士单肩包", "observation": {"product_name": "女士单肩包"}},
+        ), first)
+        page.product_summary.setText("女士软质单肩包")
+        page._accept_text_field("product_name", page.product_summary)
+
+        second = _make_proposal((99, 99, 99, 9999), "第二次AI包装")
+        _complete_visual_ai(page, AIObservation(
+            product_name="女士斜挎包", display_product_summary="女士斜挎包",
+            raw_payload={"product_name": "女士斜挎包", "observation": {"product_name": "女士斜挎包"}},
+        ), second)
+
+        payload = page.build_record_payload()
+        assert page.product_summary.text() == "女士软质单肩包"
+        assert page.session.observation.product_name == "女士软质单肩包"
+        assert page.session.observation.display_product_summary == "女士软质单肩包"
+        assert payload["product_name"] == "女士软质单肩包"
+        assert page.session.ai_raw_response["product_name"] == "女士斜挎包"
+
+    def test_second_ai_preserves_packaging_authority_and_manual_current_payload(self, page):
+        first = _make_proposal((17, 32, 17, 720), "首次AI包装")
+        _complete_visual_ai(page, AIObservation(raw_payload={"observation": {}}), first)
+        page.conservative_fields["method"].setText("用户当前采用")
+        page.conservative_fields["length"].setValue(25)
+        page.conservative_fields["weight"].setValue(800)
+        page.manual_scenarios.add("当前采用")
+        page.user_calibration_dirty = True
+
+        second = _make_proposal((99, 99, 99, 9999), "第二次AI包装")
+        _complete_visual_ai(page, AIObservation(raw_payload={"observation": {}}), second)
+
+        payload = page.build_record_payload()
+        assert page._adopted_packaging().normal.length_cm == pytest.approx(17)
+        assert page._adopted_packaging().conservative.weight_g == pytest.approx(720)
+        assert page.normal_fields["length"].value() == pytest.approx(17)
+        assert page.conservative_fields["length"].value() == pytest.approx(25)
+        assert page.conservative_fields["weight"].value() == pytest.approx(800)
+        assert "当前采用" in page.manual_scenarios
+        assert page.user_calibration_dirty is True
+        assert payload["layers"]["adopted"]["normal"]["packaging_method"] == "首次AI包装"
+        assert payload["layers"]["adopted"]["conservative"]["packaging_method"] == "用户当前采用"
+        assert payload["layers"]["ai_raw"]["packaging_proposal"]["normal"]["length_cm"] == pytest.approx(17)
+        assert "第二次AI包装" not in str(payload)
+
     def test_clear_new_allows_new_first_ai(self, qapp, page, monkeypatch):
         """第 6 项：新商品清空后允许重新建立新的第一次 AI估算。"""
         import profit_accounting_26.ui.pages.calculation_page as calculation_page_module
@@ -250,6 +302,27 @@ class TestAdoptedFlow:
         assert page.initial_ai_snapshot == initial
         assert page.user_calibration_dirty is True
         assert "当前采用" in page.manual_scenarios
+
+    def test_corrected_reestimate_adopt_preserves_visual_raw_and_complete_current_metadata(self, page, monkeypatch):
+        import profit_accounting_26.ui.pages.calculation_page as calculation_page_module
+
+        first = _make_proposal((49, 34, 19, 820), "首次视觉包装")
+        first.normal.reasoning_summary = "首次视觉理由"
+        first.conservative.reasoning_summary = "首次视觉理由"
+        _complete_visual_ai(page, AIObservation(raw_payload={"observation": {}}), first)
+        candidate = _make_proposal((46, 31, 8, 760), "重估包装")
+        candidate.normal.reasoning_summary = "重估理由"
+        result = LocalReestimateResult(shipment=candidate.normal, packaging_proposal=candidate)
+        monkeypatch.setattr(calculation_page_module, "confirm_action", lambda *a, **k: True)
+
+        page._local_reestimate_completed(result)
+
+        payload = page.build_record_payload()
+        assert payload["layers"]["ai_raw"]["packaging_proposal"]["normal"]["length_cm"] == pytest.approx(49)
+        assert payload["layers"]["adopted"]["normal"]["reasoning_summary"] == "首次视觉理由"
+        assert payload["layers"]["adopted"]["conservative"]["length_cm"] == pytest.approx(46)
+        assert payload["layers"]["adopted"]["conservative"]["packaging_method"] == "重估包装"
+        assert payload["layers"]["adopted"]["conservative"]["reasoning_summary"] == "重估理由"
 
     def test_corrected_reestimate_requires_user_correction_before_service_call(self, page, monkeypatch):
         calls = []

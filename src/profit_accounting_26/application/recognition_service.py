@@ -148,8 +148,8 @@ class RecognitionService:
         return [path for _, _, path in sorted(keyed_paths)]
 
     @classmethod
-    def _prompt(cls, image_count: int) -> str:
-        return f"""
+    def _prompt(cls, image_count: int, *, include_json_shape: bool = True) -> str:
+        prompt = f"""
 你是跨境电商商品图片识别助手。本次共有 {image_count} 张图片。
 
 只完成商品识别、图片事实读取和发货判断。不要计算或推理其余事项。
@@ -162,8 +162,30 @@ class RecognitionService:
 
 confirmed_facts 是用户已经确认的数据，优先级最高，不得修改。observed 是裸品/页面事实，shipment 是发货外廓和发货总重量，两者不得混淆。
 不得输出或计算体积重、计费重、头程、固定服务费、尾程、总成本、利润、利润率、货代选择、CAL、规则编号、多候选方案或复杂分类字段。
-只返回符合给定 JSON Schema 的一个 JSON 对象，不要 Markdown。
 """.strip()
+        if not include_json_shape:
+            return prompt + "\n只返回符合给定 JSON Schema 的一个 JSON 对象，不要 Markdown。"
+        return prompt + "\n严格按以下 JSON 结构返回一个对象，不要 Markdown：\n" + json.dumps(
+            {
+                "product_name": "",
+                "observed": {
+                    "product_price_rmb": None,
+                    "page_shipping_rmb": None,
+                    "bare_dimensions_cm": {"length": None, "width": None, "height": None},
+                    "bare_weight_g": None,
+                },
+                "shipment": {
+                    "length_cm": 0,
+                    "width_cm": 0,
+                    "height_cm": 0,
+                    "weight_g": 0,
+                    "state": "",
+                },
+                "note": "",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     @staticmethod
     def _extract_content(response: dict[str, Any]) -> str:
@@ -527,9 +549,16 @@ confirmed_facts 是用户已经确认的数据，优先级最高，不得修改�
         if not paths:
             raise RecognitionUnavailableError("没有可用于AI识图的图片。")
 
-        content: list[dict[str, Any]] = [{"type": "text", "text": self._prompt(len(paths))}]
-        if user_context:
-            content.append({"type": "text", "text": "confirmed_facts (authoritative; do not replace): " + json.dumps(user_context, ensure_ascii=False)})
+        uses_openai_schema = str(provider or "").strip().casefold() == "openai"
+        prompt = self._prompt(len(paths), include_json_shape=not uses_openai_schema)
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        confirmed_facts = dict(user_context or {})
+        # Accept the previous wrapper for callers still on the old contract, but
+        # always send exactly one confirmed_facts level to the model.
+        if set(confirmed_facts) == {"confirmed_facts"} and isinstance(confirmed_facts["confirmed_facts"], dict):
+            confirmed_facts = dict(confirmed_facts["confirmed_facts"])
+        if confirmed_facts:
+            content.append({"type": "text", "text": "confirmed_facts (authoritative; do not replace): " + json.dumps(confirmed_facts, ensure_ascii=False)})
         for path in paths:
             content.append({"type": "text", "text": "证据图：请扫描全部字段；位置不代表字段职责。"})
             content.append({"type": "image_url", "image_url": {"url": self._image_data_url(path), "detail": "high"}})
@@ -537,7 +566,7 @@ confirmed_facts 是用户已经确认的数据，优先级最高，不得修改�
         if diagnostic_operation:
             diagnostic_operation.request(
                 request_type="ai-recognition", provider_host=urlparse(endpoint).netloc,
-                model=model, prompt=self._prompt(len(paths)), schema_version=self.PROMPT_VERSION,
+                model=model, prompt=prompt, schema_version=self.PROMPT_VERSION,
                 temperature=0, timeout_seconds=timeout,
                 request_started_at=diagnostic_operation.started_at.isoformat(),
                 images=[DiagnosticLogger.image_metadata(path) for path in paths],
@@ -552,7 +581,7 @@ confirmed_facts 是用户已经确认的数据，优先级最高，不得修改�
                     {"type": "json_schema", "json_schema": {
                         "name": "vision_runtime_v1", "strict": True, "schema": self.RESPONSE_SCHEMA,
                     }}
-                    if provider == "OpenAI" else None
+                    if uses_openai_schema else None
                 ),
             )
             if diagnostic_operation:
