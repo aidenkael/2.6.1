@@ -11,9 +11,11 @@ pytest.importorskip("PySide6")
 
 from dataclasses import asdict
 
-from PySide6.QtWidgets import QComboBox, QLabel, QLineEdit
+from PySide6.QtCore import QRect
+from PySide6.QtWidgets import QComboBox, QLabel, QLineEdit, QScrollArea, QWidget
 
 from profit_accounting_26.application import AppContext, SettingsService
+from profit_accounting_26.ui.main_window import MainWindow
 from profit_accounting_26.ui.pages import CalculationPage, HistoryPage
 from profit_accounting_26.ui.pages.calibration_feedback_dialog import CalibrationFeedbackDialog
 
@@ -81,18 +83,78 @@ def _create_record(context, name: str = "真实头程商品") -> str:
 
 
 class TestMainPageLayout:
-    def test_user_correction_label_removed_and_note_moved_up(self, qapp, temp_context):
+    def test_actual_first_mile_display_contract_and_geometry(self, qapp, temp_context):
         page = _make_page(temp_context)
         try:
+            page.resize(1688, 929)
+            page.show()
+            qapp.processEvents()
             card = page.conservative_fields["card"]
             texts = [label.text() for label in card.findChildren(QLabel)]
             assert "用户修正" not in texts, "独立“用户修正”小标题应删除"
-            assert "真实头程（选填）" in texts
-            assert "仅记录，不用于当前计算" in texts
+            assert "真实头程（选填）" not in texts
+            assert "真实头程" in texts
+            assert "选填，仅记录，不影响计算" in texts
+            row = page.actual_first_mile_row
+            row_texts = [label.text() for label in row.findChildren(QLabel)]
+            assert "RMB" not in row_texts
+            assert "¥" in row_texts
+            assert page.actual_first_mile_fee_edit.width() < 72
+            row_controls = (
+                row.findChild(QLabel, "actualFirstMileLabel"),
+                page.actual_forwarder_combo,
+                row.findChild(QLabel, "actualFirstMileCurrency"),
+                page.actual_first_mile_fee_edit,
+            )
+            assert all(row_controls)
+            for index, left in enumerate(row_controls):
+                for right in row_controls[index + 1:]:
+                    assert not left.geometry().intersects(right.geometry())
             # 用户修正框仍在（同一控件），无第二个文本框
             assert page.user_correction._widget is not None
         finally:
+            page.close()
             page.deleteLater()
+            qapp.processEvents()
+
+    def test_1920_viewport_has_no_vertical_overflow_or_badge_overlap(self, qapp, temp_context):
+        window = MainWindow(temp_context)
+        try:
+            window.resize(1920, 1080)
+            window.show()
+            window.switch_page(1)
+            qapp.processEvents()
+            page = window.calculation_page
+            root = page._root
+            scroll = root.findChild(QScrollArea, "calculationScrollArea")
+            body = root.findChild(QWidget, "calculationBody")
+            assert scroll is not None and body is not None
+            viewport_height = scroll.viewport().height()
+            assert body.minimumSizeHint().height() <= viewport_height
+            assert body.sizeHint().height() <= viewport_height
+            assert scroll.verticalScrollBar().maximum() == 0
+
+            title = root.findChild(QLabel, "lblAiSummaryTitle")
+            badge = page.review_badge
+            title_rect = QRect(title.mapTo(window, title.rect().topLeft()), title.size())
+            badge_rect = QRect(badge.mapTo(window, badge.rect().topLeft()), badge.size())
+            assert not title_rect.intersects(badge_rect)
+
+            profit_section = root.findChild(QWidget, "profitSection")
+            profit_fields = root.findChild(QWidget, "profitFieldsHost")
+            assert profit_section is not None and profit_fields is not None
+            bottom_gap = profit_section.height() - (profit_fields.y() + profit_fields.height())
+            assert bottom_gap <= 16
+
+            # 窄窗口可出现滚动，但标题 badge 不能压到标题文字上。
+            window.resize(1280, 800)
+            qapp.processEvents()
+            title_rect = QRect(title.mapTo(window, title.rect().topLeft()), title.size())
+            badge_rect = QRect(badge.mapTo(window, badge.rect().topLeft()), badge.size())
+            assert not title_rect.intersects(badge_rect)
+        finally:
+            window.close()
+            window.deleteLater()
             qapp.processEvents()
 
     def test_forwarder_combo_only_unarchived(self, qapp, temp_context):

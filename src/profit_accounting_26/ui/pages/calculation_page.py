@@ -364,13 +364,27 @@ class CalculationPage(QWidget):
         self.structure_summary = _TextAdapter(f(QLineEdit, "txtPackingState"))
         self.btn_partial_reestimate = f(QPushButton, "btnPartialReestimate")
         ai_layout = f(QGridLayout, "aiSummaryLayout")
-        self.material_summary = QLineEdit()
+        # 该字段仅保存 AI 材质事实，不再作为摘要卡的隐藏第二行。
+        # 保留 parent 以维持现有数据绑定和生命周期。
+        self.material_summary = QLineEdit(root)
         self.material_summary.setVisible(False)
         self.review_badge = QLabel("待识别")
+        self.review_badge.setObjectName("lblReviewBadge")
         self.review_badge.setProperty("warning", True)
         if ai_layout is not None:
-            ai_layout.addWidget(self.material_summary, 1, 0)
-            ai_layout.addWidget(self.review_badge, 1, 1, 1, 4)
+            summary_title = f(QLabel, "lblAiSummaryTitle")
+            if summary_title is not None:
+                # 状态与标题共享既有标题行，不再为 badge 增加一整行高度。
+                ai_layout.removeWidget(summary_title)
+                summary_header = QWidget()
+                summary_header.setObjectName("aiSummaryHeader")
+                summary_header_layout = QHBoxLayout(summary_header)
+                summary_header_layout.setContentsMargins(0, 0, 0, 0)
+                summary_header_layout.setSpacing(5)
+                summary_header_layout.addWidget(summary_title)
+                summary_header_layout.addWidget(self.review_badge)
+                summary_header_layout.addStretch(1)
+                ai_layout.addWidget(summary_header, 0, 0)
         # 成本与裸尺寸
         self.product_cost = self._cost_spin("spinProductCostRmb", maximum=1_000_000)
         self.domestic_shipping = self._cost_spin("spinDomesticFreightRmb", maximum=1_000_000)
@@ -629,6 +643,11 @@ class CalculationPage(QWidget):
                 if title_widget is not None:
                     stack.addWidget(title_widget)
                 profit_grid.addLayout(stack, row, col, row_span, col_span)
+        # 此结论仅重复利润区标题提示，且在紧凑窗口中占用无效的独立行。
+        # 计算与字段布局完全不依赖它，因此隐藏该显示冗余项。
+        profit_conclusion = f(QLabel, "lblProfitConclusion")
+        if profit_conclusion is not None:
+            profit_conclusion.setVisible(False)
 
     def _build_dynamic_regions(self) -> None:
         """清除 Designer 预览控件，准备动态图片框与货代卡片容器。"""
@@ -1849,38 +1868,43 @@ class CalculationPage(QWidget):
             "weight_g": fields["weight"].value() or None,
         }
 
-    # ------------------------------------------------------------ 真实头程（选填）
+    # ------------------------------------------------------------ 真实头程
 
     def _build_actual_first_mile_row(self, grid: QGridLayout, row: int) -> None:
-        """当前采用卡最底部新增“真实头程（选填）”：只记录，不参与任何当前计算。"""
+        """当前采用卡最底部的真实头程：只记录，不参与任何当前计算。"""
         row_widget = QWidget()
+        row_widget.setObjectName("actualFirstMileRow")
+        self.actual_first_mile_row = row_widget
         row_layout = QHBoxLayout(row_widget)
         row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(6)
-        label = QLabel("真实头程（选填）")
-        label.setFixedHeight(20)
+        row_layout.setSpacing(4)
+        label = QLabel("真实头程")
+        label.setObjectName("actualFirstMileLabel")
         row_layout.addWidget(label)
         self.actual_forwarder_combo = QComboBox()
-        self.actual_forwarder_combo.setFixedWidth(96)
+        self.actual_forwarder_combo.setObjectName("actualFirstMileForwarder")
+        self.actual_forwarder_combo.setFixedWidth(88)
         self.actual_forwarder_combo.setFixedHeight(28)
+        self.actual_forwarder_combo.setStyleSheet("QComboBox { min-height: 0px; max-height: 28px; }")
         self._reload_actual_forwarder_combo()
         row_layout.addWidget(self.actual_forwarder_combo)
         symbol = QLabel("¥")
+        symbol.setObjectName("actualFirstMileCurrency")
         symbol.setProperty("muted", True)
         row_layout.addWidget(symbol)
         self.actual_first_mile_fee_edit = QLineEdit()
+        self.actual_first_mile_fee_edit.setObjectName("actualFirstMileFee")
         self.actual_first_mile_fee_edit.setPlaceholderText("0.00")
-        self.actual_first_mile_fee_edit.setFixedWidth(72)
+        self.actual_first_mile_fee_edit.setFixedWidth(58)
         self.actual_first_mile_fee_edit.setFixedHeight(28)
+        self.actual_first_mile_fee_edit.setStyleSheet("QLineEdit { min-height: 0px; max-height: 28px; }")
         validator = QDoubleValidator(0.0, 1_000_000.0, 2, self.actual_first_mile_fee_edit)
         validator.setNotation(QDoubleValidator.Notation.StandardNotation)
         self.actual_first_mile_fee_edit.setValidator(validator)
         row_layout.addWidget(self.actual_first_mile_fee_edit)
-        rmb = QLabel("RMB")
-        rmb.setProperty("muted", True)
-        row_layout.addWidget(rmb)
         row_layout.addStretch(1)
-        hint = QLabel("仅记录，不用于当前计算")
+        hint = QLabel("选填，仅记录，不影响计算")
+        hint.setObjectName("actualFirstMileHint")
         hint.setProperty("muted", True)
         hint_font = hint.font()
         if hint_font.pointSize() > 8:
