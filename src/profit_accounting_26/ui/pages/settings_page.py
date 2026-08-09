@@ -911,11 +911,6 @@ class SettingsPage(QWidget):
     # ------------------------------------------------------------------
 
     def save_settings(self) -> None:
-        try:
-            forwarders = self.collect_forwarders()
-        except ValueError as exc:
-            QMessageBox.warning(self, "无法保存", str(exc))
-            return
         latest = self.context.settings_service.load()
 
         # 验证显示名称：去除首尾空格后 Unicode 可见字符 1-8 个
@@ -936,27 +931,11 @@ class SettingsPage(QWidget):
             latest["log_level"] = self.log_level.currentText()
         if self.log_retention_days:
             latest["log_retention_days"] = int(self.log_retention_days.value())
-        enabled_ids = [item["id"] for item in forwarders if item["enabled"] and not item["archived"]]
-        selected_forwarder = latest.get("selected_forwarder_id")
-        if selected_forwarder not in enabled_ids:
-            selected_forwarder = enabled_ids[0] if enabled_ids else ""
-        enabled_rule_ids = [
-            str(item.get("id"))
-            for item in self.rules_data
-            if item.get("enabled", True) and not item.get("archived", False)
-        ]
-        selected_rule = str(latest.get("selected_profit_rule_id") or "")
-        if selected_rule not in enabled_rule_ids:
-            selected_rule = enabled_rule_ids[0] if enabled_rule_ids else ""
-        latest.update(
-            {
-                "display_name": display_name_val,
-                "forwarders": forwarders,
-                "selected_forwarder_id": selected_forwarder,
-                "profit_rules": self.rules_data,
-                "selected_profit_rule_id": selected_rule,
-            }
-        )
+        latest["display_name"] = display_name_val
+
+        # 货代和利润规则分别由其专用保存/增删操作即时持久化。全局保存是
+        # API binding 与通用设置的入口，不得把页面中的空白或旧副本写回，
+        # 因而始终保留 SettingsService 刚读取到的四项业务设置。
         # New API settings live in the selected data directory's separate
         # profile/key files.  Do not copy a secret back into settings.json.
         latest.pop("vision_api_key", None)

@@ -12,7 +12,7 @@ LOCAL_REESTIMATE = "local_reestimate"
 PROVIDER_PRESETS = {
     "DeepSeek": "https://api.deepseek.com/chat/completions",
     "GLM": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-    "阿里云百炼": "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "阿里云百炼": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "OpenAI": "https://api.openai.com/v1/chat/completions",
     "自定义": "",
 }

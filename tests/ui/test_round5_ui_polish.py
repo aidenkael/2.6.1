@@ -60,36 +60,35 @@ def _proposal(method: str = "polybag") -> PackagingProposal:
 
 
 # ---------------------------------------------------------------------------
-# AI估算包装方式中文化（仅显示层）
+# AI 发货判断直接展示外部 shipment.state
 # ---------------------------------------------------------------------------
 
 
-class TestPackagingMethodChinese:
-    def test_polybag_shows_chinese_on_ai_card_only(self, qapp, temp_context):
+class TestPackagingMethodDirectDisplay:
+    def test_ai_card_displays_external_state_without_rewriting(self, qapp, temp_context):
         page = CalculationPage(temp_context)
         try:
             page.apply_proposal(_proposal("polybag"))
-            assert page.normal_fields["method"].text() == "塑料袋包装"
-            # 当前采用后台字段保留原始英文，不污染数据
+            assert page.normal_fields["method"].text() == "polybag"
             assert page.conservative_fields["method"].text() == "polybag"
         finally:
             page.deleteLater()
             qapp.processEvents()
 
-    def test_box_and_bubble_mailer_mapping(self, qapp, temp_context):
+    def test_history_restore_does_not_rewrite_external_state(self, qapp, temp_context):
         page = CalculationPage(temp_context)
         try:
             page._fill_package_fields(page.normal_fields, {"packaging_method": "box"})
-            assert page.normal_fields["method"].text() == "纸箱包装"
+            assert page.normal_fields["method"].text() == "box"
             page._fill_package_fields(page.normal_fields, {"packaging_method": "bubble mailer"})
-            assert page.normal_fields["method"].text() == "气泡袋包装"
+            assert page.normal_fields["method"].text() == "bubble mailer"
             page._fill_package_fields(page.normal_fields, {"packaging_method": "vacuum bag"})
-            assert page.normal_fields["method"].text() == "真空袋包装"
+            assert page.normal_fields["method"].text() == "vacuum bag"
             page._fill_package_fields(page.normal_fields, {"packaging_method": "bag"})
-            assert page.normal_fields["method"].text() == "袋装"
-            # 未知英文值不崩溃，显示“其他包装”
+            assert page.normal_fields["method"].text() == "bag"
+            # 未知值也保持原样，不伪造 AI 判断。
             page._fill_package_fields(page.normal_fields, {"packaging_method": "strange_method_xyz"})
-            assert page.normal_fields["method"].text() == "其他包装"
+            assert page.normal_fields["method"].text() == "strange_method_xyz"
         finally:
             page.deleteLater()
             qapp.processEvents()

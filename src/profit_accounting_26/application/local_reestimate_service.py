@@ -37,6 +37,8 @@ class LocalReestimateResult:
 class LocalReestimateService:
     """Produce one temporary shipment candidate from confirmed facts and user correction."""
 
+    PROMPT_VERSION = "2.6.1-reestimate-v1.1-frozen"
+
     RESPONSE_SCHEMA = {
         "type": "object",
         "additionalProperties": False,
@@ -83,10 +85,12 @@ class LocalReestimateService:
             "你是跨境电商发货判断助手。你看不到图片。"
             "根据商品名称、当前已确认的裸品事实、当前采用的发货尺寸/重量和用户修正，"
             "重新判断一套最可能的实际发货状态、外部尺寸和发货总重量。"
-            "shipment.state 只描述商品交给物流时的物理形态和处理方式，例如折叠、压扁、盘绕、保持原形等。"
-            "禁止填写发货时效、现货、包邮、快递方式、48小时发货、商家履约信息或物流速度。"
+            "shipment.state 是面向用户的一句简短AI发货判断，必须同时描述商品交给物流时的主要物理形态/处理状态"
+            "和简单包装方式，例如‘可折叠；袋装发货’。不要只返回‘折叠’‘压缩’‘保持原形’等单一处理词。"
+            "shipment.state 禁止填写发货时效、48小时发货、现货、包邮、快递速度、商家履约、"
+            "物流费用、货代、CAL、体积重或利润。"
             "用户已确认的数据不得修改。只完成发货判断，不要计算或推理其余事项。"
-            "不要输出商品事实补丁、多候选方案、物流费用、利润、货代、CAL、规则编号或证据链。"
+            "不要输出商品事实补丁、多候选方案、规则编号或证据链。"
         )
         if include_json_shape:
             prompt += "严格按以下 JSON 结构返回一个对象，不要 Markdown：\n" + json.dumps(

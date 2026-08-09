@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDoubleSpinBox,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -40,7 +41,6 @@ from profit_accounting_26.application.calculation_session import CalculationSess
 from profit_accounting_26.application.category_normalizer import normalize_observation
 from profit_accounting_26.application.packaging_presentation import (
     normal_reminder,
-    packaging_method_zh,
     packaging_summary,
     product_summary,
 )
@@ -364,6 +364,12 @@ class CalculationPage(QWidget):
         self.product_summary = _TextAdapter(f(QLineEdit, "txtAiSummary"))
         self.structure_summary = _TextAdapter(f(QLineEdit, "txtPackingState"))
         self.structure_summary._widget.setReadOnly(True)
+        # 发货判断只在 AI 估算卡正式展示。保留旧 objectName 和绑定，
+        # 仅隐藏顶部重复入口以兼容历史 payload 与现有自动化。
+        packing_state_title = f(QLabel, "lblPackingStateTitle")
+        if packing_state_title is not None:
+            packing_state_title.setVisible(False)
+        self.structure_summary._widget.setVisible(False)
         self.btn_partial_reestimate = f(QPushButton, "btnPartialReestimate")
         self.btn_partial_reestimate.setText("按修正重估")
         ai_layout = f(QGridLayout, "aiSummaryLayout")
@@ -547,16 +553,17 @@ class CalculationPage(QWidget):
                 weight_hbox.addLayout(weight_row)
             grid.addLayout(weight_hbox, 3, 0, 1, 3)
             # 行 4/5：底部区域
-            # AI估算：包装方式标签 + 只读多行框（保持原样）
+            # AI估算：唯一正式展示的 AI 发货判断 + 只读多行框
             # 当前采用：用户修正多行框直接放在包装后重量下一行（无独立“用户修正”小标题）
             #          + 最底部“真实头程（选填）”一行
             if is_ai:
-                bottom_label = QLabel("包装方式")
+                bottom_label = QLabel("AI发货判断")
+                bottom_label.setObjectName("lblAiShipmentJudgment")
                 bottom_label.setFixedHeight(20)
                 grid.addWidget(bottom_label, 4, 0, 1, 3)
                 note_edit = method_widget
                 note_edit.setReadOnly(True)
-                note_edit.setPlaceholderText("AI估算包装方式（第一次 AI 结果，只读）")
+                note_edit.setPlaceholderText("AI发货判断（第一次 AI 结果，只读）")
                 if not isinstance(note_edit, _UserCorrectionEdit):
                     note_edit.setFixedHeight(104)
                 note_edit.setMinimumWidth(90)
@@ -621,6 +628,8 @@ class CalculationPage(QWidget):
         # 利润区规则状态放字段标题上方；字号用 QFont（binder 用 setStyleSheet 只覆盖颜色）
         profit_grid = f(QGridLayout, "profitFieldsGrid")
         if profit_grid is not None:
+            profit_grid.setHorizontalSpacing(12)
+            profit_grid.setVerticalSpacing(6)
             for layout_name in ("layoutNoActivityProfitTitle", "layoutActivityProfitTitle"):
                 hbox = f(QHBoxLayout, layout_name)
                 if hbox is None or hbox.count() < 2:
@@ -646,6 +655,37 @@ class CalculationPage(QWidget):
                 if title_widget is not None:
                     stack.addWidget(title_widget)
                 profit_grid.addLayout(stack, row, col, row_span, col_span)
+
+            # 统一标题和值的视觉中心；在无活动/活动两大功能组前增加两条
+            # 不占新网格列的浅色细分隔线，保持利润区整体高度与宽度不变。
+            for label_name in (
+                "lblSheinPrice", "lblCalculatedCost", "lblProfitRate",
+                "lblNoActivityPrice", "lblListPriceProfitRateTitle",
+                "lblPromotionReserve", "lblActivityPrice",
+            ):
+                label = f(QLabel, label_name)
+                if label is not None:
+                    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            for label_name in ("lblNoActivityPrice", "lblActivityPrice"):
+                label = f(QLabel, label_name)
+                if label is not None:
+                    label.setStyleSheet(
+                        "border-left:1px solid #E1E7EF; padding-left:6px;"
+                    )
+            for layout_name in (
+                "layout_txtNoActivityPriceRmb", "layout_txtNoActivityPriceUsd",
+                "layout_txtActivityPriceRmb", "layout_txtActivityPriceUsd",
+            ):
+                row_layout = f(QHBoxLayout, layout_name)
+                if row_layout is None:
+                    continue
+                separator = QFrame()
+                separator.setObjectName(f"separator_{layout_name}")
+                separator.setFrameShape(QFrame.Shape.VLine)
+                separator.setStyleSheet("color:#E1E7EF;")
+                separator.setFixedWidth(1)
+                row_layout.insertWidget(0, separator)
+                row_layout.setSpacing(5)
         # 此结论仅重复利润区标题提示，且在紧凑窗口中占用无效的独立行。
         # 计算与字段布局完全不依赖它，因此隐藏该显示冗余项。
         profit_conclusion = f(QLabel, "lblProfitConclusion")
@@ -971,26 +1011,32 @@ class CalculationPage(QWidget):
     def _apply_observation(self, observation: AIObservation) -> None:
         previous_updating = self._updating
         self._updating = True
-        if observation.product_name or observation.product_type:
-            self.product_summary.setText(product_summary(observation))
+        if "product_name" not in self.session.user_overrides:
+            has_product_fact = bool(
+                observation.product_name
+                or observation.product_type
+                or observation.display_product_summary
+            )
+            self.product_summary.setText(product_summary(observation) if has_product_fact else "")
         if observation.material:
             self.material_summary.setText(observation.material)
         self.structure_summary.setText(observation.display_packaging_summary or self._observation_structure_summary(observation))
         self._set_combo_data(self.rigidity_combo, observation.rigidity)
         self._set_combo_data(self.foldability_combo, observation.foldability)
         self._set_combo_data(self.compressibility_combo, observation.compressibility)
-        if observation.product_cost_rmb is not None and "product_cost_rmb" not in self.session.user_overrides:
-            self.product_cost.setValue(observation.product_cost_rmb)
-        if observation.domestic_shipping_rmb is not None and "domestic_shipping_rmb" not in self.session.user_overrides:
-            self.domestic_shipping.setValue(observation.domestic_shipping_rmb)
-        if observation.length_cm is not None and "length_cm" not in self.session.user_overrides:
-            self.bare_length.setValue(observation.length_cm)
-        if observation.width_cm is not None and "width_cm" not in self.session.user_overrides:
-            self.bare_width.setValue(observation.width_cm)
-        if observation.height_cm is not None and "height_cm" not in self.session.user_overrides:
-            self.bare_height.setValue(observation.height_cm)
-        if observation.weight_g is not None and "weight_g" not in self.session.user_overrides:
-            self.bare_weight.setValue(observation.weight_g)
+        observed_widgets = {
+            "product_cost_rmb": (self.product_cost, observation.product_cost_rmb),
+            "domestic_shipping_rmb": (self.domestic_shipping, observation.domestic_shipping_rmb),
+            "length_cm": (self.bare_length, observation.length_cm),
+            "width_cm": (self.bare_width, observation.width_cm),
+            "height_cm": (self.bare_height, observation.height_cm),
+            "weight_g": (self.bare_weight, observation.weight_g),
+        }
+        for field_name, (widget, value) in observed_widgets.items():
+            if field_name not in self.session.user_overrides:
+                # 新一轮识图是图片事实的完整替换：本轮 null 必须清掉上一轮
+                # AI、设计预览或页面残留值；shipment 由包装卡单独承接。
+                widget.setValue(float(value) if value is not None else 0.0)
         flags = {
             "has_hard_bottom": observation.has_hard_bottom,
             "has_hard_backboard": observation.has_hard_backboard,
@@ -1009,7 +1055,13 @@ class CalculationPage(QWidget):
     def _refresh_display_summaries(self, observation: AIObservation, proposal: PackagingProposal) -> None:
         previous_updating = self._updating
         self._updating = True
-        self.product_summary.setText(product_summary(observation))
+        if "product_name" not in self.session.user_overrides:
+            has_product_fact = bool(
+                observation.product_name
+                or observation.product_type
+                or observation.display_product_summary
+            )
+            self.product_summary.setText(product_summary(observation) if has_product_fact else "")
         self.structure_summary.setText(packaging_summary(observation, proposal))
         self._updating = previous_updating
 
@@ -1293,7 +1345,12 @@ class CalculationPage(QWidget):
                 "model": _profile.model_name,
                 "provider_host": _urlparse(_profile.api_url).netloc,
             }
-        self._local_diagnostic_operation.request(request_type="corrected-reestimate-v1", **provider_info, **context)
+        self._local_diagnostic_operation.request(
+            request_type="corrected-reestimate-v1",
+            prompt_version=reestimate_svc.PROMPT_VERSION,
+            **provider_info,
+            **context,
+        )
         self._show_local_dialog()
         self._local_thread = QThread(self)
         self._local_worker = LocalReestimateWorker(self.context.local_reestimate_service, context)
@@ -1432,9 +1489,7 @@ class CalculationPage(QWidget):
         if self.initial_ai_snapshot is None and self.editing_record_id is None:
             for fields in (self.normal_fields, self.conservative_fields):
                 method_text = proposal.normal.packaging_method
-                fields["method"].setText(
-                    packaging_method_zh(method_text) if fields is self.normal_fields else method_text
-                )
+                fields["method"].setText(method_text)
                 fields["length"].setValue(proposal.normal.length_cm or 0)
                 fields["width"].setValue(proposal.normal.width_cm or 0)
                 fields["height"].setValue(proposal.normal.height_cm or 0)
@@ -2218,9 +2273,6 @@ class CalculationPage(QWidget):
         """把包装 dict 写入卡片字段（缺失归一为 0/空）。"""
         raw = raw if isinstance(raw, dict) else {}
         method_text = str(raw.get("packaging_method") or "")
-        if fields.get("name") == "AI估算":
-            # 仅显示层中文化：AI 英文包装方式转中文，原始 payload 不变
-            method_text = packaging_method_zh(method_text)
         fields["method"].setText(method_text)
         fields["length"].setValue(float(raw.get("length_cm") or 0))
         fields["width"].setValue(float(raw.get("width_cm") or 0))
