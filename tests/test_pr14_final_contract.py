@@ -6,7 +6,7 @@ from dataclasses import asdict
 import json
 
 import pytest
-from PySide6.QtWidgets import QLabel, QLineEdit, QTextEdit, QWidget
+from PySide6.QtWidgets import QDoubleSpinBox, QLabel, QLineEdit, QTextEdit, QWidget
 
 from profit_accounting_26.application import AppContext
 from profit_accounting_26.application.api_profile_store import (
@@ -126,11 +126,15 @@ def test_ai_shipment_judgment_has_one_visible_contract_location(qapp, app_contex
 
 
 def test_visual_and_reestimate_prompts_are_frozen_minimal_contracts():
-    assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.1-frozen"
+    assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.2-frozen"
     assert LocalReestimateService.PROMPT_VERSION == "2.6.1-reestimate-v1.1-frozen"
     schema = RecognitionService.RESPONSE_SCHEMA
-    assert set(schema["properties"]) == {"product_name", "observed", "shipment", "note"}
+    assert set(schema["properties"]) == {"product_name", "observed", "bare_estimate", "shipment", "note"}
+    assert "bare_estimate" in schema["properties"]
+    be_schema = schema["properties"]["bare_estimate"]
+    assert set(be_schema["required"]) == {"length_cm", "width_cm", "height_cm", "weight_g"}
     prompt = RecognitionService._prompt(2)
+    assert "bare_estimate" in prompt
     reestimate = LocalReestimateService._context(
         product_name="商品", confirmed_facts={}, current_shipment={}, user_correction="修正",
     )
@@ -266,18 +270,24 @@ def test_profit_snapshot_restores_last_reserve_and_rate(binder, qapp):
     assert restored.is_in_snapshot_mode()
 
 
-def test_profit_ui_object_names_and_separators_survive(qapp, app_context):
+def test_profit_ui_object_names_and_three_groups_exist(qapp, app_context):
     page = CalculationPage(app_context)
     try:
         for name in (
             "spinPromotionReserve", "spinProfitRate", "txtCalculatedCostRmb",
             "txtNoActivityPriceRmb", "txtNoActivityPriceUsd",
             "txtActivityProfitRmb", "txtActivityProfitUsd",
+            "txtSheinPriceRmb", "txtSheinPriceUsd",
+            "txtCalculatedCostUsd", "txtNoActivityProfitRmb",
+            "txtActivityPriceRmb", "txtActivityPriceUsd",
         ):
-            assert page._root.findChild(QWidget, name) is not None
-        # 利润区 2 条完整竖向分隔线（Grid 级别，非 HBox 内插）
-        assert page._root.findChild(QWidget, "profitSeparator_col2") is not None
-        assert page._root.findChild(QWidget, "profitSeparator_col7") is not None
+            assert page._root.findChild(QWidget, name) is not None, f"missing widget: {name}"
+        # 不再存在竖向分隔线
+        assert page._root.findChild(QWidget, "profitSeparator_col2") is None
+        assert page._root.findChild(QWidget, "profitSeparator_col7") is None
+        # 裸尺寸/裸重来源标签存在
+        assert page._root.findChild(QWidget, "lblBareDimensionSource") is not None
+        assert page._root.findChild(QWidget, "lblBareWeightSource") is not None
     finally:
         page.deleteLater()
 
@@ -354,5 +364,128 @@ def test_archive_current_rule_persists_immediately(qapp, app_context, monkeypatc
             if r.get("id") == rule_id and r.get("archived")
         ]
         assert len(archived_rules) == 1
+    finally:
+        page.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# bare_estimate 层级测试
+# ---------------------------------------------------------------------------
+
+def test_bare_estimate_fallback_when_observed_null(qapp, app_context):
+    """observed=null + bare_estimate=45g：页面显示 45g，source=AI估算。"""
+    page = CalculationPage(app_context)
+    try:
+        obs = AIObservation()
+        obs.raw_payload = {
+            "bare_estimate": {"length_cm": 10.0, "width_cm": 8.0, "height_cm": 3.0, "weight_g": 45.0},
+            "observation": {},
+        }
+        page._apply_observation(obs)
+        assert page.bare_weight.value() == 45.0
+        assert page.bare_length.value() == 10.0
+        assert page.lbl_bare_weight_source.text() == "AI\u4f30\u7b97"
+        assert page.lbl_bare_dim_source.text() == "AI\u4f30\u7b97"
+    finally:
+        page.deleteLater()
+
+
+def test_observed_takes_priority_over_bare_estimate(qapp, app_context):
+    """observed=50g + bare_estimate=45g：页面显示 50g，source=图片识别。"""
+    page = CalculationPage(app_context)
+    try:
+        obs = AIObservation(weight_g=50.0, length_cm=12.0, width_cm=10.0, height_cm=4.0)
+        obs.dimension_value_source = "image_text"
+        obs.weight_value_source = "image_text"
+        obs.raw_payload = {
+            "bare_estimate": {"length_cm": 10.0, "width_cm": 8.0, "height_cm": 3.0, "weight_g": 45.0},
+            "observation": {},
+        }
+        page._apply_observation(obs)
+        assert page.bare_weight.value() == 50.0
+        assert page.bare_length.value() == 12.0
+        assert page.lbl_bare_weight_source.text() == "\u56fe\u7247\u8bc6\u522b"
+        assert page.lbl_bare_dim_source.text() == "\u56fe\u7247\u8bc6\u522b"
+    finally:
+        page.deleteLater()
+
+
+def test_user_confirmed_not_overwritten_by_bare_estimate(qapp, app_context):
+    """user_confirmed=52g：页面保持 52g，source=用户确认。"""
+    page = CalculationPage(app_context)
+    try:
+        page.bare_weight.setValue(52.0)
+        page.session.confirm_value("weight_g", 52.0)
+        obs = AIObservation()
+        obs.raw_payload = {
+            "bare_estimate": {"length_cm": 10.0, "width_cm": 8.0, "height_cm": 3.0, "weight_g": 45.0},
+            "observation": {},
+        }
+        page.session.protect_confirmed_values(obs)
+        page._apply_observation(obs)
+        assert page.bare_weight.value() == 52.0
+        assert page.lbl_bare_weight_source.text() == "\u7528\u6237\u786e\u8ba4"
+    finally:
+        page.deleteLater()
+
+
+def test_bare_estimate_not_in_confirmed_facts(qapp, app_context):
+    """bare_estimate 不得进入 confirmed_facts。"""
+    page = CalculationPage(app_context)
+    try:
+        obs = AIObservation()
+        obs.raw_payload = {
+            "bare_estimate": {"length_cm": 10.0, "width_cm": 8.0, "height_cm": 3.0, "weight_g": 45.0},
+            "observation": {},
+        }
+        page._apply_observation(obs)
+        facts = page.session.confirmed_facts()
+        # bare_estimate 自动填充不应产生 user_confirmed 记录
+        assert "weight_g" not in facts
+        assert "length_cm" not in facts
+    finally:
+        page.deleteLater()
+
+
+def test_shipment_does_not_backfill_observed(qapp, app_context):
+    """shipment 不得反填 observed。"""
+    page = CalculationPage(app_context)
+    try:
+        obs = AIObservation()
+        obs.raw_payload = {
+            "bare_estimate": {},
+            "observation": {},
+        }
+        page._apply_observation(obs)
+        proposal = RecognitionService.proposal_from_shipment(
+            {"length_cm": 20, "width_cm": 15, "height_cm": 3, "weight_g": 60, "state": "\u53ef\u6298\u53e0\uff1b\u888b\u88c5\u53d1\u8d27"}
+        )
+        page.apply_proposal(proposal)
+        # shipment 值在包装卡片中，不应反填裸尺寸/裸重
+        assert page.bare_length.value() == 0
+        assert page.bare_weight.value() == 0
+    finally:
+        page.deleteLater()
+
+
+def test_reestimate_schema_unchanged():
+    """Reestimate Prompt/Schema 不因本轮扩张。"""
+    schema = LocalReestimateService.RESPONSE_SCHEMA
+    assert set(schema["properties"]) == {"shipment", "note"}
+    assert "bare_estimate" not in schema["properties"]
+    assert LocalReestimateService.PROMPT_VERSION == "2.6.1-reestimate-v1.1-frozen"
+
+
+def test_old_record_without_bare_estimate_loads(qapp, app_context):
+    """旧记录无 bare_estimate 时正常读取。"""
+    page = CalculationPage(app_context)
+    try:
+        obs = AIObservation()
+        obs.raw_payload = {"observation": {}}  # 没有 bare_estimate
+        page._apply_observation(obs)
+        assert page.bare_weight.value() == 0
+        assert page.bare_length.value() == 0
+        assert page.lbl_bare_weight_source.text() == "\u672a\u8bc6\u522b"
+        assert page.lbl_bare_dim_source.text() == "\u672a\u8bc6\u522b"
     finally:
         page.deleteLater()

@@ -92,11 +92,11 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-visual-v1.1-frozen"
+    PROMPT_VERSION = "2.6.1-visual-v1.2-frozen"
     RESPONSE_SCHEMA = {
         "type": "object",
         "additionalProperties": False,
-        "required": ["product_name", "observed", "shipment", "note"],
+        "required": ["product_name", "observed", "bare_estimate", "shipment", "note"],
         "properties": {
             "product_name": {"type": "string"},
             "observed": {
@@ -117,6 +117,17 @@ class RecognitionService:
                         },
                     },
                     "bare_weight_g": {"type": ["number", "null"]},
+                },
+            },
+            "bare_estimate": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["length_cm", "width_cm", "height_cm", "weight_g"],
+                "properties": {
+                    "length_cm": {"type": ["number", "null"]},
+                    "width_cm": {"type": ["number", "null"]},
+                    "height_cm": {"type": ["number", "null"]},
+                    "weight_g": {"type": ["number", "null"]},
                 },
             },
             "shipment": {
@@ -174,12 +185,13 @@ class RecognitionService:
 逐张查看全部图片，但图片顺序和图片框类型不代表字段职责。返回：
 1. product_name：简短、规范、可搜索的商品名称，不复制供应商 SEO 长标题。
 2. observed：只填写图片中能可靠读到的页面价格、页面运费、裸品尺寸和裸重。看不清就返回 null；价格和运费禁止凭经验猜测；只确认部分裸尺寸时其余维度保持 null。
-3. shipment：独立判断商品真正交给物流时最可能的外部尺寸、总重量和简短发货状态。即使图片没有标注尺寸，也应根据商品本身尽量给出一套完整判断。
-shipment.state 是面向用户的一句简短“AI发货判断”，必须同时描述商品交给物流时的主要物理形态/处理状态、处理方式和简单包装方式，例如“可折叠；袋装发货”。不要只返回“折叠”“压缩”“保持原形”等单一处理词。
+3. bare_estimate：当图片没有明确标注裸品尺寸或裸重时，可根据商品本身估算 bare_estimate。bare_estimate 是 AI 推测，不是图片事实。最终 shipment 判断应结合用户确认事实、图片事实及必要的 bare_estimate。
+4. shipment：独立判断商品真正交给物流时最可能的外部尺寸、总重量和简短发货状态。即使图片没有标注尺寸，也应根据商品本身尽量给出一套完整判断。
+shipment.state 是面向用户的一句简短"AI发货判断"，必须同时描述商品交给物流时的主要物理形态/处理状态、处理方式和简单包装方式，例如"可折叠；袋装发货"。不要只返回"折叠""压缩""保持原形"等单一处理词。
 shipment.state 禁止填写发货时效、48小时发货、现货、包邮、快递速度、商家履约、物流费用、货代、CAL、体积重或利润。
-4. note：仅写必要的简短补充。
+5. note：仅写必要的简短补充。
 
-confirmed_facts 是用户已经确认的数据，优先级最高，不得修改。observed 是裸品/页面事实，shipment 是发货外廓和发货总重量，两者不得混淆。
+confirmed_facts 是用户已经确认的数据，优先级最高，不得修改。observed 是裸品/页面事实，bare_estimate 是 AI 推测的裸品近似值（不是图片事实），shipment 是发货外廓和发货总重量，三者不得混淆。
 不得输出或计算体积重、计费重、头程、固定服务费、尾程、总成本、利润、利润率、货代选择、CAL、规则编号、多候选方案或复杂分类字段。
 """.strip()
         if not include_json_shape:
@@ -192,6 +204,12 @@ confirmed_facts 是用户已经确认的数据，优先级最高，不得修改�
                     "page_shipping_rmb": None,
                     "bare_dimensions_cm": {"length": None, "width": None, "height": None},
                     "bare_weight_g": None,
+                },
+                "bare_estimate": {
+                    "length_cm": None,
+                    "width_cm": None,
+                    "height_cm": None,
+                    "weight_g": None,
                 },
                 "shipment": {
                     "length_cm": 0,
@@ -365,6 +383,26 @@ confirmed_facts 是用户已经确认的数据，优先级最高，不得修改�
             raw_observation.update(dimension_scope="product_size", dimension_value_source="image_text")
         if raw_observation["weight_g"] is not None:
             raw_observation.update(weight_scope="net_weight", weight_value_source="image_text")
+        # bare_estimate: AI 推测的裸品近似值，仅在 observed 无值时作为回退
+        bare_est = payload.get("bare_estimate") if isinstance(payload.get("bare_estimate"), dict) else {}
+        raw_observation["bare_estimate"] = {
+            "length_cm": cls._parse_optional_number(
+                bare_est.get("length_cm"), field_name="bare_estimate.length_cm",
+                parse_issues=parse_issues,
+            ),
+            "width_cm": cls._parse_optional_number(
+                bare_est.get("width_cm"), field_name="bare_estimate.width_cm",
+                parse_issues=parse_issues,
+            ),
+            "height_cm": cls._parse_optional_number(
+                bare_est.get("height_cm"), field_name="bare_estimate.height_cm",
+                parse_issues=parse_issues,
+            ),
+            "weight_g": cls._parse_optional_number(
+                bare_est.get("weight_g"), field_name="bare_estimate.weight_g",
+                parse_issues=parse_issues,
+            ),
+        }
         if raw_observation["product_cost_rmb"] is not None:
             raw_observation["product_cost_value_type"] = "exact"
         if raw_observation["domestic_shipping_rmb"] is not None:

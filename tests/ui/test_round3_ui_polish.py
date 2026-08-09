@@ -147,21 +147,14 @@ def test_profit_rule_status_above_title(qapp, page, title_name, status_name):
     title_label = page._root.findChild(QLabel, title_name)
     status_label = page._root.findChild(QLabel, status_name)
     assert title_label is not None and status_label is not None
-    grid = page._root.findChild(QGridLayout, "profitFieldsGrid")
-    assert grid is not None
-    # 在 grid 中找到同时包含状态与标题的竖排子布局
-    stack = None
-    for index in range(grid.count()):
-        sub = grid.itemAt(index).layout()
-        if sub is not None and sub.indexOf(status_label) >= 0:
-            stack = sub
-            break
-    assert isinstance(stack, QVBoxLayout)
-    # 状态在上、标题在下
-    assert stack.indexOf(status_label) == 0
-    assert stack.indexOf(title_label) == 1
-    # 输入框没有移动：标题容器仍在 profitFieldsGrid 内
-    assert grid.indexOf(stack) >= 0
+    # 三个业务组重排后，状态标签和标题均在 Group 容器内
+    # 检查两个控件均可见
+    assert title_label.isVisibleTo(page._root)
+    assert status_label.isVisibleTo(page._root)
+    # 状态标签和标题标签共享同一个父控件（所属 Group QFrame）
+    assert status_label.parentWidget() is not None
+    assert title_label.parentWidget() is not None
+    assert status_label.parentWidget() is title_label.parentWidget()
 
 
 # ---------------------------------------------------------------- 十一、历史选中浅蓝

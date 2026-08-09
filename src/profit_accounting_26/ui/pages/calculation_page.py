@@ -401,6 +401,25 @@ class CalculationPage(QWidget):
         self.bare_width = self._dim_spin("spinBareWidthCm")
         self.bare_height = self._dim_spin("spinBareHeightCm")
         self.bare_weight = self._weight_spin("spinBareWeightG")
+        # 裸尺寸/裸重来源标签（小字号，不抢主数据视觉）
+        self.lbl_bare_dim_source = QLabel("\u672a\u8bc6\u522b")
+        self.lbl_bare_dim_source.setObjectName("lblBareDimensionSource")
+        _src_font = self.lbl_bare_dim_source.font()
+        if _src_font.pointSize() > 8:
+            _src_font.setPointSize(_src_font.pointSize() - 1)
+        self.lbl_bare_dim_source.setFont(_src_font)
+        self.lbl_bare_dim_source.setStyleSheet("color:#607089;")
+        self.lbl_bare_weight_source = QLabel("\u672a\u8bc6\u522b")
+        self.lbl_bare_weight_source.setObjectName("lblBareWeightSource")
+        self.lbl_bare_weight_source.setFont(_src_font)
+        self.lbl_bare_weight_source.setStyleSheet("color:#607089;")
+        # 把来源标签插入现有布局尾部
+        _bare_height_layout = f(QHBoxLayout, "layout_spinBareHeightCm")
+        if _bare_height_layout is not None:
+            _bare_height_layout.addWidget(self.lbl_bare_dim_source)
+        _bare_weight_layout = f(QHBoxLayout, "layout_spinBareWeightG")
+        if _bare_weight_layout is not None:
+            _bare_weight_layout.addWidget(self.lbl_bare_weight_source)
         # AI估算（原正常档位置）：第一次 AI 结果，全部只读，不参与正式计算
         self.normal_fields: dict[str, Any] = {
             "name": "AI估算",
@@ -656,40 +675,158 @@ class CalculationPage(QWidget):
                     stack.addWidget(title_widget)
                 profit_grid.addLayout(stack, row, col, row_span, col_span)
 
-            # 统一标题和值的视觉中心
-            for label_name in (
-                "lblSheinPrice", "lblCalculatedCost", "lblProfitRate",
-                "lblNoActivityPrice", "lblListPriceProfitRateTitle",
-                "lblPromotionReserve", "lblActivityPrice",
-            ):
-                label = f(QLabel, label_name)
-                if label is not None:
-                    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            # ---- 利润区三个业务组重排 ----
+            # 从 profitFieldsGrid 中取出所有控件，按业务组重排到三个浅边框容器。
+            # 不再使用竖向分隔线，组本身的浅边框提供视觉分隔。
+            grid_items = []
+            for idx in range(profit_grid.count()):
+                item = profit_grid.itemAt(idx)
+                grid_items.append(item)
+            for item in grid_items:
+                profit_grid.removeItem(item)
 
-            # 增加 2 条浅色竖向分隔线，将利润区分为三个逻辑组：
-            # 基础数据 | 标价/利润目标 | 活动相关
-            # 通过向 Grid 插入新列实现，不影响现有字段 objectName 和功能。
-            items_info = []
-            for i in range(profit_grid.count()):
-                item = profit_grid.itemAt(i)
-                r, c, rs, cs = profit_grid.getItemPosition(i)
-                items_info.append((item, r, c, rs, cs))
-            while profit_grid.count():
-                profit_grid.takeAt(0)
-            for item, r, c, rs, cs in items_info:
-                new_c = c
-                if c >= 6:
-                    new_c += 2
-                elif c >= 2:
-                    new_c += 1
-                profit_grid.addItem(item, r, new_c, rs, cs)
-            for sep_col in (2, 7):
-                sep = QFrame()
-                sep.setObjectName(f"profitSeparator_col{sep_col}")
-                sep.setFrameShape(QFrame.Shape.VLine)
-                sep.setStyleSheet("color:#E1E7EF;")
-                sep.setFixedWidth(1)
-                profit_grid.addWidget(sep, 0, sep_col, 3, 1, Qt.AlignmentFlag.AlignHCenter)
+            # profitFieldsHost 改为自适应宽度（取消固定 1190px）
+            profit_host = f(QWidget, "profitFieldsHost")
+            if profit_host is not None:
+                profit_host.setMinimumWidth(0)
+                profit_host.setMaximumWidth(16777215)
+                from PySide6.QtWidgets import QSizePolicy as _QSP
+                profit_host.setSizePolicy(_QSP(_QSP.Policy.Preferred, _QSP.Policy.Preferred))
+
+            def _build_field_block(title_name, row1_names, row2_names=None, *, is_percent=False):
+                """构建统一的小 Field Block：标题 → RMB行 → USD行。"""
+                block = QVBoxLayout()
+                block.setContentsMargins(0, 0, 0, 0)
+                block.setSpacing(4)
+                title_lbl = f(QLabel, title_name)
+                if title_lbl is not None:
+                    title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    block.addWidget(title_lbl, alignment=Qt.AlignmentFlag.AlignHCenter)
+                for w_name in (row1_names or []):
+                    w = f(QDoubleSpinBox, w_name) if w_name.startswith(("txt", "spin")) else f(QLabel, w_name)
+                    if w is not None:
+                        if hasattr(w, "setFixedWidth"):
+                            w.setFixedWidth(96)
+                        block.addWidget(w, alignment=Qt.AlignmentFlag.AlignHCenter)
+                if row2_names:
+                    for w_name in row2_names:
+                        w = f(QDoubleSpinBox, w_name) if w_name.startswith(("txt", "spin")) else f(QLabel, w_name)
+                        if w is not None:
+                            if hasattr(w, "setFixedWidth"):
+                                w.setFixedWidth(96)
+                            block.addWidget(w, alignment=Qt.AlignmentFlag.AlignHCenter)
+                elif is_percent:
+                    spacer_h = QWidget()
+                    spacer_h.setFixedHeight(28)
+                    block.addWidget(spacer_h)
+                return block
+
+            def _build_block_with_status(title_name, status_name, row1_names, row2_names=None, *, is_percent=False):
+                """构建带规则状态标签的 Field Block。"""
+                block = QVBoxLayout()
+                block.setContentsMargins(0, 0, 0, 0)
+                block.setSpacing(4)
+                status_lbl = f(QLabel, status_name)
+                title_lbl = f(QLabel, title_name)
+                if status_lbl is not None:
+                    sfont = status_lbl.font()
+                    if sfont.pointSize() > 8:
+                        sfont.setPointSize(sfont.pointSize() - 1)
+                    status_lbl.setFont(sfont)
+                header = QVBoxLayout()
+                header.setContentsMargins(0, 0, 0, 0)
+                header.setSpacing(1)
+                if status_lbl is not None:
+                    header.addWidget(status_lbl, alignment=Qt.AlignmentFlag.AlignHCenter)
+                if title_lbl is not None:
+                    title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    header.addWidget(title_lbl, alignment=Qt.AlignmentFlag.AlignHCenter)
+                block.addLayout(header)
+                for w_name in (row1_names or []):
+                    w = f(QDoubleSpinBox, w_name) if w_name.startswith(("txt", "spin")) else f(QLabel, w_name)
+                    if w is not None:
+                        if hasattr(w, "setFixedWidth"):
+                            w.setFixedWidth(96)
+                        block.addWidget(w, alignment=Qt.AlignmentFlag.AlignHCenter)
+                if row2_names:
+                    for w_name in row2_names:
+                        w = f(QDoubleSpinBox, w_name) if w_name.startswith(("txt", "spin")) else f(QLabel, w_name)
+                        if w is not None:
+                            if hasattr(w, "setFixedWidth"):
+                                w.setFixedWidth(96)
+                            block.addWidget(w, alignment=Qt.AlignmentFlag.AlignHCenter)
+                elif is_percent:
+                    spacer_h = QWidget()
+                    spacer_h.setFixedHeight(28)
+                    block.addWidget(spacer_h)
+                return block
+
+            def _build_group(title_text, field_blocks, stretch_val):
+                """构建一个浅边框业务组。"""
+                group = QFrame()
+                group.setStyleSheet(
+                    "QFrame{border:1px solid #E1E7EF;border-radius:6px;background:transparent;}"
+                )
+                outer = QVBoxLayout(group)
+                outer.setContentsMargins(10, 7, 10, 8)
+                outer.setSpacing(5)
+                title = QLabel(title_text)
+                title.setStyleSheet("font-weight:600;color:#33445d;border:none;")
+                outer.addWidget(title)
+                row = QHBoxLayout()
+                row.setSpacing(10)
+                for fb in field_blocks:
+                    row.addLayout(fb, 1)
+                outer.addLayout(row)
+                outer.addStretch(1)
+                return group, stretch_val
+
+            # Group A: 基础数据 (SHEIN核价 / 计算总成本)
+            blk_shein = _build_field_block(
+                "lblSheinPrice", ["txtSheinPriceRmb"], ["txtSheinPriceUsd"])
+            blk_cost = _build_field_block(
+                "lblCalculatedCost", ["txtCalculatedCostRmb"], ["txtCalculatedCostUsd"])
+            group_a, str_a = _build_group("\u57fa\u7840\u6570\u636e", [blk_shein, blk_cost], 20)
+
+            # Group B: 标价与利润目标
+            blk_rate = _build_field_block(
+                "lblProfitRate", ["spinProfitRate"], is_percent=True)
+            blk_na_price = _build_field_block(
+                "lblNoActivityPrice", ["txtNoActivityPriceRmb"], ["txtNoActivityPriceUsd"])
+            blk_na_profit = _build_block_with_status(
+                "lblNoActivityProfit", "lblNoActivitySubsidyStatus",
+                ["txtNoActivityProfitRmb"], ["txtNoActivityProfitUsd"])
+            blk_list_rate = _build_field_block(
+                "lblListPriceProfitRateTitle", ["txtListPriceProfitRate"], is_percent=True)
+            group_b, str_b = _build_group(
+                "\u6807\u4ef7\u4e0e\u5229\u6da6\u76ee\u6807",
+                [blk_rate, blk_na_price, blk_na_profit, blk_list_rate], 44)
+
+            # Group C: 活动测算
+            blk_reserve = _build_field_block(
+                "lblPromotionReserve", ["spinPromotionReserve"], is_percent=True)
+            blk_act_price = _build_field_block(
+                "lblActivityPrice", ["txtActivityPriceRmb"], ["txtActivityPriceUsd"])
+            blk_act_profit = _build_block_with_status(
+                "lblActivityProfit", "lblActivitySubsidyStatus",
+                ["txtActivityProfitRmb"], ["txtActivityProfitUsd"])
+            group_c, str_c = _build_group(
+                "\u6d3b\u52a8\u6d4b\u7b97",
+                [blk_reserve, blk_act_price, blk_act_profit], 36)
+
+            # 将三个组添加到 profitFieldsHostLayout
+            profit_host_layout = f(QVBoxLayout, "profitFieldsHostLayout")
+            if profit_host_layout is not None:
+                # 清空现有内容
+                while profit_host_layout.count():
+                    profit_host_layout.takeAt(0)
+                groups_row = QHBoxLayout()
+                groups_row.setSpacing(10)
+                groups_row.setContentsMargins(0, 0, 0, 0)
+                groups_row.addWidget(group_a, str_a)
+                groups_row.addWidget(group_b, str_b)
+                groups_row.addWidget(group_c, str_c)
+                profit_host_layout.addLayout(groups_row)
         # 此结论仅重复利润区标题提示，且在紧凑窗口中占用无效的独立行。
         # 计算与字段布局完全不依赖它，因此隐藏该显示冗余项。
         profit_conclusion = f(QLabel, "lblProfitConclusion")
@@ -971,6 +1108,13 @@ class CalculationPage(QWidget):
                 "height_cm": self.bare_height, "weight_g": self.bare_weight,
             }
             self._accept_numeric_field(key, widgets[key])
+            # 用户手动编辑后更新来源标签
+            if key in ("length_cm", "width_cm", "height_cm"):
+                if hasattr(self, "lbl_bare_dim_source"):
+                    self.lbl_bare_dim_source.setText("\u7528\u6237\u786e\u8ba4")
+            elif key == "weight_g":
+                if hasattr(self, "lbl_bare_weight_source"):
+                    self.lbl_bare_weight_source.setText("\u7528\u6237\u786e\u8ba4")
 
     def _accept_numeric_field(self, key: str, widget: Any) -> None:
         if self._updating:
@@ -1028,19 +1172,49 @@ class CalculationPage(QWidget):
         self._set_combo_data(self.rigidity_combo, observation.rigidity)
         self._set_combo_data(self.foldability_combo, observation.foldability)
         self._set_combo_data(self.compressibility_combo, observation.compressibility)
+        # bare_estimate: AI 推测的裸品近似值，仅在 observed 无值时作为回退
+        bare_est = {}
+        if isinstance(observation.raw_payload, dict):
+            raw_be = observation.raw_payload.get("bare_estimate")
+            if isinstance(raw_be, dict):
+                bare_est = raw_be
+        # 优先级：用户确认 > 图片识别(observed) > AI估算(bare_estimate) > 空值
+        dim_source = "\u672a\u8bc6\u522b"
+        weight_source = "\u672a\u8bc6\u522b"
         observed_widgets = {
-            "product_cost_rmb": (self.product_cost, observation.product_cost_rmb),
-            "domestic_shipping_rmb": (self.domestic_shipping, observation.domestic_shipping_rmb),
-            "length_cm": (self.bare_length, observation.length_cm),
-            "width_cm": (self.bare_width, observation.width_cm),
-            "height_cm": (self.bare_height, observation.height_cm),
-            "weight_g": (self.bare_weight, observation.weight_g),
+            "product_cost_rmb": (self.product_cost, observation.product_cost_rmb, None),
+            "domestic_shipping_rmb": (self.domestic_shipping, observation.domestic_shipping_rmb, None),
+            "length_cm": (self.bare_length, observation.length_cm, bare_est.get("length_cm")),
+            "width_cm": (self.bare_width, observation.width_cm, bare_est.get("width_cm")),
+            "height_cm": (self.bare_height, observation.height_cm, bare_est.get("height_cm")),
+            "weight_g": (self.bare_weight, observation.weight_g, bare_est.get("weight_g")),
         }
-        for field_name, (widget, value) in observed_widgets.items():
-            if field_name not in self.session.user_overrides:
-                # 新一轮识图是图片事实的完整替换：本轮 null 必须清掉上一轮
-                # AI、设计预览或页面残留值；shipment 由包装卡单独承接。
-                widget.setValue(float(value) if value is not None else 0.0)
+        for field_name, (widget, observed_val, est_val) in observed_widgets.items():
+            if field_name in self.session.user_overrides:
+                if field_name in ("length_cm", "width_cm", "height_cm"):
+                    dim_source = "\u7528\u6237\u786e\u8ba4"
+                elif field_name == "weight_g":
+                    weight_source = "\u7528\u6237\u786e\u8ba4"
+                continue
+            if observed_val is not None:
+                widget.setValue(float(observed_val))
+                if field_name in ("length_cm", "width_cm", "height_cm"):
+                    dim_source = "\u56fe\u7247\u8bc6\u522b"
+                elif field_name == "weight_g":
+                    weight_source = "\u56fe\u7247\u8bc6\u522b"
+            elif est_val is not None and field_name in ("length_cm", "width_cm", "height_cm", "weight_g"):
+                widget.setValue(float(est_val))
+                if field_name in ("length_cm", "width_cm", "height_cm"):
+                    dim_source = "AI\u4f30\u7b97"
+                elif field_name == "weight_g":
+                    weight_source = "AI\u4f30\u7b97"
+            else:
+                widget.setValue(0.0)
+        # 更新裸尺寸/裸重来源标签
+        if hasattr(self, "lbl_bare_dim_source"):
+            self.lbl_bare_dim_source.setText(dim_source)
+        if hasattr(self, "lbl_bare_weight_source"):
+            self.lbl_bare_weight_source.setText(weight_source)
         flags = {
             "has_hard_bottom": observation.has_hard_bottom,
             "has_hard_backboard": observation.has_hard_backboard,
@@ -2161,6 +2335,26 @@ class CalculationPage(QWidget):
         self.bare_width.setValue(float(bare.get("width_cm") or 0))
         self.bare_height.setValue(float(bare.get("height_cm") or 0))
         self.bare_weight.setValue(float(bare.get("weight_g") or 0))
+        # 恢复裸尺寸/裸重来源标签：如果 adopted.bare 有值，说明是用户确认或最终采用值
+        _has_bare_dim = any(bare.get(k) for k in ("length_cm", "width_cm", "height_cm"))
+        _has_bare_weight = bool(bare.get("weight_g"))
+        if hasattr(self, "lbl_bare_dim_source"):
+            if _has_bare_dim and observation_raw and any(
+                (observation_raw.get(k) is not None and observation_raw.get(k) != 0)
+                for k in ("length_cm", "width_cm", "height_cm")
+            ):
+                self.lbl_bare_dim_source.setText("\u56fe\u7247\u8bc6\u522b")
+            elif _has_bare_dim:
+                self.lbl_bare_dim_source.setText("AI\u4f30\u7b97")
+            else:
+                self.lbl_bare_dim_source.setText("\u672a\u8bc6\u522b")
+        if hasattr(self, "lbl_bare_weight_source"):
+            if _has_bare_weight and observation_raw.get("weight_g") is not None and observation_raw.get("weight_g") != 0:
+                self.lbl_bare_weight_source.setText("\u56fe\u7247\u8bc6\u522b")
+            elif _has_bare_weight:
+                self.lbl_bare_weight_source.setText("AI\u4f30\u7b97")
+            else:
+                self.lbl_bare_weight_source.setText("\u672a\u8bc6\u522b")
         # AI估算（左卡）：优先第一次 AI 结果（_v2.ai_initial），旧记录回退 adopted.normal
         v2 = record.get("_v2") if isinstance(record.get("_v2"), dict) else {}
         ai_initial = v2.get("ai_initial") if isinstance(v2.get("ai_initial"), dict) else {}
