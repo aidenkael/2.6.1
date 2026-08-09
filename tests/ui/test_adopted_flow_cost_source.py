@@ -26,6 +26,7 @@ pytest.importorskip("PySide6")
 from dataclasses import asdict
 
 from profit_accounting_26.application import AppContext, SettingsService
+from profit_accounting_26.application.local_reestimate_service import LocalReestimateResult
 from profit_accounting_26.domain.models import (
     AIObservation,
     PackagingProposal,
@@ -195,6 +196,73 @@ class TestAdoptedFlow:
         assert page.normal_fields["length"].value() == pytest.approx(40.0)
         assert page.conservative_fields["length"].value() == pytest.approx(40.0)
         assert page.initial_ai_snapshot is not None
+
+    def test_runtime_recognition_bypasses_cal77_packaging_arbitration(self, page, monkeypatch):
+        def forbidden_cal(*_args, **_kwargs):
+            raise AssertionError("CAL77 runtime arbitration must stay bypassed")
+
+        monkeypatch.setattr(page.context.packaging_service, "estimate", forbidden_cal)
+        page._diagnostic_operation = page.context.diagnostic_logger.begin_operation("test-ai-runtime-v1")
+        observation = AIObservation(
+            product_name="女士单肩包",
+            weight_g=580,
+            raw_payload={"observed": {"bare_weight_g": 580}, "observation": {"product_name": "女士单肩包"}},
+        )
+        proposal = _make_proposal((46, 31, 8, 760), "压扁并整理肩带后紧凑发货")
+        proposal.proposal_source = "vision_ai_v1"
+        proposal.applied_profile_ids = []
+        page._recognition_completed(observation, proposal)
+        assert page.conservative_fields["weight"].value() == pytest.approx(760)
+        assert page._adopted_packaging().applied_profile_ids == []
+
+    def test_corrected_reestimate_cancel_keeps_current_and_initial_unchanged(self, page, monkeypatch):
+        import profit_accounting_26.ui.pages.calculation_page as calculation_page_module
+
+        _simulate_ai(page)
+        initial = dict(page.initial_ai_snapshot)
+        before = page._scenario_data(page.conservative_fields)
+        proposal = _make_proposal((46, 31, 8, 760), "压扁并整理肩带后紧凑发货")
+        proposal.proposal_source = "corrected_reestimate_v1"
+        result = LocalReestimateResult(shipment=proposal.normal, packaging_proposal=proposal)
+        monkeypatch.setattr(calculation_page_module, "confirm_action", lambda *a, **k: False)
+
+        page._local_reestimate_completed(result)
+
+        assert page._scenario_data(page.conservative_fields) == before
+        assert page.initial_ai_snapshot == initial
+
+    def test_corrected_reestimate_adopt_updates_only_current_and_marks_feedback(self, page, monkeypatch):
+        import profit_accounting_26.ui.pages.calculation_page as calculation_page_module
+
+        _simulate_ai(page)
+        initial = dict(page.initial_ai_snapshot)
+        ai_before = page._scenario_data(page.normal_fields)
+        proposal = _make_proposal((46, 31, 8, 760), "压扁并整理肩带后紧凑发货")
+        proposal.proposal_source = "corrected_reestimate_v1"
+        result = LocalReestimateResult(shipment=proposal.normal, packaging_proposal=proposal)
+        monkeypatch.setattr(calculation_page_module, "confirm_action", lambda *a, **k: True)
+
+        page._local_reestimate_completed(result)
+
+        assert page._scenario_data(page.normal_fields) == ai_before
+        assert page.conservative_fields["length"].value() == pytest.approx(46)
+        assert page.conservative_fields["weight"].value() == pytest.approx(760)
+        assert page.initial_ai_snapshot == initial
+        assert page.user_calibration_dirty is True
+        assert "当前采用" in page.manual_scenarios
+
+    def test_corrected_reestimate_requires_user_correction_before_service_call(self, page, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            "PySide6.QtWidgets.QMessageBox.information",
+            lambda _parent, title, message: calls.append((title, message)),
+        )
+        page._ai_baseline = {"summary": "ready"}
+        page.user_correction.clear()
+        page.reestimate_packaging()
+        assert calls == [("需要用户修正", "请先填写修正原因，再点击“按修正重估”。")]
+        assert page._local_thread is None
+        assert page.btn_partial_reestimate.text() == "按修正重估"
 
 
 # ---------------------------------------------------------------------------

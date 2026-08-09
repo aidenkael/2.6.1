@@ -52,8 +52,9 @@ class TestUserCorrectionExampleLayer:
         assert edit.toPlainText() == ""
         assert edit.example.isVisibleTo(edit.viewport())
         assert edit.example.text().count("\n") == 1
-        assert "深圳货代纯头程预估26元" in edit.example.text()
-        assert "义乌货代纯头程预估10元" in edit.example.text()
+        assert "这个包可以压扁，肩带可以拆下来" in edit.example.text()
+        assert "这种小商品可以缠绕后紧凑发货" in edit.example.text()
+        assert "头程" not in edit.example.text() and "货代" not in edit.example.text()
 
     def test_example_hidden_on_input_and_back_on_clear(self, shown_page, qapp):
         edit = shown_page.user_correction._widget

@@ -7,7 +7,7 @@
 - 图片框（3–6 个）与货代报价卡片为运行时动态生成，分别挂到
   ``imageSlotsLayout`` / ``forwarderCardsLayout``（Designer 预览卡片被清除）；
 - 利润双场景（无活动 / 活动后）委托 ``CalculationBinder`` 的 driver 状态机；
-- AI 识图、局部重估、包装估算、货代报价、记录保存逻辑与旧版完全一致。
+- AI 识图与按修正重估走 V1 轻量合同；物流、利润和记录保存沿用稳定链路。
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ from profit_accounting_26.application.recognition_service import (
     RecognitionCancellation,
     RecognitionCancelledError,
     RecognitionResponseError,
+    RecognitionService,
     RecognitionUnavailableError,
 )
 from profit_accounting_26.domain.models import (
@@ -202,8 +203,8 @@ class _UserCorrectionEdit(QTextEdit):
     """
 
     EXAMPLE_TEXT = (
-        "这个包可以压扁，肩带可以拆下来，深圳货代纯头程预估26元\n"
-        "这种小商品通常可以缠绕打包，预计袋装即可，义乌货代纯头程预估10元"
+        "例如：这个包可以压扁，肩带可以拆下来\n"
+        "例如：这种小商品可以缠绕后紧凑发货"
     )
     MIN_HEIGHT = 104
     MAX_HEIGHT = 148
@@ -363,6 +364,7 @@ class CalculationPage(QWidget):
         self.product_summary = _TextAdapter(f(QLineEdit, "txtAiSummary"))
         self.structure_summary = _TextAdapter(f(QLineEdit, "txtPackingState"))
         self.btn_partial_reestimate = f(QPushButton, "btnPartialReestimate")
+        self.btn_partial_reestimate.setText("按修正重估")
         ai_layout = f(QGridLayout, "aiSummaryLayout")
         # 该字段仅保存 AI 材质事实，不再作为摘要卡的隐藏第二行。
         # 保留 parent 以维持现有数据绑定和生命周期。
@@ -733,6 +735,9 @@ class CalculationPage(QWidget):
         for key, widget in (("length_cm", self.bare_length), ("width_cm", self.bare_width), ("height_cm", self.bare_height), ("weight_g", self.bare_weight)):
             widget.editingFinished.connect(lambda k=key: self._accept_bare_field(k))
         self.product_summary.textChanged.connect(lambda _text: self._upstream_changed())
+        self.product_summary._widget.editingFinished.connect(
+            lambda: self._accept_text_field("product_name", self.product_summary)
+        )
         self.material_summary.textChanged.connect(lambda _text: self._upstream_changed())
         self.structure_summary.textChanged.connect(lambda _text: self._upstream_changed())
         for combo in (self.rigidity_combo, self.foldability_combo, self.compressibility_combo):
@@ -933,6 +938,11 @@ class CalculationPage(QWidget):
             self.session.confirm_value(key, value if value > 0 else None)
         self.recalculate()
 
+    def _accept_text_field(self, key: str, widget: _TextAdapter) -> None:
+        if self._updating:
+            return
+        self.session.confirm_value(key, widget.text().strip() or None)
+
     def _confirmed_facts(self) -> dict[str, dict[str, Any]]:
         facts = self.session.confirmed_facts()
         if "正常档" in self.manual_scenarios:
@@ -1090,6 +1100,7 @@ class CalculationPage(QWidget):
     ) -> dict[str, Any]:
         """第一次完整视觉识图成功后捕获 AI 初始快照；无法可靠获得的字段不写、不猜。"""
         adopted = self._adopted_packaging()
+        metadata_proposal = adopted or external_proposal
         provider = None
         try:
             bound = self.context.api_profile_store.bound_profile(VISUAL_AI)
@@ -1102,8 +1113,8 @@ class CalculationPage(QWidget):
             "provider": str(provider).strip() or None,
             "model": observation.model or None,
             "prompt_version": observation.prompt_version or None,
-            "engine_version": self.context.packaging_service.ENGINE_VERSION,
-            "calibration_version": self.context.packaging_service.calibration_version,
+            "engine_version": metadata_proposal.engine_version if metadata_proposal else "vision-runtime-v1",
+            "calibration_version": metadata_proposal.calibration_version if metadata_proposal else "",
             "observation": observation.to_dict(),
             "external_ai_packaging_proposal": external_proposal.to_dict() if external_proposal else None,
             "adopted_packaging": adopted.to_dict() if adopted else None,
@@ -1114,7 +1125,7 @@ class CalculationPage(QWidget):
         observation: AIObservation,
         external_proposal: PackagingProposal | None,
     ) -> None:
-        """只在 snapshot 尚不存在时捕获；第二次识图/局部重估/人工修改均不得覆盖。"""
+        """只在 snapshot 尚不存在时捕获；第二次识图/按修正重估/人工修改均不得覆盖。"""
         if self.initial_ai_snapshot is None:
             self.initial_ai_snapshot = self._capture_initial_ai_snapshot(observation, external_proposal)
 
@@ -1128,8 +1139,8 @@ class CalculationPage(QWidget):
         self.session.ai_packaging_proposal = external_proposal
         self.session.observation = observation
         self.observation = self.session.observation
-        self._adopt_packaging(self.context.packaging_service.estimate(observation, external_proposal=external_proposal))
-        self._restore_confirmed_normal(self._adopted_packaging())
+        runtime_proposal = external_proposal or RecognitionService.proposal_from_shipment({})
+        self._adopt_packaging(runtime_proposal)
         if conflicts:
             self._adopted_packaging().review_reasons.append("user confirmed facts conflict with image evidence")
         self._apply_observation(observation)
@@ -1165,13 +1176,13 @@ class CalculationPage(QWidget):
         if salvage:
             op.event("candidate_field_salvage", **dict(salvage.get("diagnostic") or {}),
                      final_source=adopted.proposal_source, adjustments=salvage.get("adjustments", []))
-        op.event("ai_request_completed"); op.event("ai_response_parsed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing); op.event("calibration_completed", matched_rule_ids=adopted.applied_profile_ids)
+        op.event("ai_request_completed"); op.event("ai_response_parsed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing); op.event("calibration_bypassed", reason="CAL77 runtime shipment arbitration disabled")
         generated=adopted.normal.is_complete() and adopted.conservative.is_complete()
-        op.event("packaging_generated" if generated else "packaging_skipped", skip_reason=None if generated else "AI未返回尺寸/重量，且本地CAL未生成可用回退值")
+        op.event("packaging_generated" if generated else "packaging_skipped", skip_reason=None if generated else "AI未返回完整发货尺寸/重量，等待人工填写")
         op.event("logistics_calculated" if self.current_quote else "logistics_skipped", reason=None if self.current_quote else "无可用包装尺寸和重量")
         op.event("page_updated", filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)])
         op.event("operation_completed")
-        op.summary(status="completed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing, field_evidence=observation.raw_payload.get("field_evidence",{}), raw_observation=observation.raw_payload.get("observation", {}), normalized_codes={"product_type_code": observation.product_type_code, "product_family_code": observation.product_family_code, "material_family_code": observation.material_family_code}, value_types={"product_cost": observation.product_cost_value_type, "domestic_shipping": observation.domestic_shipping_value_type}, value_sources={"dimensions": observation.dimension_value_source, "weight": observation.weight_value_source}, ai_packaging_proposal=external_proposal.to_dict() if external_proposal else None, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=adopted.applied_profile_ids, cal_rejected_rules=[], cal_rejection_reasons=[], generic_fallback=adopted.proposal_source == "generic_candidate", packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["AI未返回尺寸/重量，且本地CAL未生成可用回退值"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "无可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)], page_empty_fields=missing, warnings=adopted.review_reasons)
+        op.summary(status="completed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing, field_evidence=observation.raw_payload.get("field_evidence",{}), raw_observation=observation.raw_payload.get("observation", {}), normalized_codes={"product_type_code": observation.product_type_code, "product_family_code": observation.product_family_code, "material_family_code": observation.material_family_code}, value_types={"product_cost": observation.product_cost_value_type, "domestic_shipping": observation.domestic_shipping_value_type}, value_sources={"dimensions": observation.dimension_value_source, "weight": observation.weight_value_source}, ai_packaging_proposal=external_proposal.to_dict() if external_proposal else None, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], generic_fallback=False, packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["AI未返回完整发货尺寸/重量，等待人工填写"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "无可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)], page_empty_fields=missing, warnings=adopted.review_reasons)
 
     @Slot(str, str)
     def _recognition_failed(self, category: str, message: str) -> None:
@@ -1238,51 +1249,37 @@ class CalculationPage(QWidget):
         return observation
 
     # ------------------------------------------------------------------
-    # 局部重估
+    # 按修正重估
     # ------------------------------------------------------------------
 
     def reestimate_packaging(self) -> None:
         if self._local_thread is not None:
             return
         if self._ai_baseline is None:
-            QMessageBox.information(self, "需要先识图", "请先完成一次 AI识图，再根据摘要进行局部重估。")
+            QMessageBox.information(self, "需要先识图", "请先完成一次 AI识图，再按用户修正重估。")
             return
-        if self._image_fingerprint() != self._recognized_image_fingerprint:
-            if confirm_action(
-                self,
-                "图片已修改",
-                "图片已修改，是否使用新图片重新识图？",
-            ):
-                # Overall recognition is explicit; never start another visual
-                # request as a side effect of clicking local reestimate.
-                return
+        user_correction = self.user_correction.text().strip()
+        if not user_correction:
+            QMessageBox.information(self, "需要用户修正", "请先填写修正原因，再点击“按修正重估”。")
+            return
         current = self.collect_observation()
-        adopted_bare = {
-            key: getattr(current, key)
-            for key in self._accepted_bare_fields
-            if getattr(current, key) is not None
+        confirmed_facts = {
+            "bare_dimensions_cm": {
+                "length": current.length_cm,
+                "width": current.width_cm,
+                "height": current.height_cm,
+            },
+            "bare_weight_g": current.weight_g,
         }
-        adopted_normal: dict[str, Any] = {}
-        if "正常档" in self.manual_scenarios:
-            adopted_normal = self._scenario_data(self.normal_fields)
-        original = self._ai_baseline
         context = {
-            "original_summary": str(original["summary"]),
-            "current_summary": self._current_summary(),
-            "original_observation": dict(self.session.ai_raw_observation or self.observation.to_dict()),
-            "user_overrides": self._confirmed_facts(),
-            "adopted_normal": adopted_normal or (self._adopted_packaging().normal.to_dict() if self._adopted_packaging() else {}),
-            "original_product_summary": str(original.get("product_summary") or ""),
-            "current_product_summary": self.product_summary.text().strip(),
-            "original_packaging_summary": str(original.get("packaging_summary") or ""),
-            "current_packaging_summary": self.structure_summary.text().strip(),
-            "cal_summary": list(self.session.matched_cal_rules),
-            "rejected_candidates": dict(self._adopted_packaging().rejected_candidates) if self._adopted_packaging() else {},
-            "visual_evidence": dict(self.session.ai_raw_response.get("field_evidence") or {}),
+            "product_name": self.product_summary.text().strip(),
+            "confirmed_facts": confirmed_facts,
+            "current_shipment": self._scenario_data(self.conservative_fields),
+            "user_correction": user_correction,
         }
         self._local_diagnostic_operation = self.context.diagnostic_logger.begin_operation("local-reestimate")
-        self._local_diagnostic_operation.event("local_reestimate_requested", observation_patch=adopted_bare)
-        self._local_diagnostic_operation.request(request_type="local-reestimate", original_summary=context["original_summary"], current_summary=context["current_summary"], original_observation=context["original_observation"], user_overrides=context["user_overrides"], adopted_normal=context["adopted_normal"])
+        self._local_diagnostic_operation.event("corrected_reestimate_requested")
+        self._local_diagnostic_operation.request(request_type="corrected-reestimate-v1", **context)
         self._show_local_dialog()
         self._local_thread = QThread(self)
         self._local_worker = LocalReestimateWorker(self.context.local_reestimate_service, context)
@@ -1312,12 +1309,12 @@ class CalculationPage(QWidget):
 
     def _show_local_dialog(self) -> None:
         dialog = QDialog(self)
-        dialog.setWindowTitle("局部重估")
+        dialog.setWindowTitle("按修正重估")
         dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
         dialog.setFixedSize(300, 92)
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(18, 16, 18, 14)
-        label = QLabel("局部重估中，请稍候")
+        label = QLabel("正在按修正重新估算，请稍候")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setProperty("sectionTitle", True)
         layout.addWidget(label)
@@ -1326,50 +1323,60 @@ class CalculationPage(QWidget):
 
     @Slot(object)
     def _local_reestimate_completed(self, result: Any) -> None:
-        confirmed_normal = self._scenario_data(self.normal_fields) if "正常档" in self.manual_scenarios else None
+        if self._local_dialog is not None:
+            self._local_dialog.close()
+        proposal = result.packaging_proposal
+        scenario = result.shipment or (proposal.normal if proposal else None)
+        if proposal is None or scenario is None or not scenario.is_complete():
+            QMessageBox.warning(self, "按修正重估失败", "模型未返回完整有效的发货尺寸和重量，当前采用未改变。")
+            return
+        message = (
+            "重新估算结果\n\n"
+            f"{scenario.length_cm:g} × {scenario.width_cm:g} × {scenario.height_cm:g} cm\n"
+            f"{scenario.weight_g:g} g\n"
+            f"{scenario.packaging_method or '发货状态待确认'}"
+        )
+        accepted = confirm_action(
+            self,
+            "重新估算结果",
+            message,
+            confirm_text="采用此结果",
+        )
+        op = getattr(self, "_local_diagnostic_operation", None)
+        if not accepted:
+            if op:
+                op.event("corrected_reestimate_cancelled", elapsed_ms=result.elapsed_ms)
+                op.response(provider_raw_response=None, normalized_result={"shipment": scenario.to_dict()}, parse_error=None, elapsed_ms=result.elapsed_ms)
+                op.summary(status="cancelled", returned_fields=["shipment"], missing_fields=[], field_evidence={}, parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=True, normal_packaging=scenario.to_dict(), conservative_packaging=None, not_generated_reason=[], entered_logistics=False, logistics_skip_reason="候选已取消，当前采用未改变", logistics_inputs=None, logistics_outputs=None, page_filled_fields=[], page_empty_fields=[], warnings=[])
+            return
+
+        self._adopt_packaging(proposal)
         previous_updating = self._updating
         self._updating = True
-        current_product_summary = self.product_summary.text().strip()
-        current_packaging_summary = self.structure_summary.text().strip()
-        changed = self.session.apply_observation_patch(result.observation_patch)
-        self.observation = self.session.observation
-        self.observation.display_product_summary = result.product_summary or current_product_summary
-        self.observation.display_packaging_summary = result.packaging_summary or current_packaging_summary
-        self._updating = previous_updating
-        self._apply_observation(self.observation)
-        self.observation = self.collect_observation()
-        self.session.observation = self.observation
-        self.session.observation = normalize_observation(self.observation)
-        self.observation = self.session.observation
-        self._adopt_packaging(self.context.packaging_service.estimate(self.observation, external_proposal=result.packaging_proposal))
-        self.apply_proposal(self._adopted_packaging())
-        if confirmed_normal:
-            self._updating = True
-            for key, field in (("length_cm", self.normal_fields["length"]),
-                               ("width_cm", self.normal_fields["width"]), ("height_cm", self.normal_fields["height"]),
-                               ("weight_g", self.normal_fields["weight"])):
-                value = confirmed_normal.get(key)
-                field.setValue(float(value or 0))
-            self._updating = False
-        self._refresh_display_summaries(self.observation, self._adopted_packaging())
-        if not changed:
-            self.review_badge.setText("结构条件未变化")
+        try:
+            self.conservative_fields["method"].setText(scenario.packaging_method)
+            for key, field in (("length_cm", self.conservative_fields["length"]),
+                               ("width_cm", self.conservative_fields["width"]),
+                               ("height_cm", self.conservative_fields["height"]),
+                               ("weight_g", self.conservative_fields["weight"])):
+                field.setValue(float(getattr(scenario, key) or 0))
+        finally:
+            self._updating = previous_updating
+        self.manual_scenarios.add("当前采用")
+        self.user_calibration_dirty = True
         self.packaging_stale = False
+        self.review_badge.setText("已采用修正重估 · 需要复核")
+        self.review_badge.setProperty("warning", True)
+        self.review_badge.setProperty("success", False)
+        self._refresh_badge_style()
         self._mark_dirty()
         self.recalculate()
-        op = self._local_diagnostic_operation
-        op.event("local_reestimate_completed", observation_patch=result.observation_patch, changed_fields=result.changed_fields, elapsed_ms=result.elapsed_ms)
-        adopted = self._adopted_packaging()
-        salvage = adopted.candidate_records.get("candidate_field_salvage", {})
-        if salvage:
-            op.event("candidate_field_salvage", **dict(salvage.get("diagnostic") or {}),
-                     final_source=adopted.proposal_source, adjustments=salvage.get("adjustments", []))
-        op.event("calibration_completed", matched_rule_ids=adopted.applied_profile_ids)
-        generated = adopted.normal.is_complete() and adopted.conservative.is_complete()
-        op.event("packaging_generated" if generated else "packaging_skipped")
-        op.event("operation_completed")
-        op.response(provider_raw_response=None, normalized_result={"observation_patch": result.observation_patch, "changed_fields": result.changed_fields}, parse_error=None, elapsed_ms=result.elapsed_ms)
-        op.summary(status="completed", returned_fields=list(result.observation_patch), missing_fields=[], field_evidence={}, observation_patch=result.observation_patch, normalized_codes={"product_type_code": self.observation.product_type_code, "product_family_code": self.observation.product_family_code, "material_family_code": self.observation.material_family_code}, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=adopted.applied_profile_ids, cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["重估后没有完整包装数据"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "没有可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=result.changed_fields, page_empty_fields=[], warnings=adopted.review_reasons)
+        if op:
+            op.event("corrected_reestimate_adopted", elapsed_ms=result.elapsed_ms)
+            op.event("calibration_bypassed", reason="CAL77 runtime shipment arbitration disabled")
+            op.event("operation_completed")
+            op.response(provider_raw_response=None, normalized_result={"shipment": scenario.to_dict()}, parse_error=None, elapsed_ms=result.elapsed_ms)
+            op.summary(status="completed", returned_fields=["shipment"], missing_fields=[], field_evidence={}, parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=True, normal_packaging=scenario.to_dict(), conservative_packaging=scenario.to_dict(), not_generated_reason=[], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "没有可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=["length_cm", "width_cm", "height_cm", "weight_g", "state"], page_empty_fields=[], warnings=[])
 
     @Slot(str, str)
     def _local_reestimate_failed(self, category: str, message: str) -> None:
@@ -1377,8 +1384,8 @@ class CalculationPage(QWidget):
             self._local_diagnostic_operation.event("local_reestimate_failed", category=category, message=message)
             self._local_diagnostic_operation.event("operation_completed", status="failed")
             self._local_diagnostic_operation.response(provider_raw_response=None, normalized_result=None, parse_error=message)
-            self._local_diagnostic_operation.summary(status="failed", returned_fields=[], missing_fields=[], field_evidence={}, parse_error=message, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=False, normal_packaging=None, conservative_packaging=None, not_generated_reason=[message], entered_logistics=False, logistics_skip_reason="局部重估失败", logistics_inputs=None, logistics_outputs=None, page_filled_fields=[], page_empty_fields=[], warnings=[])
-        title = "局部重估不可用" if category == "unavailable" else "局部重估失败"
+            self._local_diagnostic_operation.summary(status="failed", returned_fields=[], missing_fields=[], field_evidence={}, parse_error=message, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=False, normal_packaging=None, conservative_packaging=None, not_generated_reason=[message], entered_logistics=False, logistics_skip_reason="按修正重估失败", logistics_inputs=None, logistics_outputs=None, page_filled_fields=[], page_empty_fields=[], warnings=[])
+        title = "按修正重估不可用" if category == "unavailable" else "按修正重估失败"
         QMessageBox.warning(self, title, message)
 
     def _local_thread_finished(self) -> None:
@@ -1401,7 +1408,7 @@ class CalculationPage(QWidget):
         self._updating = True
         # 只在第一次 AI（initial_ai_snapshot 尚未捕获）时写入两框：
         # AI估算与当前采用复制完全相同的首次 AI 数据；
-        # 同会话再次 AI / 局部重估不得静默覆盖已冻结的首次结果或用户已编辑的当前采用；
+        # 同会话再次 AI / 按修正重估不得静默覆盖已冻结的首次结果或用户已编辑的当前采用；
         # 历史编辑模式下（含无 ai_initial 的旧记录）同样不得覆盖已恢复的两卡。
         if self.initial_ai_snapshot is None and self.editing_record_id is None:
             for fields in (self.normal_fields, self.conservative_fields):
@@ -1744,8 +1751,14 @@ class CalculationPage(QWidget):
                     "logistics_quote": asdict(self.current_quote) if self.current_quote else {},
                     "forwarder_name": self.current_forwarder.name if self.current_forwarder else "",
                     "logistics_engine_version": "deterministic-logistics-v1",
-                    "packaging_engine_version": self.context.packaging_service.ENGINE_VERSION,
-                    "calibration_version": self.context.packaging_service.calibration_version,
+                    "packaging_engine_version": (
+                        self._adopted_packaging().engine_version
+                        if self._adopted_packaging() else "vision-runtime-v1"
+                    ),
+                    "calibration_version": (
+                        self._adopted_packaging().calibration_version
+                        if self._adopted_packaging() else ""
+                    ),
                     "schema_version": "2.6.1",
                 },
                 "actual": {},

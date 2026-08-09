@@ -106,8 +106,8 @@ def test_multi_image_payload_order_is_stable_for_product_and_weight_evidence(tmp
 
     assert forward == reversed_order
     prompt = RecognitionService._prompt(2)
-    assert "Merge product, price, dimensions, weight, structure, and packaging evidence" in prompt
-    assert "image sequence and image slot have no semantic meaning" in prompt
+    assert "逐张查看全部图片" in prompt
+    assert "图片顺序和图片框类型不代表字段职责" in prompt
 
 
 def test_ambiguous_bare_dimension_is_ignored_and_reported_without_losing_weight():
@@ -239,3 +239,58 @@ def test_recognizable_outline_with_missing_weight_gets_complete_low_confidence_c
     assert proposal.normal.confidence == "low"
     assert proposal.normal.length_cm >= observation.length_cm
     assert observation.raw_payload["vision_packaging_completion"] == "generated_from_recognized_outline"
+
+
+def test_v1_observed_facts_and_shipment_are_independent():
+    payload = {
+        "product_name": "女士单肩包",
+        "observed": {
+            "product_price_rmb": None,
+            "page_shipping_rmb": 0,
+            "bare_dimensions_cm": {"length": 45, "width": None, "height": 15},
+            "bare_weight_g": 580,
+        },
+        "shipment": {
+            "length_cm": 46, "width_cm": 31, "height_cm": 8,
+            "weight_g": 760, "state": "压扁并整理肩带后紧凑发货",
+        },
+        "note": "",
+    }
+    observation, proposal = RecognitionService.parse_payload(
+        {"choices": [{"message": {"content": json.dumps(payload, ensure_ascii=False)}}]},
+        model="vision-v1",
+    )
+
+    assert observation.product_cost_rmb is None  # 看不到价格时不补造
+    assert observation.domestic_shipping_rmb == 0
+    assert (observation.length_cm, observation.width_cm, observation.height_cm) == (45, None, 15)
+    assert observation.weight_g == 580
+    assert proposal is not None
+    assert proposal.normal.weight_g == 760
+    assert proposal.normal.packaging_method == "压扁并整理肩带后紧凑发货"
+    assert proposal.normal.to_dict() != observation.to_dict()
+    assert proposal.applied_profile_ids == []
+    assert proposal.proposal_source == "vision_ai_v1"
+
+
+def test_v1_nonpositive_shipment_values_fail_basic_validation_without_cal_fallback():
+    payload = {
+        "product_name": "金属发夹",
+        "observed": {
+            "product_price_rmb": None, "page_shipping_rmb": None,
+            "bare_dimensions_cm": {"length": None, "width": None, "height": None},
+            "bare_weight_g": None,
+        },
+        "shipment": {"length_cm": -1, "width_cm": 5, "height_cm": 2, "weight_g": 0, "state": "袋装"},
+        "note": "",
+    }
+    _, proposal = RecognitionService.parse_payload(
+        {"choices": [{"message": {"content": json.dumps(payload, ensure_ascii=False)}}]},
+        model="vision-v1",
+    )
+    assert proposal is not None
+    assert proposal.normal.length_cm is None
+    assert proposal.normal.weight_g is None
+    assert not proposal.normal.is_complete()
+    issues = proposal.candidate_records["runtime_v1_validation"]["parse_issues"]
+    assert issues["shipment.length_cm"]["reason"] == "nonpositive_shipment_value"
