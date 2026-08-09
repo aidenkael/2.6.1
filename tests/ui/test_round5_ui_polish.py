@@ -167,8 +167,8 @@ class TestUserCorrectionPlaceholder:
         try:
             edit = page.user_correction._widget
             example = edit.example.text()
-            assert "深圳货代纯头程26元" in example
-            assert "义乌货代纯头程10元" in example
+            assert "深圳货代纯头程预估26元" in example
+            assert "义乌货代纯头程预估10元" in example
             assert "\n" in example
             # 示例是 viewport 子控件且不影响真实内容
             assert edit.example.parent() is edit.viewport()

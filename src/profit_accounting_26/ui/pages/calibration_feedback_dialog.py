@@ -2,11 +2,13 @@
 
 与主页面“当前采用”（用户校准入口 A）更新同一条记录：
 - 预填该记录 current_estimate 的长×宽×高/重量与已保存的用户修正；
+- 新增“真实头程（选填）”：真实已发生的纯头程费用（不含固定服务费/尾程），
+  只写入 CalibrationFeedback.actual_logistics（actual_first_mile_fee_rmb /
+  actual_forwarder），不参与任何当前计算；
 - 保存时同步更新 current_estimate、suggested_package（恒为 user_suggested）
   与 user_note；同 record_id、同 feedback_id（无则创建后 link），绝不重复创建。
-- 输入的是用户校准值，不是实际发货实测：绝不写 actual_logistics，
-  也不标记 actual_measured；已有 feedback 中的 actual_logistics / structure
-  原样保留。
+- 包装尺寸/重量/用户修正是用户校准值（user_suggested），不是实测；
+  已有 feedback 中的 structure 原样保留。
 - 顶部一行弱化显示第一次 AI 估算结果作为对照（只读参考）。
 - 数字框默认真空，空 = 未知；0 是合法输入；单位显示在输入框右侧，
   不塞进输入框占位文字；无上下微调箭头；紧凑无滚动条。
@@ -19,6 +21,7 @@ from typing import Any
 
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -172,6 +175,37 @@ class CalibrationFeedbackDialog(QDialog):
         note_layout.addWidget(self.user_note)
         outer.addWidget(note_card)
 
+        actual_card = Card()
+        actual_layout = QVBoxLayout(actual_card)
+        actual_layout.setContentsMargins(12, 10, 12, 12)
+        actual_layout.setSpacing(6)
+        actual_layout.addWidget(SectionHeader("真实头程（选填）", "实际已发生的纯头程，不含固定服务费/尾程"))
+        actual_row = QHBoxLayout()
+        actual_row.setContentsMargins(0, 0, 0, 0)
+        actual_row.setSpacing(6)
+        self.actual_forwarder_combo = QComboBox()
+        self.actual_forwarder_combo.setFixedWidth(150)
+        self.actual_forwarder_combo.setFixedHeight(30)
+        # 新反馈也必须可直接选择当前未归档货代；历史反馈随后再按 keep
+        # 补回并选中已归档的历史货代。
+        self._reload_actual_forwarder_combo(keep=None)
+        actual_row.addWidget(self.actual_forwarder_combo)
+        symbol = QLabel("¥")
+        symbol.setProperty("muted", True)
+        actual_row.addWidget(symbol)
+        self.actual_first_mile_fee_edit = _make_number_edit(1_000_000)
+        self.actual_first_mile_fee_edit.setPlaceholderText("0.00")
+        actual_row.addWidget(self.actual_first_mile_fee_edit)
+        rmb = QLabel("RMB")
+        rmb.setProperty("muted", True)
+        actual_row.addWidget(rmb)
+        actual_row.addStretch(1)
+        actual_layout.addLayout(actual_row)
+        hint = QLabel("仅记录，不用于当前计算")
+        hint.setProperty("muted", True)
+        actual_layout.addWidget(hint)
+        outer.addWidget(actual_card)
+
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
         actions.addStretch(1)
@@ -209,6 +243,37 @@ class CalibrationFeedbackDialog(QDialog):
         _set_optional(self.weight_edit, estimate.get("weight_g"))
         if feedback is not None:
             self.user_note.setPlainText(feedback.user_note or "")
+            if feedback.actual_logistics is not None and feedback.actual_logistics.has_content():
+                actual = feedback.actual_logistics
+                self._reload_actual_forwarder_combo(keep=actual.actual_forwarder)
+                _set_optional(self.actual_first_mile_fee_edit, actual.actual_first_mile_fee_rmb)
+
+    def _reload_actual_forwarder_combo(self, *, keep: str | None) -> None:
+        """下拉只显示未归档货代；历史货代已归档时仍显示原名称，不丢真实物流事实。"""
+        forwarders = self.context.settings_service.forwarders_from_settings(
+            self.context.settings_service.load()
+        )
+        names = [item.name for item in forwarders if not item.archived]
+        if keep and keep not in names:
+            names = [keep] + names
+        self.actual_forwarder_combo.blockSignals(True)
+        try:
+            self.actual_forwarder_combo.clear()
+            self.actual_forwarder_combo.addItems(names)
+            if keep:
+                index = self.actual_forwarder_combo.findText(keep)
+                if index >= 0:
+                    self.actual_forwarder_combo.setCurrentIndex(index)
+        finally:
+            self.actual_forwarder_combo.blockSignals(False)
+
+    def _actual_dict(self) -> dict[str, Any]:
+        """真实头程输入：留空返回空 dict；0 是合法值。"""
+        fee = _parse_optional(self.actual_first_mile_fee_edit)
+        if fee is None:
+            return {}
+        forwarder = self.actual_forwarder_combo.currentText().strip() or None
+        return {"actual_first_mile_fee_rmb": fee, "actual_forwarder": forwarder}
 
     # ---------------------------------------------------------------- payload
 
@@ -227,6 +292,7 @@ class CalibrationFeedbackDialog(QDialog):
 
     def build_payload(self) -> dict[str, Any]:
         estimate = self._estimate_dict()
+        actual = self._actual_dict()
         payload: dict[str, Any] = {
             "record_id": self.record_id,
             "source": "user",
@@ -243,21 +309,30 @@ class CalibrationFeedbackDialog(QDialog):
                 "evidence_level": "user_suggested",
             }
             payload["suggested_package"] = suggested
+        if actual:
+            payload["actual_logistics"] = dict(actual)
         # 已有反馈：更新同一条 feedback_id，保留其中的实测数据与结构反馈
         if self.existing is not None:
             payload["feedback_id"] = self.existing.feedback_id
             if "suggested_package" not in payload and self.existing.suggested_package is not None and self.existing.suggested_package.has_content():
                 payload["suggested_package"] = self.existing.suggested_package.to_dict()
-            actual = self.existing.actual_logistics
-            if actual is not None and actual.has_content():
-                payload["actual_logistics"] = actual.to_dict()
+            existing_actual_obj = self.existing.actual_logistics
+            if "actual_logistics" in payload:
+                existing_actual = existing_actual_obj.to_dict() if existing_actual_obj is not None and existing_actual_obj.has_content() else {}
+                payload["actual_logistics"] = {**existing_actual, **payload["actual_logistics"]}
+            elif existing_actual_obj is not None and existing_actual_obj.has_content():
+                payload["actual_logistics"] = existing_actual_obj.to_dict()
             if self.existing.structure.has_content():
                 payload["structure"] = self.existing.structure.to_dict()
         return payload
 
     def _has_input(self) -> bool:
         payload = self.build_payload()
-        return bool(payload.get("suggested_package") or payload.get("user_note"))
+        return bool(
+            payload.get("suggested_package")
+            or payload.get("user_note")
+            or payload.get("actual_logistics")
+        )
 
     # ---------------------------------------------------------------- save
 
@@ -283,7 +358,7 @@ class CalibrationFeedbackDialog(QDialog):
 
     def _on_save(self) -> None:
         if not self._has_input():
-            QMessageBox.warning(self, "无法保存", "请至少填写包装尺寸、重量或用户修正中的一项。")
+            QMessageBox.warning(self, "无法保存", "请至少填写包装尺寸、重量、用户修正或真实头程中的一项。")
             return
         try:
             self.save()
