@@ -1690,7 +1690,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                   <item row="0" column="2">
                    <widget class="QLabel" name="lblPackingStateTitle">
                     <property name="text">
-                     <string>预计包装方式</string>
+                     <string>AI发货判断</string>
                     </property>
                    </widget>
                   </item>

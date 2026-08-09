@@ -460,13 +460,9 @@ class SettingsPage(QWidget):
         pending_data_dir = ApplicationPaths.configured_data_dir()
         if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
             stores.append(ApiProfileStore(pending_data_dir))
-        visual_id = str(self.visual_binding.currentData() or profile.profile_id) if self.visual_binding else profile.profile_id
-        local_id = str(self.local_binding.currentData() or profile.profile_id) if self.local_binding else profile.profile_id
         key_text = self.vision_key.text() if self.vision_key else ""
         for store in stores:
             store.save_profile(profile, key_text)
-            store.bind(VISUAL_AI, visual_id)
-            store.bind(LOCAL_REESTIMATE, local_id)
         self._refresh_api_profiles()
         if self.api_profile_select:
             self.api_profile_select.setCurrentIndex(max(0, self.api_profile_select.findData(profile.profile_id)))
@@ -972,6 +968,15 @@ class SettingsPage(QWidget):
         pending_data_dir = ApplicationPaths.configured_data_dir()
         if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
             SettingsService.save_copy(self.settings, pending_data_dir / "settings.json")
+        # Persist visual/local binding selections to ApiProfileStore.
+        visual_id = str(self.visual_binding.currentData() or "") if self.visual_binding else ""
+        local_id = str(self.local_binding.currentData() or "") if self.local_binding else ""
+        binding_stores = [self.context.api_profile_store]
+        if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
+            binding_stores.append(ApiProfileStore(pending_data_dir))
+        for store in binding_stores:
+            store.bind(VISUAL_AI, visual_id or None)
+            store.bind(LOCAL_REESTIMATE, local_id or None)
         self.dirty = False
         self.dirtyChanged.emit(False)
         self.settingsSaved.emit()

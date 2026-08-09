@@ -33,6 +33,22 @@ class RecognitionCancelledError(RuntimeError):
     pass
 
 
+# Keywords that indicate fulfillment/timing info rather than physical shipping state.
+_INVALID_STATE_KEYWORDS: tuple[str, ...] = (
+    "小时发货", "天发货", "现货", "包邮", "快递", "物流", "发货时效",
+    "顺丰", "中通", "圆通", "申通", "韵达", "邮政", "EMS", "DHL", "FedEx", "UPS",
+    "48小时", "24小时", "72小时", "当日", "次日", "当天",
+)
+
+
+def _is_invalid_shipment_state(state: str) -> bool:
+    """Reject state values that describe fulfillment timing rather than physical form."""
+    if not state:
+        return False
+    lower = state.lower()
+    return any(kw.lower() in lower for kw in _INVALID_STATE_KEYWORDS)
+
+
 class RecognitionCancellation:
     def __init__(self) -> None:
         self._event = threading.Event()
@@ -158,6 +174,7 @@ class RecognitionService:
 1. product_name：简短、规范、可搜索的商品名称，不复制供应商 SEO 长标题。
 2. observed：只填写图片中能可靠读到的页面价格、页面运费、裸品尺寸和裸重。看不清就返回 null；价格和运费禁止凭经验猜测；只确认部分裸尺寸时其余维度保持 null。
 3. shipment：独立判断商品真正交给物流时最可能的外部尺寸、总重量和简短发货状态。即使图片没有标注尺寸，也应根据商品本身尽量给出一套完整判断。
+shipment.state 只描述商品交给物流时的物理形态和处理方式，例如折叠、压扁、盘绕、保持原形等。禁止填写发货时效、现货、包邮、快递方式、48小时发货、商家履约信息或物流速度。
 4. note：仅写必要的简短补充。
 
 confirmed_facts 是用户已经确认的数据，优先级最高，不得修改。observed 是裸品/页面事实，shipment 是发货外廓和发货总重量，两者不得混淆。
@@ -275,6 +292,9 @@ confirmed_facts 是用户已经确认的数据，优先级最高，不得修改�
             for field in ("length_cm", "width_cm", "height_cm", "weight_g")
         }
         state = str(shipment.get("state") or "").strip()
+        if _is_invalid_shipment_state(state):
+            parse_issues["shipment.state"] = {"raw_value": state, "reason": "fulfillment_or_timing_info"}
+            state = ""
         complete = all(value is not None for value in values.values())
         scenario_data = {
             "packaging_state": PackagingState.UNKNOWN,

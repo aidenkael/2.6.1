@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from profit_accounting_26.application import AppContext, CalculationService, ImageSession
-from profit_accounting_26.application.api_profile_store import VISUAL_AI
+from profit_accounting_26.application.api_profile_store import LOCAL_REESTIMATE, VISUAL_AI
 from profit_accounting_26.application.calculation_session import CalculationSession
 from profit_accounting_26.application.category_normalizer import normalize_observation
 from profit_accounting_26.application.packaging_presentation import (
@@ -203,11 +203,11 @@ class _UserCorrectionEdit(QTextEdit):
     """
 
     EXAMPLE_TEXT = (
-        "例如：这个包可以压扁，肩带可以拆下来\n"
-        "例如：这种小商品可以缠绕后紧凑发货"
+        "在此填写用于重估的修正\n"
+        "例如：这个睡帽可以压缩后发货"
     )
-    MIN_HEIGHT = 104
-    MAX_HEIGHT = 148
+    MIN_HEIGHT = 68
+    MAX_HEIGHT = 88
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -363,6 +363,7 @@ class CalculationPage(QWidget):
         # AI 摘要区
         self.product_summary = _TextAdapter(f(QLineEdit, "txtAiSummary"))
         self.structure_summary = _TextAdapter(f(QLineEdit, "txtPackingState"))
+        self.structure_summary._widget.setReadOnly(True)
         self.btn_partial_reestimate = f(QPushButton, "btnPartialReestimate")
         self.btn_partial_reestimate.setText("按修正重估")
         ai_layout = f(QGridLayout, "aiSummaryLayout")
@@ -1268,14 +1269,11 @@ class CalculationPage(QWidget):
             QMessageBox.information(self, "需要用户修正", "请先填写修正原因，再点击“按修正重估”。")
             return
         current = self.collect_observation()
-        confirmed_facts = {
-            "bare_dimensions_cm": {
-                "length": current.length_cm,
-                "width": current.width_cm,
-                "height": current.height_cm,
-            },
-            "bare_weight_g": current.weight_g,
-        }
+        session_facts = self.session.confirmed_facts()
+        confirmed_facts: dict[str, Any] = {}
+        for field in ("length_cm", "width_cm", "height_cm", "weight_g"):
+            if field in session_facts:
+                confirmed_facts[field] = session_facts[field]["value"]
         context = {
             "product_name": self.product_summary.text().strip(),
             "confirmed_facts": confirmed_facts,
@@ -1284,7 +1282,18 @@ class CalculationPage(QWidget):
         }
         self._local_diagnostic_operation = self.context.diagnostic_logger.begin_operation("local-reestimate")
         self._local_diagnostic_operation.event("corrected_reestimate_requested")
-        self._local_diagnostic_operation.request(request_type="corrected-reestimate-v1", **context)
+        reestimate_svc = self.context.local_reestimate_service
+        bound = reestimate_svc.profile_store.bound_profile(LOCAL_REESTIMATE) if reestimate_svc.profile_store else None
+        provider_info: dict[str, Any] = {}
+        if bound is not None:
+            _profile, _ = bound
+            from urllib.parse import urlparse as _urlparse
+            provider_info = {
+                "provider": _profile.provider,
+                "model": _profile.model_name,
+                "provider_host": _urlparse(_profile.api_url).netloc,
+            }
+        self._local_diagnostic_operation.request(request_type="corrected-reestimate-v1", **provider_info, **context)
         self._show_local_dialog()
         self._local_thread = QThread(self)
         self._local_worker = LocalReestimateWorker(self.context.local_reestimate_service, context)
@@ -1348,10 +1357,11 @@ class CalculationPage(QWidget):
             confirm_text="采用此结果",
         )
         op = getattr(self, "_local_diagnostic_operation", None)
+        provider_meta = {"provider": result.provider, "model": result.model, "provider_host": result.provider_host}
         if not accepted:
             if op:
                 op.event("corrected_reestimate_cancelled", elapsed_ms=result.elapsed_ms)
-                op.response(provider_raw_response=None, normalized_result={"shipment": scenario.to_dict()}, parse_error=None, elapsed_ms=result.elapsed_ms)
+                op.response(provider_raw_response=None, normalized_result={"shipment": scenario.to_dict()}, parse_error=None, elapsed_ms=result.elapsed_ms, **provider_meta)
                 op.summary(status="cancelled", returned_fields=["shipment"], missing_fields=[], field_evidence={}, parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=True, normal_packaging=scenario.to_dict(), conservative_packaging=None, not_generated_reason=[], entered_logistics=False, logistics_skip_reason="候选已取消，当前采用未改变", logistics_inputs=None, logistics_outputs=None, page_filled_fields=[], page_empty_fields=[], warnings=[])
             return
 
@@ -1384,8 +1394,8 @@ class CalculationPage(QWidget):
             op.event("corrected_reestimate_adopted", elapsed_ms=result.elapsed_ms)
             op.event("calibration_bypassed", reason="CAL77 runtime shipment arbitration disabled")
             op.event("operation_completed")
-            op.response(provider_raw_response=None, normalized_result={"shipment": scenario.to_dict()}, parse_error=None, elapsed_ms=result.elapsed_ms)
-            op.summary(status="completed", returned_fields=["shipment"], missing_fields=[], field_evidence={}, parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=True, normal_packaging=scenario.to_dict(), conservative_packaging=scenario.to_dict(), not_generated_reason=[], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "没有可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=["length_cm", "width_cm", "height_cm", "weight_g", "state"], page_empty_fields=[], warnings=[])
+            op.response(provider_raw_response=None, normalized_result={"shipment": scenario.to_dict()}, parse_error=None, elapsed_ms=result.elapsed_ms, **provider_meta)
+            op.summary(status="completed", returned_fields=["shipment"], missing_fields=[], field_evidence={}, parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=True, normal_packaging=scenario.to_dict(), conservative_packaging=scenario.to_dict(), not_generated_reason=[], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "没有可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=["length_cm", "width_cm", "height_cm", "weight_g", "state"], page_empty_fields=[], warnings=[], **provider_meta)
 
     @Slot(str, str)
     def _local_reestimate_failed(self, category: str, message: str) -> None:

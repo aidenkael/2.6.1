@@ -241,6 +241,13 @@ class HistoryPage(QWidget):
         self.table.setRowCount(0)
         for payload in self.records:
             self._append_row(payload)
+        # 内容填充完成后自动调整行高，使多行文本不被裁切
+        self.table.resizeRowsToContents()
+        # 保证最小行高不低于图片列高度，防止图片列被压缩
+        min_row_h = _THUMB_SIZE + 16
+        for row in range(self.table.rowCount()):
+            if self.table.rowHeight(row) < min_row_h:
+                self.table.setRowHeight(row, min_row_h)
         self._update_action_states()
         if self.records:
             self.table.selectRow(0)

@@ -156,8 +156,8 @@ class TestUserCorrectionPlaceholderGeometry:
         assert isinstance(edit, QTextEdit)
         example = edit.example.text()
         assert "\n" in example
-        assert "这个包可以压扁，肩带可以拆下来" in example
-        assert "这种小商品可以缠绕后紧凑发货" in example
+        assert "在此填写用于重估的修正" in example
+        assert "这个睡帽可以压缩后发货" in example
         assert "头程" not in example and "货代" not in example
         assert edit.lineWrapMode() == QTextEdit.LineWrapMode.WidgetWidth
         assert edit.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff

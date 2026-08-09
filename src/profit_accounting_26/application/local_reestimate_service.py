@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from profit_accounting_26.application.api_profile_store import ApiProfileStore, LOCAL_REESTIMATE
@@ -12,6 +13,7 @@ from profit_accounting_26.application.recognition_service import (
     RecognitionResponseError,
     RecognitionService,
     RecognitionUnavailableError,
+    _is_invalid_shipment_state,
 )
 from profit_accounting_26.domain.models import PackagingProposal, PackagingScenario
 
@@ -27,6 +29,9 @@ class LocalReestimateResult:
     packaging_summary: str = ""
     packaging_proposal: PackagingProposal | None = None
     elapsed_ms: int = 0
+    provider: str = ""
+    model: str = ""
+    provider_host: str = ""
 
 
 class LocalReestimateService:
@@ -78,6 +83,8 @@ class LocalReestimateService:
             "你是跨境电商发货判断助手。你看不到图片。"
             "根据商品名称、当前已确认的裸品事实、当前采用的发货尺寸/重量和用户修正，"
             "重新判断一套最可能的实际发货状态、外部尺寸和发货总重量。"
+            "shipment.state 只描述商品交给物流时的物理形态和处理方式，例如折叠、压扁、盘绕、保持原形等。"
+            "禁止填写发货时效、现货、包邮、快递方式、48小时发货、商家履约信息或物流速度。"
             "用户已确认的数据不得修改。只完成发货判断，不要计算或推理其余事项。"
             "不要输出商品事实补丁、多候选方案、物流费用、利润、货代、CAL、规则编号或证据链。"
         )
@@ -148,6 +155,9 @@ class LocalReestimateService:
         if not isinstance(data, dict):
             raise RecognitionResponseError("按修正重估返回格式无效。")
         shipment = data.get("shipment") if isinstance(data.get("shipment"), dict) else {}
+        # Sanitize invalid state values (fulfillment/timing info instead of physical form).
+        if _is_invalid_shipment_state(str(shipment.get("state") or "")):
+            shipment["state"] = ""
         proposal = RecognitionService.proposal_from_shipment(
             shipment, note=str(data.get("note") or ""), source="corrected_reestimate_v1",
         )
@@ -160,4 +170,7 @@ class LocalReestimateService:
             changed_fields=[],
             packaging_proposal=proposal,
             elapsed_ms=round((time.perf_counter() - started) * 1000),
+            provider=str(getattr(profile, "provider", "") or "").strip(),
+            model=str(profile.model_name or "").strip(),
+            provider_host=urlparse(profile.api_url).netloc,
         )

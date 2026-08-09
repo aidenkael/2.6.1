@@ -117,8 +117,9 @@ class TestMirrorCards:
             right_bottom = page.user_correction._widget
             assert isinstance(left_bottom, QTextEdit)
             assert isinstance(right_bottom, QTextEdit)
-            assert left_bottom.minimumHeight() == right_bottom.minimumHeight() == 104
-            assert left_bottom.maximumHeight() == right_bottom.maximumHeight() == 104
+            assert left_bottom.minimumHeight() == right_bottom.minimumHeight()
+            assert left_bottom.maximumHeight() == right_bottom.maximumHeight()
+            assert 68 <= left_bottom.minimumHeight() <= 88
             # 底部标签：左“包装方式”，右“用户修正”
             assert page._root.findChild(QLabel, "lblNormalDims").text() == "包装尺寸（默认 cm）"
             assert page._root.findChild(QLabel, "lblConservativeDims").text() == "包装尺寸（默认 cm）"
@@ -167,8 +168,8 @@ class TestUserCorrectionPlaceholder:
         try:
             edit = page.user_correction._widget
             example = edit.example.text()
-            assert "这个包可以压扁，肩带可以拆下来" in example
-            assert "这种小商品可以缠绕后紧凑发货" in example
+            assert "在此填写用于重估的修正" in example
+            assert "这个睡帽可以压缩后发货" in example
             assert "头程" not in example and "货代" not in example
             assert "\n" in example
             # 示例是 viewport 子控件且不影响真实内容
