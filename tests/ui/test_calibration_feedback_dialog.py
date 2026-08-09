@@ -51,11 +51,12 @@ def _dialog(context, record_id, feedback=None) -> CalibrationFeedbackDialog:
     return CalibrationFeedbackDialog(context, record_id, feedback=feedback)
 
 
-def test_dialog_only_exposes_dims_weight_and_note(qapp, context):
-    """对话框只有尺寸、重量、用户修正三类输入；单位独立于输入框。"""
+def test_dialog_exposes_dims_weight_note_and_actual_first_mile(qapp, context):
+    """对话框输入：尺寸、重量、用户修正 + 真实头程（选填）；单位独立于输入框。"""
     record_id = _create_record(context)
     dialog = _dialog(context, record_id)
-    for attr in ("length_edit", "width_edit", "height_edit", "weight_edit", "user_note"):
+    for attr in ("length_edit", "width_edit", "height_edit", "weight_edit", "user_note",
+                 "actual_forwarder_combo", "actual_first_mile_fee_edit"):
         assert hasattr(dialog, attr)
     # 复杂字段已从用户界面移除
     for attr in ("tri_state_combos", "suggested_spins", "actual_spins", "actual_forwarder"):

@@ -16,7 +16,7 @@ from dataclasses import asdict
 from typing import Any
 
 from PySide6.QtCore import QEvent, QObject, QThread, Qt, QSignalBlocker, Signal, Slot
-from PySide6.QtGui import QKeyEvent, QKeySequence
+from PySide6.QtGui import QDoubleValidator, QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -202,8 +202,8 @@ class _UserCorrectionEdit(QTextEdit):
     """
 
     EXAMPLE_TEXT = (
-        "这个包可以压扁，肩带可以拆下来，深圳货代纯头程26元\n"
-        "这种小商品通常可以缠绕打包，预计袋装即可，义乌货代纯头程10元"
+        "这个包可以压扁，肩带可以拆下来，深圳货代纯头程预估26元\n"
+        "这种小商品通常可以缠绕打包，预计袋装即可，义乌货代纯头程预估10元"
     )
     MIN_HEIGHT = 104
     MAX_HEIGHT = 148
@@ -529,29 +529,42 @@ class CalculationPage(QWidget):
             if weight_row is not None:
                 weight_hbox.addLayout(weight_row)
             grid.addLayout(weight_hbox, 3, 0, 1, 3)
-            # 行 4：底部标签（两侧同一行结构，右卡不再显示动态货代/纯头程提示）
-            bottom_label = QLabel("包装方式" if is_ai else "用户修正")
-            bottom_label.setFixedHeight(20)
-            grid.addWidget(bottom_label, 4, 0, 1, 3)
-            # 行 5：底部多行框（两侧同高，视觉对称；AI估算只读、当前采用可编辑）
+            # 行 4/5：底部区域
+            # AI估算：包装方式标签 + 只读多行框（保持原样）
+            # 当前采用：用户修正多行框直接放在包装后重量下一行（无独立“用户修正”小标题）
+            #          + 最底部“真实头程（选填）”一行
             if is_ai:
+                bottom_label = QLabel("包装方式")
+                bottom_label.setFixedHeight(20)
+                grid.addWidget(bottom_label, 4, 0, 1, 3)
                 note_edit = method_widget
                 note_edit.setReadOnly(True)
                 note_edit.setPlaceholderText("AI估算包装方式（第一次 AI 结果，只读）")
+                if not isinstance(note_edit, _UserCorrectionEdit):
+                    note_edit.setFixedHeight(104)
+                note_edit.setMinimumWidth(90)
+                note_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+                note_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+                note_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+                note_edit.setAcceptRichText(False)
+                grid.addWidget(note_edit, 5, 0, 1, 3)
             else:
                 note_edit = _UserCorrectionEdit()
                 self.user_correction = _TextAdapter(note_edit)
-            if not isinstance(note_edit, _UserCorrectionEdit):
-                note_edit.setFixedHeight(104)
-            note_edit.setMinimumWidth(90)
-            note_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            note_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            note_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-            note_edit.setAcceptRichText(False)
-            grid.addWidget(note_edit, 5, 0, 1, 3)
+                note_edit.setMinimumWidth(90)
+                note_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+                note_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+                note_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+                note_edit.setAcceptRichText(False)
+                grid.addWidget(note_edit, 4, 0, 1, 3)
+                self._build_actual_first_mile_row(grid, 5)
         if not hasattr(self, "user_correction"):  # 防御：布局缺失时仍保证字段可用
             self.user_correction = _TextAdapter(QTextEdit())
         self.user_correction.textChanged.connect(lambda _text: self._user_calibration_changed())
+        if not hasattr(self, "actual_first_mile_fee_edit"):  # 防御：布局缺失时仍保证字段可用
+            self.actual_forwarder_combo = QComboBox()
+            self.actual_first_mile_fee_edit = QLineEdit()
+            self._reload_actual_forwarder_combo()
         # 示例层与左卡“包装方式”框镜像同高（随 viewport 宽度重算）
         right_bottom = self.user_correction._widget
         left_bottom = self.normal_fields["method"]._widget
@@ -1778,11 +1791,14 @@ class CalculationPage(QWidget):
         if self.user_calibration_dirty and adopted_filled:
             suggested = dict(adopted)
             suggested["evidence_level"] = "user_suggested"
-        if note is None and suggested is None:
+        actual = self._actual_first_mile_dict()
+        if note is None and suggested is None and not actual:
             return
         data: dict[str, Any] = {"record_id": self.record_id, "source": "user", "user_note": note}
         if suggested is not None:
             data["suggested_package"] = suggested
+        if actual:
+            data["actual_logistics"] = dict(actual)
         if self.current_feedback_id:
             try:
                 existing = self.context.calibration_feedback_service.load(self.current_feedback_id)
@@ -1793,7 +1809,14 @@ class CalculationPage(QWidget):
                 data["feedback_id"] = existing.feedback_id
                 if suggested is None and existing.suggested_package is not None and existing.suggested_package.has_content():
                     data["suggested_package"] = existing.suggested_package.to_dict()
-                if existing.actual_logistics is not None and existing.actual_logistics.has_content():
+                if actual:
+                    existing_actual = (
+                        existing.actual_logistics.to_dict()
+                        if existing.actual_logistics is not None and existing.actual_logistics.has_content()
+                        else {}
+                    )
+                    data["actual_logistics"] = {**existing_actual, **actual}
+                elif existing.actual_logistics is not None and existing.actual_logistics.has_content():
                     data["actual_logistics"] = existing.actual_logistics.to_dict()
                 if existing.structure.has_content():
                     data["structure"] = existing.structure.to_dict()
@@ -1817,6 +1840,93 @@ class CalculationPage(QWidget):
             "weight_g": fields["weight"].value() or None,
         }
 
+    # ------------------------------------------------------------ 真实头程（选填）
+
+    def _build_actual_first_mile_row(self, grid: QGridLayout, row: int) -> None:
+        """当前采用卡最底部新增“真实头程（选填）”：只记录，不参与任何当前计算。"""
+        row_widget = QWidget()
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(6)
+        label = QLabel("真实头程（选填）")
+        label.setFixedHeight(20)
+        row_layout.addWidget(label)
+        self.actual_forwarder_combo = QComboBox()
+        self.actual_forwarder_combo.setFixedWidth(96)
+        self.actual_forwarder_combo.setFixedHeight(28)
+        self._reload_actual_forwarder_combo()
+        row_layout.addWidget(self.actual_forwarder_combo)
+        symbol = QLabel("¥")
+        symbol.setProperty("muted", True)
+        row_layout.addWidget(symbol)
+        self.actual_first_mile_fee_edit = QLineEdit()
+        self.actual_first_mile_fee_edit.setPlaceholderText("0.00")
+        self.actual_first_mile_fee_edit.setFixedWidth(72)
+        self.actual_first_mile_fee_edit.setFixedHeight(28)
+        validator = QDoubleValidator(0.0, 1_000_000.0, 2, self.actual_first_mile_fee_edit)
+        validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        self.actual_first_mile_fee_edit.setValidator(validator)
+        row_layout.addWidget(self.actual_first_mile_fee_edit)
+        rmb = QLabel("RMB")
+        rmb.setProperty("muted", True)
+        row_layout.addWidget(rmb)
+        row_layout.addStretch(1)
+        hint = QLabel("仅记录，不用于当前计算")
+        hint.setProperty("muted", True)
+        hint_font = hint.font()
+        if hint_font.pointSize() > 8:
+            hint_font.setPointSize(hint_font.pointSize() - 1)
+        hint.setFont(hint_font)
+        column = QVBoxLayout()
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(1)
+        column.addWidget(row_widget)
+        column.addWidget(hint)
+        grid.addLayout(column, row, 0, 1, 3)
+
+    def _reload_actual_forwarder_combo(self, *, keep: str | None = None) -> None:
+        """货代下拉只显示未归档货代；keep 为已归档旧货代名时也加入（不丢历史事实）。"""
+        combo = getattr(self, "actual_forwarder_combo", None)
+        if combo is None:
+            return
+        current = keep if keep is not None else combo.currentText()
+        forwarders = self.context.settings_service.forwarders_from_settings(self.settings)
+        enabled = [item for item in forwarders if item.enabled and not item.archived]
+        names = [item.name for item in enabled]
+        if current and current not in names:
+            names = [current] + names
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItems(names)
+            if current:
+                index = combo.findText(current)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+        finally:
+            combo.blockSignals(False)
+
+    def _actual_first_mile_dict(self) -> dict[str, Any]:
+        """读取真实头程输入：留空返回空 dict（不写 actual_logistics）；0 是合法值。"""
+        text = self.actual_first_mile_fee_edit.text().strip()
+        if not text:
+            return {}
+        try:
+            fee = float(text)
+        except ValueError:
+            return {}
+        forwarder = self.actual_forwarder_combo.currentText().strip() or None
+        return {"actual_first_mile_fee_rmb": fee, "actual_forwarder": forwarder}
+
+    def _prefill_actual_first_mile(self, fee: float | None, forwarder: str | None) -> None:
+        """打开历史记录时预填已保存的真实头程（含已归档货代名）。"""
+        if not hasattr(self, "actual_first_mile_fee_edit"):
+            return
+        if forwarder:
+            self._reload_actual_forwarder_combo(keep=forwarder)
+        if fee is not None:
+            self.actual_first_mile_fee_edit.setText(f"{fee:g}")
+
     def clear_new(self) -> None:
         if self.dirty:
             if not confirm_action(
@@ -1836,6 +1946,9 @@ class CalculationPage(QWidget):
         self.initial_ai_snapshot = None
         self.current_feedback_id = None
         self.user_correction.clear()
+        if hasattr(self, "actual_first_mile_fee_edit"):
+            self.actual_first_mile_fee_edit.clear()
+            self._reload_actual_forwarder_combo()
         self._recognized_image_fingerprint = ()
         self._accepted_bare_fields.clear()
         self._pending_confirmed_normal = {}
@@ -1952,6 +2065,11 @@ class CalculationPage(QWidget):
             else:
                 if feedback.user_note:
                     self.user_correction.setText(feedback.user_note)
+                if feedback.actual_logistics is not None and feedback.actual_logistics.has_content():
+                    self._prefill_actual_first_mile(
+                        feedback.actual_logistics.actual_first_mile_fee_rmb,
+                        feedback.actual_logistics.actual_forwarder,
+                    )
         # 程序化恢复不算用户修改：复位用户校准 dirty
         self.user_calibration_dirty = False
         selected_package = str(adopted.get("selected_packaging") or "正常档")
@@ -2050,6 +2168,8 @@ class CalculationPage(QWidget):
         # 重新同步 RMB = USD × 当前有效汇率，确保汇率变化后一致性
         self._sync_tail_rmb_from_usd(recalculate=False)
         self.rebuild_quote_cards()
+        if hasattr(self, "actual_forwarder_combo"):
+            self._reload_actual_forwarder_combo()
         self.profit_binder.set_exchange_rate(float(self.settings.get("exchange_rate_usd_to_rmb", 7.2)))
         self.profit_binder.set_selected_rule_id(self.selected_profit_rule_id)
         self.profit_binder.set_rules(tuple(

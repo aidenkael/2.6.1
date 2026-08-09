@@ -423,17 +423,25 @@ class HistoryPage(QWidget):
         return f"裸品    {bare}\nAI      {ai_text}\n当前    {current}"
 
     def _calibration_text(self, payload: dict[str, Any]) -> str:
-        """用户层面只有两态：未校准 / 已校准 + dims + note。
+        """用户层面只有两态：未反馈 / 已反馈 + dims + note + 真实头程。
 
         dims 优先级：实测 > 用户建议 > 当前采用。
         """
         v2 = record_from_payload(payload)
         if not v2.calibration_feedback_id:
-            return "未校准"
+            return "未反馈"
         try:
             feedback = self.context.calibration_feedback_service.load(v2.calibration_feedback_id)
         except KeyError:
-            return "未校准"
+            return "未反馈"
+        has_user_content = (
+            bool(feedback.user_note)
+            or (feedback.suggested_package is not None and feedback.suggested_package.has_content())
+            or (feedback.actual_logistics is not None and feedback.actual_logistics.has_content())
+            or feedback.structure.has_content()
+        )
+        if not has_user_content:
+            return "未反馈"
         dims_raw: dict[str, Any] | None = None
         actual = feedback.actual_logistics
         if actual is not None and actual.has_content():
@@ -451,13 +459,16 @@ class HistoryPage(QWidget):
             }
         if dims_raw is None and isinstance(v2.current_estimate, dict):
             dims_raw = dict(v2.current_estimate)
-        lines = ["已校准"]
+        lines = ["已反馈"]
         dims_text = _dims_text(dims_raw)
         if dims_text != "—":
             lines.append(dims_text)
         note = str(feedback.user_note or "").strip().replace("\n", " ")
         if note:
             lines.append(note[:40])
+        if actual is not None and actual.actual_first_mile_fee_rmb is not None:
+            forwarder = str(actual.actual_forwarder or "").rstrip("货代").strip() or "—"
+            lines.append(f"真实头程：{forwarder} ¥{float(actual.actual_first_mile_fee_rmb):g}")
         return "\n".join(lines)
 
     # ---------------------------------------------------------------- actions

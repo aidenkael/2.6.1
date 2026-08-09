@@ -346,13 +346,13 @@ def test_calibration_states_uncalibrated_corrected_measured(qapp, context):
     )
     context.history_record_v2_service.link_feedback(measured, fid_measured)
     page = HistoryPage(context)
-    assert _cell_label(page, _row_for(page, uncalibrated), 7).text() == "未校准"
+    assert _cell_label(page, _row_for(page, uncalibrated), 7).text() == "未反馈"
     corrected_text = _cell_label(page, _row_for(page, corrected), 7).text()
-    # 用户层面只有两态：仅文字反馈也归为已校准，尺寸回退到当前采用
-    assert corrected_text.startswith("已校准")
+    # 用户层面只有两态：仅文字反馈也归为已反馈，尺寸回退到当前采用
+    assert corrected_text.startswith("已反馈")
     assert "肩带可拆" in corrected_text
     measured_text = _cell_label(page, _row_for(page, measured), 7).text()
-    assert measured_text.startswith("已校准")
+    assert measured_text.startswith("已反馈")
     assert "23×14×3 / 560g" in measured_text
     assert "实测更小" in measured_text
 

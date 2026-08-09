@@ -156,8 +156,8 @@ class TestUserCorrectionPlaceholderGeometry:
         assert isinstance(edit, QTextEdit)
         example = edit.example.text()
         assert "\n" in example
-        assert "深圳货代纯头程26元" in example
-        assert "义乌货代纯头程10元" in example
+        assert "深圳货代纯头程预估26元" in example
+        assert "义乌货代纯头程预估10元" in example
         assert edit.lineWrapMode() == QTextEdit.LineWrapMode.WidgetWidth
         assert edit.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
 
