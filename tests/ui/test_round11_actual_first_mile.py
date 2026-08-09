@@ -24,7 +24,7 @@ def temp_context(tmp_path, monkeypatch):
     return AppContext.create_default()
 
 
-def _install_forwarders(context, *, with_archived: bool = False):
+def _install_forwarders(context, *, with_archived: bool = False, with_disabled: bool = False):
     settings = context.settings_service.load()
     shenzhen = SettingsService.new_forwarder("深圳货代", 80.0, 10.0, 8000.0)
     yiwu = SettingsService.new_forwarder("义乌货代", 100.0, 6.0, 8000.0)
@@ -35,6 +35,11 @@ def _install_forwarders(context, *, with_archived: bool = False):
         archived_data["archived"] = True
         archived_data["enabled"] = False
         forwarders.append(archived_data)
+    if with_disabled:
+        disabled = SettingsService.new_forwarder("停用未归档货代", 88.0, 7.0, 8000.0)
+        disabled_data = asdict(disabled)
+        disabled_data["enabled"] = False
+        forwarders.append(disabled_data)
     settings["forwarders"] = forwarders
     settings["selected_forwarder_id"] = shenzhen.id
     context.settings_service.save(settings)
@@ -98,6 +103,18 @@ class TestMainPageLayout:
             combo = page.actual_forwarder_combo
             names = [combo.itemText(i) for i in range(combo.count())]
             assert "深圳货代" in names and "义乌货代" in names
+            assert "已归档货代" not in names
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_forwarder_combo_keeps_disabled_but_unarchived(self, qapp, temp_context):
+        page = CalculationPage(temp_context)
+        try:
+            _install_forwarders(page.context, with_archived=True, with_disabled=True)
+            page.refresh_settings()
+            names = [page.actual_forwarder_combo.itemText(i) for i in range(page.actual_forwarder_combo.count())]
+            assert "停用未归档货代" in names
             assert "已归档货代" not in names
         finally:
             page.deleteLater()
@@ -219,6 +236,15 @@ class TestHistoryDialogAndTable:
         assert dialog.actual_first_mile_fee_edit.text() == "26"
         assert dialog.actual_forwarder_combo.currentText() == "深圳货代"
 
+    def test_new_dialog_loads_current_unarchived_forwarders(self, qapp, temp_context):
+        record_id = _create_record(temp_context)
+        _install_forwarders(temp_context, with_disabled=True)
+        dialog = CalibrationFeedbackDialog(temp_context, record_id)
+        names = [dialog.actual_forwarder_combo.itemText(i) for i in range(dialog.actual_forwarder_combo.count())]
+        assert "深圳货代" in names
+        assert "义乌货代" in names
+        assert "停用未归档货代" in names
+
     def test_archived_forwarder_still_shown_in_dialog_and_table(self, qapp, temp_context):
         record_id = _create_record(temp_context)
         fid = self._feedback_with_actual(temp_context, record_id, forwarder="老货代A", fee=26.0)
@@ -240,6 +266,92 @@ class TestHistoryDialogAndTable:
             text = label.findChild(QLabel).text()
             assert text.startswith("已反馈")
             assert "真实头程：老货代A ¥26" in text
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_history_shows_suggested_package_with_actual_first_mile_only(self, qapp, temp_context):
+        record_id = _create_record(temp_context)
+        feedback_id = temp_context.calibration_feedback_service.save(
+            {
+                "record_id": record_id,
+                "source": "user",
+                "suggested_package": {
+                    "length_cm": 22.0,
+                    "width_cm": 16.0,
+                    "height_cm": 5.0,
+                    "weight_g": 280.0,
+                    "evidence_level": "user_suggested",
+                },
+                "actual_logistics": {
+                    "actual_first_mile_fee_rmb": 26.0,
+                    "actual_forwarder": "深圳货代",
+                },
+            }
+        )
+        temp_context.history_record_v2_service.link_feedback(record_id, feedback_id)
+        page = HistoryPage(temp_context)
+        try:
+            row = next(
+                row for row in range(page.table.rowCount())
+                if page.table.item(row, 0).data(256) == record_id
+            )
+            text = page.table.cellWidget(row, 7).findChild(QLabel).text()
+            assert "22×16×5 / 280g" in text
+            assert "真实头程：深圳 ¥26" in text
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_history_shows_current_estimate_with_actual_first_mile_only(self, qapp, temp_context):
+        record_id = _create_record(temp_context)
+        temp_context.history_record_v2_service.update_current_estimate(
+            record_id,
+            {"length_cm": 24.0, "width_cm": 15.0, "height_cm": 4.0, "weight_g": 260.0},
+        )
+        feedback_id = self._feedback_with_actual(temp_context, record_id, fee=26.0)
+        temp_context.history_record_v2_service.link_feedback(record_id, feedback_id)
+        page = HistoryPage(temp_context)
+        try:
+            row = next(
+                row for row in range(page.table.rowCount())
+                if page.table.item(row, 0).data(256) == record_id
+            )
+            text = page.table.cellWidget(row, 7).findChild(QLabel).text()
+            assert "24×15×4 / 260g" in text
+            assert "真实头程：深圳 ¥26" in text
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_loading_record_without_actual_first_mile_clears_previous_value(self, qapp, temp_context):
+        record_a = _create_record(temp_context, "有真实头程")
+        record_b = _create_record(temp_context, "无真实头程")
+        feedback_id = self._feedback_with_actual(temp_context, record_a, fee=26.0)
+        temp_context.history_record_v2_service.link_feedback(record_a, feedback_id)
+        page = CalculationPage(temp_context)
+        try:
+            _install_forwarders(page.context)
+            page.load_record_payload(record_a)
+            assert page.actual_first_mile_fee_edit.text() == "26"
+            page.load_record_payload(record_b)
+            assert page.actual_first_mile_fee_edit.text() == ""
+        finally:
+            page.deleteLater()
+            qapp.processEvents()
+
+    def test_actual_first_mile_changes_mark_page_dirty_without_user_calibration(self, qapp, temp_context):
+        page = _make_page(temp_context)
+        try:
+            page.mark_saved()
+            page.user_calibration_dirty = False
+            page.actual_first_mile_fee_edit.setText("26")
+            assert page.dirty is True
+            assert page.user_calibration_dirty is False
+            page.mark_saved()
+            page.actual_forwarder_combo.setCurrentIndex(1)
+            assert page.dirty is True
+            assert page.user_calibration_dirty is False
         finally:
             page.deleteLater()
             qapp.processEvents()

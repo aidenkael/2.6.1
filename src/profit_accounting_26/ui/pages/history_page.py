@@ -444,7 +444,12 @@ class HistoryPage(QWidget):
             return "未反馈"
         dims_raw: dict[str, Any] | None = None
         actual = feedback.actual_logistics
-        if actual is not None and actual.has_content():
+        # 真实头程本身不代表存在实测包装。仅在实际包装尺寸或重量确实
+        # 保存过时，才让它覆盖 suggested/current 的包装显示。
+        if actual is not None and (
+            actual.actual_package_dimensions is not None
+            or actual.actual_package_weight_g is not None
+        ):
             dims_raw = {
                 **(actual.actual_package_dimensions or {}),
                 "weight_g": actual.actual_package_weight_g,

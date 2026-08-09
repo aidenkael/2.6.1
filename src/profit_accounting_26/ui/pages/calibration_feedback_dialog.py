@@ -186,6 +186,9 @@ class CalibrationFeedbackDialog(QDialog):
         self.actual_forwarder_combo = QComboBox()
         self.actual_forwarder_combo.setFixedWidth(150)
         self.actual_forwarder_combo.setFixedHeight(30)
+        # 新反馈也必须可直接选择当前未归档货代；历史反馈随后再按 keep
+        # 补回并选中已归档的历史货代。
+        self._reload_actual_forwarder_combo(keep=None)
         actual_row.addWidget(self.actual_forwarder_combo)
         symbol = QLabel("¥")
         symbol.setProperty("muted", True)
@@ -250,8 +253,7 @@ class CalibrationFeedbackDialog(QDialog):
         forwarders = self.context.settings_service.forwarders_from_settings(
             self.context.settings_service.load()
         )
-        enabled = [item for item in forwarders if item.enabled and not item.archived]
-        names = [item.name for item in enabled]
+        names = [item.name for item in forwarders if not item.archived]
         if keep and keep not in names:
             names = [keep] + names
         self.actual_forwarder_combo.blockSignals(True)

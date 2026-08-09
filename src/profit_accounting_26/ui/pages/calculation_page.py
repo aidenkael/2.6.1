@@ -727,6 +727,10 @@ class CalculationPage(QWidget):
         self.tail_fee_usd.editingFinished.connect(self._tail_usd_changed)
         # 尾程 USD 实时联动：直接连接真实 USD 控件的 valueChanged，不等待编辑完成
         self.tail_fee_usd.valueChanged.connect(self._tail_usd_live_changed)
+        # 真实头程仅作为 actual_logistics 保存；它仍属于未保存修改，
+        # 但不能影响 user_calibration_dirty。
+        self.actual_first_mile_fee_edit.textChanged.connect(self._actual_first_mile_changed)
+        self.actual_forwarder_combo.currentTextChanged.connect(self._actual_first_mile_changed)
 
         self.ai_button.clicked.connect(self.run_recognition)
         self.btn_partial_reestimate.clicked.connect(self.reestimate_packaging)
@@ -762,6 +766,11 @@ class CalculationPage(QWidget):
         if not self.dirty:
             self.dirty = True
             self.dirtyChanged.emit(True)
+
+    def _actual_first_mile_changed(self, *_args: Any) -> None:
+        """真实头程改动只进入通用未保存状态，不是用户包装校准。"""
+        if not self._updating:
+            self._mark_dirty()
 
     def _adopt_packaging(self, proposal: PackagingProposal) -> None:
         """Keep one packaging authority for page, calculation, persistence and logs."""
@@ -1891,8 +1900,7 @@ class CalculationPage(QWidget):
             return
         current = keep if keep is not None else combo.currentText()
         forwarders = self.context.settings_service.forwarders_from_settings(self.settings)
-        enabled = [item for item in forwarders if item.enabled and not item.archived]
-        names = [item.name for item in enabled]
+        names = [item.name for item in forwarders if not item.archived]
         if current and current not in names:
             names = [current] + names
         combo.blockSignals(True)
@@ -2003,6 +2011,10 @@ class CalculationPage(QWidget):
         # 进入历史编辑模式：恢复后修改任何字段都允许直接重算并更新同一条记录
         self.editing_record_id = record_id
         self.user_calibration_dirty = False
+        # 每条历史记录独立恢复真实头程；先清掉前一条记录残留的金额和货代，
+        # 仅当前记录实际保存了该字段时才在后面预填。
+        self.actual_first_mile_fee_edit.clear()
+        self._reload_actual_forwarder_combo(keep=None)
         self.product_summary.setText(str(record.get("product_name") or ""))
         if self.product_link is not None:
             self.product_link.setText(str(record.get("product_link") or ""))
