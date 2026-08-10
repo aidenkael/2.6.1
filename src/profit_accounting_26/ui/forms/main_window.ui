@@ -1683,7 +1683,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                      <string />
                     </property>
                     <property name="placeholderText">
-                     <string>商品主体；主要结构；可折叠/压缩特征</string>
+                     <string>商品主体；主要结构；发货相关特征</string>
                     </property>
                    </widget>
                   </item>

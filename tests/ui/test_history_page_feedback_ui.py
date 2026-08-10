@@ -25,6 +25,7 @@ from profit_accounting_26.ui.pages.history_page import HistoryPage, expand_searc
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QImage  # noqa: E402
 from PySide6.QtWidgets import QLabel, QLineEdit, QPushButton  # noqa: E402
 
@@ -174,6 +175,13 @@ def _cell_label(page: HistoryPage, row: int, column: int) -> QLabel:
     return label
 
 
+def _cell_text(page: HistoryPage, row: int, column: int) -> str:
+    """key/value 单元格：按布局顺序拼接所有 QLabel 文本（键和值交替）。"""
+    widget = page.table.cellWidget(row, column)
+    labels = widget.findChildren(QLabel) if widget is not None else []
+    return "\n".join(label.text() for label in labels)
+
+
 # ---------------------------------------------------------------- 18. 8 列
 
 
@@ -276,51 +284,67 @@ def test_cost_column_reads_saved_snapshot(qapp, context):
     record_id = _create_v2(context)
     page = HistoryPage(context)
     row = _row_for(page, record_id)
-    text = _cell_label(page, row, 3).text()
-    assert "总成本    ¥237.26" in text
-    assert "国内成本  ¥66.80 + ¥28.00" in text
-    assert "头程      深圳货代  ¥92.48 + ¥10.00" in text
-    assert "尾程      $5.55 / ¥39.98" in text
+    text = _cell_text(page, row, 3)
+    assert "总成本" in text and "¥237.26" in text
+    assert "国内成本" in text and "¥94.80" in text  # 66.80 + 28.00
+    assert "总头程（深圳）" in text and "¥102.48" in text  # 92.48 + 10.00
+    assert "尾程" in text and "¥39.98 / $5.55" in text
 
 
 def test_price_and_profit_columns_read_saved_snapshot(qapp, context):
     record_id = _create_v2(context)
     page = HistoryPage(context)
     row = _row_for(page, record_id)
-    price = _cell_label(page, row, 4).text()
-    assert "核价      $30.00" in price
-    assert "标价      $30.00" in price
-    assert "活动后    $27.00" in price
-    profit = _cell_label(page, row, 5).text()
-    assert "普通      ¥78.74 / 50.00%" in profit
-    assert "活动      ¥55.12 / 35.00%" in profit
+    price = _cell_text(page, row, 4)
+    # 售价栏三行固定顺序：SHEIN标价 / 活动售价 / SHEIN核价
+    assert "SHEIN标价" in price and "$30.00" in price
+    assert "活动售价" in price and "$27.00" in price
+    assert "SHEIN核价" in price
+    keys = [
+        label.text()
+        for label in page.table.cellWidget(row, 4).findChildren(QLabel)
+    ][0::2]
+    assert keys == ["SHEIN标价", "活动售价", "SHEIN核价"]
+    profit = _cell_text(page, row, 5)
+    assert "标价利润" in profit and "¥78.74 / 50.00%" in profit
+    assert "活动利润" in profit and "¥55.12 / 35.00%" in profit
 
 
 def test_legacy_record_profit_falls_back_safely(qapp, context):
     legacy_id = _create_legacy(context)
     page = HistoryPage(context)
     row = _row_for(page, legacy_id)
-    profit = _cell_label(page, row, 5).text()
-    assert "普通      ¥8.00 / 20.00%" in profit
+    profit = _cell_text(page, row, 5)
+    assert "标价" in profit and "¥8.00 / 20.00%" in profit
 
 
 def test_packaging_column_shows_bare_ai_current(qapp, context):
+    """包装数据列改用 _kv_cell 布局：三行标题左对齐、三行数据右对齐。"""
     record_id = _create_v2(context)
     page = HistoryPage(context)
     row = _row_for(page, record_id)
-    text = _cell_label(page, row, 6).text()
-    assert "裸品    45×30×15 / 580g" in text
-    assert "AI      17×32×17 / 720g" in text
-    assert "当前    17×32×17 / 720g" in text
+    labels = page.table.cellWidget(row, 6).findChildren(QLabel)
+    # [key0, value0, key1, value1, key2, value2]
+    keys = [labels[i].text() for i in range(0, len(labels), 2)]
+    values = [labels[i].text() for i in range(1, len(labels), 2)]
+    assert keys == ["裸品", "AI", "当前"]
+    assert values == ["45×30×15 / 580g", "17×32×17 / 720g", "17×32×17 / 720g"]
+    # 三行数据右对齐
+    for i in range(1, len(labels), 2):
+        assert labels[i].alignment() & Qt.AlignmentFlag.AlignRight
 
 
 def test_legacy_record_ai_column_not_faked(qapp, context):
+    """旧记录无 ai_initial 时 AI 行显示 —，不伪造数据。"""
     legacy_id = _create_legacy(context)
     page = HistoryPage(context)
     row = _row_for(page, legacy_id)
-    text = _cell_label(page, row, 6).text()
-    assert "AI      —" in text
-    assert "当前    30×20×10 / 200g" in text
+    labels = page.table.cellWidget(row, 6).findChildren(QLabel)
+    keys = [labels[i].text() for i in range(0, len(labels), 2)]
+    values = [labels[i].text() for i in range(1, len(labels), 2)]
+    assert keys == ["裸品", "AI", "当前"]
+    assert values[1] == "—"
+    assert values[2] == "30×20×10 / 200g"
 
 
 # ---------------------------------------------------------------- 26. 校准状态

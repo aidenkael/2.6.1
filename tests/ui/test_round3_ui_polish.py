@@ -178,10 +178,10 @@ def test_history_column_resize_modes(qapp, context):
     assert not header.stretchLastSection()
     assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Fixed
     assert header.sectionResizeMode(1) == QHeaderView.ResizeMode.Fixed
-    # 多余空间优先给名称与包装数据
+    # 多余空间优先给名称与校准内容（阶段 3 最终调整：包装列固定收窄，校准列 Stretch）
     assert header.sectionResizeMode(2) == QHeaderView.ResizeMode.Stretch
-    assert header.sectionResizeMode(6) == QHeaderView.ResizeMode.Stretch
-    for column in (3, 4, 5, 7):
+    assert header.sectionResizeMode(7) == QHeaderView.ResizeMode.Stretch
+    for column in (3, 4, 5, 6):
         assert header.sectionResizeMode(column) == QHeaderView.ResizeMode.Fixed
 
 

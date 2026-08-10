@@ -167,8 +167,9 @@ class TestUserCorrectionPlaceholder:
         try:
             edit = page.user_correction._widget
             example = edit.example.text()
-            assert "在此填写用于重估的修正" in example
-            assert "这个睡帽可以压缩后发货" in example
+            # 阶段 3 最终调整：示例文字替换为两行短提示
+            assert "填写用于重估的修正（本框内容优先）" in example
+            assert "若商品识别错误，请同时修改上方摘要" in example
             assert "头程" not in example and "货代" not in example
             assert "\n" in example
             # 示例是 viewport 子控件且不影响真实内容
@@ -293,14 +294,15 @@ class TestHistoryTableRound5:
             page.deleteLater()
             qapp.processEvents()
 
-    def test_calibration_column_not_stretch(self, qapp, temp_context):
+    def test_calibration_column_stretch_stage3_final(self, qapp, temp_context):
         page = HistoryPage(temp_context)
         try:
             header = page.table.horizontalHeader()
             assert header.stretchLastSection() is False
-            assert header.sectionResizeMode(7) != QHeaderView.ResizeMode.Stretch
             assert header.sectionResizeMode(2) == QHeaderView.ResizeMode.Stretch
-            assert header.sectionResizeMode(6) == QHeaderView.ResizeMode.Stretch
+            # 阶段 3 最终调整：包装列固定收窄，释放宽度给校准内容列（Stretch）
+            assert header.sectionResizeMode(6) == QHeaderView.ResizeMode.Fixed
+            assert header.sectionResizeMode(7) == QHeaderView.ResizeMode.Stretch
         finally:
             page.deleteLater()
             qapp.processEvents()

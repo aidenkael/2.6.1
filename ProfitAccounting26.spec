@@ -12,7 +12,7 @@ a = Analysis(
         (str(root / "calibration" / "logistics_v2"), "calibration/logistics_v2"),
         (str(root / "docs" / "assets" / "ui_baseline"), "docs/assets/ui_baseline"),
     ],
-    hiddenimports=[],
+    hiddenimports=["PIL"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

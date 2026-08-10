@@ -18,10 +18,16 @@ from typing import Any
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -30,6 +36,9 @@ from PySide6.QtWidgets import (
 )
 
 from profit_accounting_26.application import AppContext
+from profit_accounting_26.application.calibration_export_service import (
+    ExportIncompleteError,
+)
 from profit_accounting_26.application.data_contracts import record_from_payload
 from profit_accounting_26.application.profit_scenario_codec import extract_profit_scenarios
 from profit_accounting_26.ui.pages.calibration_feedback_dialog import CalibrationFeedbackDialog
@@ -129,6 +138,52 @@ def _fmt_percent(value: Any, *, legacy_percent: bool) -> str:
     return f"{number:.2f}%" if legacy_percent else f"{number * 100:.2f}%"
 
 
+def _short_forwarder_name(name: str) -> str:
+    """显示压缩：深圳货代→深圳、义乌货代→义乌；其它自定义货代不改名。"""
+    if name in ("深圳货代", "义乌货代"):
+        return name[:-2]
+    return name
+
+
+def _display_product_name(full_summary: str) -> str:
+    """历史名称只显示完整商品摘要的第一段（第一个“；”之前）。
+
+    底层仍保存完整摘要；这里只做显示层提取，不改动存储。
+    无分隔符用完整字符串；为空保持“未命名商品”。
+    """
+    text = str(full_summary or "").strip()
+    if not text:
+        return "未命名商品"
+    for separator in ("；", ";"):
+        if separator in text:
+            first = text.split(separator, 1)[0].strip()
+            if first:
+                return first
+            break
+    return text
+
+
+_CALIBRATION_MAX_LINES = 3
+_CALIBRATION_MAX_CHARS = 96
+
+
+def _truncate_multiline(text: str) -> str:
+    """校准内容显示层截断：最多 3 行、总字符数受限，超出追加“…”。
+
+    完整原文由 QLabel tooltip 承载；行高不被超长反馈无限撑高。
+    """
+    lines = text.split("\n")
+    display_lines = lines[:_CALIBRATION_MAX_LINES]
+    display = "\n".join(display_lines)
+    truncated = len(lines) > _CALIBRATION_MAX_LINES
+    if len(display) > _CALIBRATION_MAX_CHARS:
+        display = display[:_CALIBRATION_MAX_CHARS].rstrip()
+        truncated = True
+    if truncated:
+        display = display.rstrip() + "…"
+    return display
+
+
 def _dims_text(raw: dict[str, Any] | None) -> str:
     """格式：L×W×H / 重量g；完全缺失返回 —。"""
     if not isinstance(raw, dict):
@@ -159,7 +214,7 @@ class HistoryPage(QWidget):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(14, 12, 14, 12)
         card_layout.setSpacing(10)
-        header = SectionHeader("历史记录管理", "裸品 → AI估算 → 当前采用 → 保存 → 用户校准")
+        header = SectionHeader("历史记录管理")
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("搜索商品……")
@@ -172,12 +227,21 @@ class HistoryPage(QWidget):
         self.open_button.setProperty("primary", True)
         self.calibrate_button = QPushButton("编辑校准")
         self.delete_button = QPushButton("删除")
-        for button in (refresh, self.open_button, self.calibrate_button, self.delete_button):
+        self.export_button = QPushButton("导出校准反馈")
+        self.export_button.setProperty("primary", True)
+        for button in (
+            refresh, self.open_button, self.calibrate_button,
+            self.delete_button, self.export_button,
+        ):
             button.setFixedHeight(32)
         refresh.clicked.connect(self.refresh)
         self.open_button.clicked.connect(self.open_selected)
         self.calibrate_button.clicked.connect(self._open_calibration_dialog)
         self.delete_button.clicked.connect(self._delete_selected)
+        self.export_button.clicked.connect(self._export_calibration)
+        # 导出校准反馈按钮放在搜索框之前（阶段 3 参考布局）
+        header.right_layout.insertWidget(0, self.export_button)
+        self._header_right_layout = header.right_layout
         header.right_layout.addWidget(self.search)
         header.right_layout.addWidget(refresh)
         header.right_layout.addWidget(self.open_button)
@@ -197,16 +261,18 @@ class HistoryPage(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
         self.table.setColumnWidth(0, 50)
         self.table.setColumnWidth(1, _THUMB_SIZE * 2 + 16)
         self.table.setColumnWidth(2, 290)
-        self.table.setColumnWidth(3, 205)
-        self.table.setColumnWidth(4, 125)
+        self.table.setColumnWidth(3, 250)
+        self.table.setColumnWidth(4, 150)
         self.table.setColumnWidth(5, 170)
-        self.table.setColumnWidth(6, 230)
-        self.table.setColumnWidth(7, 170)
+        # 包装数据列：足够一行显示"17×32×17 / 720g"类标准数据，不挤不换行
+        self.table.setColumnWidth(6, 200)
+        # 校准内容列继续承担主要剩余伸展宽度（Stretch）
+        self.table.setColumnWidth(7, 290)
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(_ROW_HEIGHT)
         self.table.setAlternatingRowColors(True)
@@ -275,11 +341,11 @@ class HistoryPage(QWidget):
         self.table.setItem(row, 0, anchor)
         self.table.setCellWidget(row, 1, self._with_column_border(self._build_image_cell(payload)))
         self.table.setCellWidget(row, 2, self._with_column_border(self._build_name_cell(payload)))
-        self.table.setCellWidget(row, 3, self._with_column_border(self._multiline_cell(self._cost_text(payload))))
-        self.table.setCellWidget(row, 4, self._with_column_border(self._multiline_cell(self._price_text(payload))))
-        self.table.setCellWidget(row, 5, self._with_column_border(self._multiline_cell(self._profit_text(payload))))
-        self.table.setCellWidget(row, 6, self._with_column_border(self._multiline_cell(self._packaging_text(payload))))
-        self.table.setCellWidget(row, 7, self._multiline_cell(self._calibration_text(payload)))
+        self.table.setCellWidget(row, 3, self._with_column_border(self._kv_cell(self._cost_rows(payload))))
+        self.table.setCellWidget(row, 4, self._with_column_border(self._kv_cell(self._price_rows(payload))))
+        self.table.setCellWidget(row, 5, self._with_column_border(self._kv_cell(self._profit_rows(payload))))
+        self.table.setCellWidget(row, 6, self._with_column_border(self._kv_cell(self._packaging_rows(payload))))
+        self.table.setCellWidget(row, 7, self._calibration_cell(payload))
 
     @staticmethod
     def _with_column_border(container: QWidget, *, last: bool = False) -> QWidget:
@@ -289,16 +355,48 @@ class HistoryPage(QWidget):
         return container
 
     @staticmethod
-    def _multiline_cell(text: str) -> QWidget:
+    def _multiline_cell(text: str, *, tooltip: str | None = None) -> QWidget:
         """多行文字单元格：所有文字列第一行从统一顶部基线开始，不垂直居中。"""
         label = QLabel(text)
         label.setWordWrap(True)
+        if tooltip:
+            label.setToolTip(tooltip)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         container = QWidget()
         column = QVBoxLayout(container)
         column.setContentsMargins(6, 4, 6, 4)
         column.setSpacing(0)
         column.addWidget(label)
+        column.addStretch(1)
+        return container
+
+    @staticmethod
+    def _kv_cell(rows: list[tuple]) -> QWidget:
+        """局部轻量 key/value 行布局：左侧字段名、右侧数值，不用空格模拟对齐。
+
+        行可为 (key, value) 或 (key, value, bold)，bold 仅强调字段名。
+        """
+        container = QWidget()
+        column = QVBoxLayout(container)
+        column.setContentsMargins(6, 4, 6, 4)
+        column.setSpacing(1)
+        for row_data in rows:
+            key, value = row_data[0], row_data[1]
+            bold = bool(row_data[2]) if len(row_data) > 2 else False
+            row_widget = QWidget()
+            row = QHBoxLayout(row_widget)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            key_label = QLabel(key)
+            if bold:
+                key_label.setStyleSheet("font-weight: 600;")
+            value_label = QLabel(value)
+            value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            value_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            row.addWidget(key_label)
+            row.addStretch(1)
+            row.addWidget(value_label)
+            column.addWidget(row_widget)
         column.addStretch(1)
         return container
 
@@ -336,9 +434,13 @@ class HistoryPage(QWidget):
         column = QVBoxLayout(container)
         column.setContentsMargins(6, 4, 6, 4)
         column.setSpacing(2)
-        name = str(payload.get("product_name") or "未命名商品")
+        full_summary = str(payload.get("product_name") or "")
+        name = _display_product_name(full_summary)
         name_label = QLabel(name)
         name_label.setWordWrap(False)
+        # 名称只显示首段；悬停可见完整商品摘要
+        if full_summary.strip() and full_summary.strip() != name:
+            name_label.setToolTip(full_summary.strip())
         column.addWidget(name_label)
         link = str(payload.get("product_link") or "").strip()
         if link:
@@ -359,40 +461,59 @@ class HistoryPage(QWidget):
 
     # ---------------------------------------------------------------- texts
 
-    def _cost_text(self, payload: dict[str, Any]) -> str:
+    def _cost_rows(self, payload: dict[str, Any]) -> list[tuple]:
         """成本四行全部读取保存快照；历史页不重新计算旧记录。"""
         layers = payload.get("layers") if isinstance(payload.get("layers"), dict) else {}
         calculated = layers.get("calculated") if isinstance(layers.get("calculated"), dict) else {}
         quote = calculated.get("logistics_quote") if isinstance(calculated.get("logistics_quote"), dict) else {}
         forwarder_name = str(calculated.get("forwarder_name") or "").strip()
-        total = _fmt_rmb(calculated.get("system_cost_rmb"))
-        domestic = f"{_fmt_rmb(payload.get('product_cost_rmb'))} + {_fmt_rmb(payload.get('domestic_shipping_rmb'))}"
-        if quote and forwarder_name:
-            first_mile = f"{forwarder_name}  {_fmt_rmb(quote.get('weight_fee_rmb'))} + {_fmt_rmb(quote.get('fixed_fee_rmb'))}"
-        else:
-            first_mile = "—"
-        tail_rmb = _num(quote.get("tail_fee_rmb")) if quote else None
         rate = _num(calculated.get("exchange_rate"))
-        if tail_rmb is None:
-            tail = "—"
-        elif rate:
-            tail = f"${tail_rmb / rate:.2f} / ¥{tail_rmb:.2f}"
+        total_rmb = _num(calculated.get("system_cost_rmb"))
+        if total_rmb is None:
+            total_value = "—"
+        elif rate and rate > 0:
+            # USD 必须用保存记录中的汇率快照，禁止用当前设置汇率补算
+            total_value = f"¥{total_rmb:.2f} / ${total_rmb / rate:.2f}"
         else:
-            tail = f"— / ¥{tail_rmb:.2f}"
-        return f"总成本    {total}\n国内成本  {domestic}\n头程      {first_mile}\n尾程      {tail}"
+            total_value = f"¥{total_rmb:.2f} / $—"
+        product_cost = _num(payload.get("product_cost_rmb")) or 0.0
+        domestic_shipping = _num(payload.get("domestic_shipping_rmb")) or 0.0
+        domestic = _fmt_rmb(product_cost + domestic_shipping)
+        if quote and forwarder_name:
+            weight_fee = _num(quote.get("weight_fee_rmb")) or 0.0
+            fixed_fee = _num(quote.get("fixed_fee_rmb")) or 0.0
+            first_mile_label = f"总头程（{_short_forwarder_name(forwarder_name)}）"
+            first_mile_value = _fmt_rmb(weight_fee + fixed_fee)
+        else:
+            first_mile_label = "总头程"
+            first_mile_value = "—"
+        tail_rmb = _num(quote.get("tail_fee_rmb")) if quote else None
+        if tail_rmb is None:
+            tail_value = "—"
+        elif rate and rate > 0:
+            tail_value = f"¥{tail_rmb:.2f} / ${tail_rmb / rate:.2f}"
+        else:
+            tail_value = f"¥{tail_rmb:.2f} / $—"
+        return [
+            ("总成本", total_value, True),
+            ("国内成本", domestic),
+            (first_mile_label, first_mile_value),
+            ("尾程", tail_value),
+        ]
 
-    def _price_text(self, payload: dict[str, Any]) -> str:
+    def _price_rows(self, payload: dict[str, Any]) -> list[tuple]:
+        """售价三行全部读取保存快照，禁止用当前利润规则重新计算。"""
         scenarios = extract_profit_scenarios(payload) or {}
         no_activity = scenarios.get("no_activity") or {}
         activity = scenarios.get("activity") or {}
-        quote_usd = _fmt_usd(payload.get("shein_quote_usd"))
-        return (
-            f"核价      {quote_usd}\n"
-            f"标价      {_fmt_usd(no_activity.get('sale_price_usd'))}\n"
-            f"活动后    {_fmt_usd(activity.get('sale_price_usd'))}"
-        )
+        return [
+            ("SHEIN标价", _fmt_usd(no_activity.get("sale_price_usd"))),
+            ("活动售价", _fmt_usd(activity.get("sale_price_usd"))),
+            ("SHEIN核价", _fmt_usd(payload.get("shein_quote_usd"))),
+        ]
 
-    def _profit_text(self, payload: dict[str, Any]) -> str:
+    def _profit_rows(self, payload: dict[str, Any]) -> list[tuple]:
+        """利润列：标价利润 / 活动利润，全部读取保存的 profit_scenarios 快照。"""
         scenarios = extract_profit_scenarios(payload) or {}
         legacy = bool(scenarios.get("_legacy_compatible") or scenarios.get("legacy_compatible"))
         no_activity = scenarios.get("no_activity") or {}
@@ -404,17 +525,22 @@ class HistoryPage(QWidget):
             normal_rate_text = _fmt_percent(calculated.get("profit_rate_percent"), legacy_percent=True)
         else:
             normal_rate_text = _fmt_percent(normal_rate, legacy_percent=legacy)
-        normal = f"{_fmt_rmb(no_activity.get('profit_rmb'))} / {normal_rate_text}"
+        list_price_value = f"{_fmt_rmb(no_activity.get('profit_rmb'))} / {normal_rate_text}"
         if activity:
-            activity_text = (
+            activity_value = (
                 f"{_fmt_rmb(activity.get('profit_rmb'))} / "
                 f"{_fmt_percent(activity.get('profit_rate_on_cost'), legacy_percent=legacy)}"
             )
         else:
-            activity_text = "—"
-        return f"普通      {normal}\n活动      {activity_text}"
+            activity_value = "—"
+        return [("标价利润", list_price_value), ("活动利润", activity_value)]
 
-    def _packaging_text(self, payload: dict[str, Any]) -> str:
+    def _packaging_rows(self, payload: dict[str, Any]) -> list[tuple]:
+        """包装数据列 key/value 行：裸品 / AI首次 / 当前，左侧标题、右侧尺寸重量。
+
+        采用 _kv_cell 局部布局，三行标题左对齐、三行数据右对齐，
+        不依赖空格模拟对齐，正常尺寸重量在列宽内不换行。
+        """
         layers = payload.get("layers") if isinstance(payload.get("layers"), dict) else {}
         adopted = layers.get("adopted") if isinstance(layers.get("adopted"), dict) else {}
         bare = _dims_text(adopted.get("bare"))
@@ -427,7 +553,12 @@ class HistoryPage(QWidget):
             if isinstance(adopted_packaging, dict):
                 ai_text = _dims_text(adopted_packaging.get("normal"))
         current = _dims_text(v2.current_estimate)
-        return f"裸品    {bare}\nAI      {ai_text}\n当前    {current}"
+        return [("裸品", bare), ("AI", ai_text), ("当前", current)]
+
+    def _packaging_text(self, payload: dict[str, Any]) -> str:
+        """保留：供 tooltip 或外部文本引用；单元格渲染改用 _packaging_rows + _kv_cell。"""
+        rows = self._packaging_rows(payload)
+        return "\n".join(f"{key} {value}" for key, value in rows)
 
     def _calibration_text(self, payload: dict[str, Any]) -> str:
         """用户层面只有两态：未反馈 / 已反馈 + dims + note + 真实头程。
@@ -477,11 +608,18 @@ class HistoryPage(QWidget):
             lines.append(dims_text)
         note = str(feedback.user_note or "").strip().replace("\n", " ")
         if note:
-            lines.append(note[:40])
+            lines.append(note)
         if actual is not None and actual.actual_first_mile_fee_rmb is not None:
             forwarder = str(actual.actual_forwarder or "").rstrip("货代").strip() or "—"
             lines.append(f"真实头程：{forwarder} ¥{float(actual.actual_first_mile_fee_rmb):g}")
         return "\n".join(lines)
+
+    def _calibration_cell(self, payload: dict[str, Any]) -> QWidget:
+        """校准内容单元格：显示层截断 + tooltip 完整原文，不新增弹窗/详情页。"""
+        full_text = self._calibration_text(payload)
+        display = _truncate_multiline(full_text)
+        tooltip = full_text if display != full_text else None
+        return self._multiline_cell(display, tooltip=tooltip)
 
     # ---------------------------------------------------------------- actions
 
@@ -536,6 +674,72 @@ class HistoryPage(QWidget):
         self.context.record_service.delete_record(record_id)
         self.context.diagnostic_logger.event("record_deleted", record_id=record_id)
         self.refresh()
+
+    def _export_calibration(self) -> None:
+        """导出校准反馈：全部 / 自定义范围 / 未导出部分，三选一。"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("导出校准反馈")
+        form = QFormLayout(dialog)
+        mode_combo = QComboBox()
+        mode_combo.addItem("全部", "all")
+        mode_combo.addItem("自定义范围", "range")
+        mode_combo.addItem("未导出部分", "pending")
+        range_edit = QLineEdit()
+        range_edit.setPlaceholderText("例如 1-30")
+        range_edit.setEnabled(False)
+
+        def _on_mode_changed(_index: int) -> None:
+            range_edit.setEnabled(mode_combo.currentData() == "range")
+
+        mode_combo.currentIndexChanged.connect(_on_mode_changed)
+        form.addRow("导出模式", mode_combo)
+        form.addRow("范围", range_edit)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        mode = str(mode_combo.currentData() or "all")
+        dataset = self._export_dataset(mode)
+        if not dataset:
+            QMessageBox.information(self, "导出校准反馈", "当前没有可导出的历史记录。")
+            return
+        parent = QFileDialog.getExistingDirectory(
+            self, "选择导出目录", str(self.context.paths.data_dir)
+        )
+        if not parent:
+            return
+        try:
+            result = self.context.calibration_export_service.export(
+                dataset,
+                mode,
+                parent,
+                seq_range=range_edit.text().strip() if mode == "range" else None,
+            )
+        except (ValueError, ExportIncompleteError) as exc:
+            QMessageBox.warning(self, "导出失败", str(exc))
+            return
+        message = f"导出完成：\n{result.output_dir}\n共 {len(result.record_ids)} 条记录"
+        if result.warnings:
+            message += "\n\n警告（缩略图 fallback）：\n" + "\n".join(result.warnings[:10])
+        QMessageBox.information(self, "导出校准反馈", message)
+
+    def _export_dataset(self, mode: str) -> list[dict[str, Any]]:
+        """导出数据集选择：
+
+        - all / pending：全部未归档历史记录，不受当前搜索框影响；
+        - range：当前 HistoryPage 可见记录（显示序号 → record_id 映射）。
+        """
+        if mode in ("all", "pending"):
+            return [
+                payload
+                for payload in self.context.record_service.list()
+                if str(payload.get("status") or "active") != "archived"
+            ]
+        return list(self.records)
 
     # ---------------------------------------------------------------- helpers
 
