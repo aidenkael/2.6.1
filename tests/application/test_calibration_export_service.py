@@ -228,11 +228,11 @@ class TestExportSources:
         records = context.record_service.list()
         # 当前采用与 AI 首次不同：导出必须用 AI 首次
         text = first_ai_shipment_text(records[0])
-        assert "25×20×5 / 600g" in text
+        assert "25×20×5 cm / 600g" in text
         assert "可压缩；袋装发货" in text
         result = context.calibration_export_service.export(records, "all", tmp_path)
         workbook = _load_workbook(result.output_dir / "校准反馈.xlsx")
-        assert workbook["校准反馈"].cell(2, 5).value == "25×20×5 / 600g\n可压缩；袋装发货"
+        assert workbook["校准反馈"].cell(2, 5).value == "25×20×5 cm / 600g\n可压缩；袋装发货"
 
     def test_user_calibration_only_user_note_and_suggested(self, context, tmp_path):
         record_id = _create_v2(context)
@@ -252,7 +252,7 @@ class TestExportSources:
         workbook = _load_workbook(result.output_dir / "校准反馈.xlsx")
         cell = workbook["校准反馈"].cell(2, 6).value
         assert "用户反馈：正常袋装即可，不需要盒装" in cell
-        assert "建议包装：25×20×4 / 550g" in cell
+        assert "建议包装：25×20×4 cm / 550g" in cell
 
     def test_actual_logistics_empty_when_no_actual(self, context, tmp_path):
         record_id = _create_v2(context)
@@ -293,6 +293,53 @@ class TestExportSources:
         assert "实际计费重：0.53kg" in actual
         assert "实际包装方式：袋装" in actual
         assert workbook["校准反馈"].cell(2, 8).value == "深圳 / ¥26.00"
+
+
+class TestActualEvidenceGate:
+    @pytest.mark.parametrize(
+        "evidence,should_export",
+        [
+            ("actual_measured", True),
+            ("actual_logistics", True),
+            ("user_estimate", False),
+            ("user_observation", False),
+            ("unknown", False),
+        ],
+    )
+    def test_sheet1_col7_evidence_gate(self, context, tmp_path, evidence, should_export):
+        """第 7 列只允许 actual_measured / actual_logistics；第 8 列不受影响。"""
+        record_id = _create_v2(context)
+        service = context.calibration_feedback_service
+        feedback_id = service.save(
+            {
+                "record_id": record_id,
+                "user_note": "反馈",
+                "actual_logistics": {
+                    "actual_package_dimensions": {"length_cm": 24, "width_cm": 19, "height_cm": 4},
+                    "actual_package_weight_g": 530,
+                    "actual_chargeable_weight_kg": 0.53,
+                    "actual_packaging_method": "袋装",
+                    "actual_forwarder": "深圳",
+                    "actual_first_mile_fee_rmb": 26.0,
+                    "evidence_level": evidence,
+                },
+            }
+        )
+        context.history_record_v2_service.link_feedback(record_id, feedback_id)
+        records = context.record_service.list()
+        result = context.calibration_export_service.export(records, "all", tmp_path)
+        workbook = _load_workbook(result.output_dir / "校准反馈.xlsx")
+        col7 = workbook["校准反馈"].cell(2, 7).value
+        col8 = workbook["校准反馈"].cell(2, 8).value
+        if should_export:
+            assert "实际包装：24×19×4 cm" in col7
+            assert "实际重量：530g" in col7
+            assert "实际计费重：0.53kg" in col7
+            assert "实际包装方式：袋装" in col7
+        else:
+            assert col7 in (None, ""), f"evidence={evidence} 不得进入第7列"
+        # 真实头程（第 8 列）是用户明确填写的独立字段，不受证据门影响
+        assert col8 == "深圳 / ¥26.00"
 
 
 class TestExportImages:
@@ -404,6 +451,23 @@ class TestFailureAndLifecycle:
         monkeypatch.setattr(
             context.calibration_export_service,
             "_write_excel",
+            _boom,
+        )
+        with pytest.raises(ExportIncompleteError):
+            context.calibration_export_service.export(records, "all", tmp_path)
+        assert record_id not in ExportStateStore(context.paths.data_dir).exported_record_ids()
+
+    def test_state_write_failure_is_safe_failure(self, context, tmp_path, monkeypatch):
+        """导出状态落盘失败：export() 明确失败、无 record 被标记、无未处理异常。"""
+        record_id = _create_v2(context)
+        records = context.record_service.list()
+
+        def _boom(*_args, **_kwargs):
+            raise OSError("模拟导出状态写入失败")
+
+        monkeypatch.setattr(
+            context.calibration_export_service.state_store,
+            "mark_exported",
             _boom,
         )
         with pytest.raises(ExportIncompleteError):

@@ -48,6 +48,7 @@ SHEET2_COLUMNS = (
     "contract_version",
 )
 MODES = ("all", "range", "pending")
+ALLOWED_ACTUAL_EVIDENCE_LEVELS = ("actual_measured", "actual_logistics")
 
 
 def _utc_now_iso() -> str:
@@ -75,8 +76,8 @@ def _fmt_dims_weight(length: Any, width: Any, height: Any, weight: Any) -> str:
         for value in (length, width, height)
     )
     if weight is not None:
-        return f"{dims} / {weight:g}g"
-    return dims
+        return f"{dims} cm / {weight:g}g"
+    return f"{dims} cm"
 
 
 class ExportStateStore:
@@ -207,9 +208,9 @@ def user_calibration_text(feedback) -> str:
 
 
 def actual_logistics_text(feedback) -> str:
-    """只读真实 actual/measured 层；没有则空。"""
+    """只读真实 actual/measured 层；evidence_level 不符或缺失时为空。"""
     actual = getattr(feedback, "actual_logistics", None)
-    if actual is None:
+    if actual is None or actual.evidence_level not in ALLOWED_ACTUAL_EVIDENCE_LEVELS:
         return ""
     lines: list[str] = []
     dimensions = actual.actual_package_dimensions if isinstance(actual.actual_package_dimensions, dict) else {}
@@ -218,7 +219,7 @@ def actual_logistics_text(feedback) -> str:
         dimensions.get("height_cm"), None,
     )
     if dims:
-        lines.append(f"实际包装：{dims} cm")
+        lines.append(f"实际包装：{dims}")
     if actual.actual_package_weight_g is not None:
         lines.append(f"实际重量：{actual.actual_package_weight_g:g}g")
     if actual.actual_chargeable_weight_kg is not None:
@@ -372,8 +373,13 @@ class CalibrationFeedbackExporter:
         except OSError as exc:
             raise ExportIncompleteError(f"Excel 写入失败：{exc}") from exc
 
-        # 5) 全部成功后才标记已导出
-        self.state_store.mark_exported(record_ids, batch_id=batch_id, exported_at=exported_at)
+        # 5) 全部成功后才标记已导出；状态落盘失败视为批次失败，不宣称成功
+        try:
+            self.state_store.mark_exported(
+                record_ids, batch_id=batch_id, exported_at=exported_at
+            )
+        except OSError as exc:
+            raise ExportIncompleteError(f"导出状态写入失败：{exc}") from exc
         return ExportResult(
             output_dir=output_dir,
             batch_id=batch_id,

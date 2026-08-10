@@ -239,3 +239,38 @@ def test_forwarder_saved_with_settings_service_still_reads_snapshot(qapp, contex
         assert "总头程（深圳）" in _cell_text(page, row, 3)
     finally:
         page.deleteLater()
+
+
+def test_export_dataset_all_pending_ignore_search_range_uses_visible(qapp, context, tmp_path):
+    """all/pending 不受搜索框影响；range 使用当前可见记录；archived 不导出。"""
+    ids = [_create(context, product_name=name) for name in ("商品A", "商品B", "商品C")]
+    # 归档记录：all/pending 不得包含
+    archived_payload = _payload("已归档商品")
+    archived_payload["status"] = "archived"
+    archived_id = context.record_service.save(
+        archived_payload, images=[], ai_initial=_ai_initial()
+    )
+
+    page = HistoryPage(context)
+    try:
+        page.search.setText("商品A")
+        page.refresh()
+        assert len(page.records) == 1
+        assert page.records[0]["id"] == ids[0]
+
+        all_dataset = page._export_dataset("all")
+        pending_dataset = page._export_dataset("pending")
+        assert len(all_dataset) == 3 and len(pending_dataset) == 3
+        dataset_ids = {str(payload["id"]) for payload in all_dataset}
+        assert dataset_ids == set(ids)
+        assert archived_id not in dataset_ids
+
+        # range 使用当前可见记录：显示序号 1 → 商品A
+        range_dataset = page._export_dataset("range")
+        assert len(range_dataset) == 1
+        result = context.calibration_export_service.export(
+            range_dataset, "range", tmp_path, seq_range="1-1"
+        )
+        assert result.record_ids == [ids[0]]
+    finally:
+        page.deleteLater()

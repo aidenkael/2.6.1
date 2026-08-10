@@ -599,9 +599,6 @@ class HistoryPage(QWidget):
 
     def _export_calibration(self) -> None:
         """导出校准反馈：全部 / 自定义范围 / 未导出部分，三选一。"""
-        if not self.records:
-            QMessageBox.information(self, "导出校准反馈", "当前没有可导出的历史记录。")
-            return
         dialog = QDialog(self)
         dialog.setWindowTitle("导出校准反馈")
         form = QFormLayout(dialog)
@@ -628,6 +625,10 @@ class HistoryPage(QWidget):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         mode = str(mode_combo.currentData() or "all")
+        dataset = self._export_dataset(mode)
+        if not dataset:
+            QMessageBox.information(self, "导出校准反馈", "当前没有可导出的历史记录。")
+            return
         parent = QFileDialog.getExistingDirectory(
             self, "选择导出目录", str(self.context.paths.data_dir)
         )
@@ -635,7 +636,7 @@ class HistoryPage(QWidget):
             return
         try:
             result = self.context.calibration_export_service.export(
-                self.records,
+                dataset,
                 mode,
                 parent,
                 seq_range=range_edit.text().strip() if mode == "range" else None,
@@ -647,6 +648,20 @@ class HistoryPage(QWidget):
         if result.warnings:
             message += "\n\n警告（缩略图 fallback）：\n" + "\n".join(result.warnings[:10])
         QMessageBox.information(self, "导出校准反馈", message)
+
+    def _export_dataset(self, mode: str) -> list[dict[str, Any]]:
+        """导出数据集选择：
+
+        - all / pending：全部未归档历史记录，不受当前搜索框影响；
+        - range：当前 HistoryPage 可见记录（显示序号 → record_id 映射）。
+        """
+        if mode in ("all", "pending"):
+            return [
+                payload
+                for payload in self.context.record_service.list()
+                if str(payload.get("status") or "active") != "archived"
+            ]
+        return list(self.records)
 
     # ---------------------------------------------------------------- helpers
 
