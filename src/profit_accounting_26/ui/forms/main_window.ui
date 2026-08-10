@@ -4856,7 +4856,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </property>
                         </widget>
                        </item>
-                       <item row="0" column="9">
+                       <item row="0" column="8">
                         <widget class="QLabel" name="lblProfitRate">
                          <property name="text">
                           <string>利润率（活动后）</string>
@@ -4919,7 +4919,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </property>
                         </widget>
                        </item>
-                       <item row="0" column="8">
+                       <item row="0" column="9">
                         <widget class="QLabel" name="lblActivityPrice">
                          <property name="text">
                           <string>活动后售价</string>
@@ -5389,7 +5389,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </property>
                         </widget>
                        </item>
-                       <item row="1" column="9">
+                       <item row="1" column="8">
                         <layout class="QHBoxLayout" name="layout_spinProfitRate">
                          <property name="spacing">
                           <number>4</number>
@@ -6008,7 +6008,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="1" column="8">
+                       <item row="1" column="9">
                         <layout class="QHBoxLayout" name="layout_txtActivityPriceRmb">
                          <property name="spacing">
                           <number>4</number>
@@ -6107,7 +6107,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="2" column="8">
+                       <item row="2" column="9">
                         <layout class="QHBoxLayout" name="layout_txtActivityPriceUsd">
                          <property name="spacing">
                           <number>4</number>

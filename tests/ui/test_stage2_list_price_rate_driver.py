@@ -255,8 +255,8 @@ def test_profit_fields_final_order_and_light_group_gap(qapp, binder):
         "txtListPriceProfitRate",# 4 标价利率
         "txtNoActivityProfitRmb",# 5 标价利润
         "spinPromotionReserve",  # 6 活动预留
-        "txtActivityPriceRmb",   # 7 活动后售价
-        "spinProfitRate",        # 8 利润率（活动后）
+        "spinProfitRate",        # 7 利润率（活动后）
+        "txtActivityPriceRmb",   # 8 活动后售价
         "txtActivityProfitRmb",  # 9 活动后利润
     ]
     xs = [center_x(name) for name in order]
