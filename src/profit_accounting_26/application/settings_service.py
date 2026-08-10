@@ -31,6 +31,10 @@ DEFAULT_SUBSIDY_RULE = {
     "description": "最终售价低于29美元时增加2.99美元收入。",
 }
 
+# 一次性 seed 标记：默认利润规则只在首次初始化（或旧文件缺少该键）时补一次。
+# 用户删除后即使文件缺少 profit_rules 键也不会再次复活。
+DEFAULT_RULE_SEED_VERSION = "profit_rules_v1"
+
 
 class SettingsService:
     def __init__(self, path: str | Path, *, defaults_path: str | Path | None = None) -> None:
@@ -60,14 +64,32 @@ class SettingsService:
     def load(self) -> dict:
         if not self.path.is_file():
             data = self._default_data()
+            data.setdefault("seed_versions", [])
+            if DEFAULT_RULE_SEED_VERSION not in data["seed_versions"]:
+                data["seed_versions"].append(DEFAULT_RULE_SEED_VERSION)
             self.save(data)
             return data
         current = json.loads(self.path.read_text(encoding="utf-8"))
         defaults = self._default_data()
         merged = {**defaults, **current}
-        merged.setdefault("profit_rules", defaults["profit_rules"])
         merged.setdefault("forwarders", defaults.get("forwarders", []))
+        seed_versions = list(current.get("seed_versions", []))
+        merged["profit_rules"] = self._resolve_profit_rules(current, seed_versions)
+        merged["seed_versions"] = seed_versions
+        if DEFAULT_RULE_SEED_VERSION not in seed_versions:
+            # 一次性迁移：旧文件缺失 seed 标记时补记，避免后续“缺失就补回”。
+            seed_versions.append(DEFAULT_RULE_SEED_VERSION)
+            self.save(merged)
         return merged
+
+    @classmethod
+    def _resolve_profit_rules(cls, current: dict, seed_versions: list[str]) -> list:
+        """按一次性 seed 语义解析利润规则，禁止缺失时每次补回默认规则。"""
+        if "profit_rules" in current:
+            return current["profit_rules"]
+        if DEFAULT_RULE_SEED_VERSION not in seed_versions:
+            return [deepcopy(DEFAULT_SUBSIDY_RULE)]
+        return []
 
     def save(self, data: dict) -> None:
         self.save_copy(data, self.path)
