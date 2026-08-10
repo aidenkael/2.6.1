@@ -97,22 +97,53 @@ class CalibrationManager:
         new_package: dict[str, Any],
         previous_active: dict[str, Any] | None,
     ) -> None:
-        """激活运行时服务，失败时补偿恢复 DB 和 runtime 到切换前状态。"""
+        """激活运行时服务，失败时补偿恢复 DB 和 runtime 到切换前状态。
+
+        只有最终状态核对确认 DB 与 runtime 都已恢复时才报告“已恢复”；
+        补偿恢复本身失败时抛严重错误，不吞异常、不声称已恢复。
+        """
+        original_error: Exception | None = None
         try:
             self._activate_service(new_package)
+            return
         except Exception as exc:
-            if previous_active is not None:
-                try:
-                    self.store.activate_calibration(previous_active["id"])
-                except Exception:
-                    pass
-                try:
-                    self._activate_service(previous_active)
-                except Exception:
-                    pass
+            original_error = exc
+
+        if previous_active is None:
             raise RuntimeError(
-                f"运行时激活失败，已恢复到切换前状态：{exc}"
-            ) from exc
+                f"运行时激活失败且没有切换前版本可恢复：{original_error}"
+            ) from original_error
+
+        recovery_errors: list[str] = []
+        try:
+            self.store.activate_calibration(previous_active["id"])
+        except Exception as restore_error:
+            recovery_errors.append(f"DB 恢复失败: {restore_error}")
+        try:
+            self._activate_service(previous_active)
+        except Exception as restore_error:
+            recovery_errors.append(f"运行时恢复失败: {restore_error}")
+
+        # 最终状态核对：只有实际核对通过才允许声称“已恢复”
+        db_active = self.store.get_active_calibration()
+        if db_active is None or db_active["id"] != previous_active["id"]:
+            recovery_errors.append("最终核对：DB active 不是切换前版本")
+        if self._service is not None:
+            runtime_ok = (
+                str(self._service.calibration_version) == str(previous_active["version"])
+                and Path(self._service.calibration_path) == Path(previous_active["path"])
+            )
+            if not runtime_ok:
+                recovery_errors.append("最终核对：运行时服务不是切换前版本")
+
+        if recovery_errors:
+            raise RuntimeError(
+                "运行时激活失败且补偿恢复也失败，当前校准状态需要重新校验。"
+                f"原始错误：{original_error}；恢复问题：{'；'.join(recovery_errors)}"
+            ) from original_error
+        raise RuntimeError(
+            f"运行时激活失败，已恢复到切换前状态：{original_error}"
+        ) from original_error
 
     def ensure_builtin(self, source: str | Path, *, version: str) -> dict[str, Any]:
         source_path = Path(source)
@@ -220,7 +251,25 @@ class CalibrationManager:
             for item in self.store.list_calibration_packages()
             if item["id"] == package_id
         )
-        self._safe_runtime_activate(active, previous_active)
+        try:
+            self._safe_runtime_activate(active, previous_active)
+        except RuntimeError as exc:
+            db_active = self.store.get_active_calibration()
+            if previous_active is None:
+                recoverable = db_active is not None and db_active["id"] == active["id"]
+            else:
+                recoverable = db_active is not None and db_active["id"] == previous_active["id"]
+            if not recoverable:
+                raise RuntimeError(
+                    f"导入失败且校准状态恢复失败，需要重新校验：{exc}"
+                ) from exc
+            # 恢复已确认成功：清理本次失败导入的注册记录与包目录，回到导入前状态
+            try:
+                self.store.delete_calibration_package(active["id"])
+            except KeyError:
+                pass
+            self._remove_package_files(active)
+            raise RuntimeError(f"导入失败，已恢复并清理：{exc}") from exc
         return active
 
     def list_packages(self) -> list[dict[str, Any]]:
@@ -263,8 +312,13 @@ class CalibrationManager:
             try:
                 self._safe_runtime_activate(active, previous_active)
             except RuntimeError as exc:
+                db_active = self.store.get_active_calibration()
+                if db_active is not None and db_active["id"] == previous_active["id"]:
+                    raise RuntimeError(
+                        f"切换到内置校准版本失败，已保留原启用版本：{exc}"
+                    ) from exc
                 raise RuntimeError(
-                    f"切换到内置校准版本失败，已保留原启用版本：{exc}"
+                    f"切换到内置校准版本失败且恢复失败，当前校准状态需要重新校验：{exc}"
                 ) from exc
         self.store.delete_calibration_package(package_id)
         self._remove_package_files(target)

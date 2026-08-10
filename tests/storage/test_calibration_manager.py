@@ -286,11 +286,13 @@ def test_delete_active_builtin_runtime_fallback_failure_restores_custom(tmp_path
 
 
 def test_import_package_runtime_failure_restores_previous_state(tmp_path: Path):
-    """import_package：DB 注册并激活新包后 runtime 激活失败，DB 恢复到 previous active。"""
+    """import_package：DB 注册并激活新包后 runtime 激活失败，完全恢复到导入前状态。"""
     manager, service, _ = setup_manager(tmp_path)
     builtin = next(item for item in manager.list_packages() if item["metadata"].get("builtin"))
     assert manager.active_package()["id"] == builtin["id"]
     assert service.calibration_version == "builtin-v1"
+    count_before = len(manager.list_packages())
+    dirs_before = {p.name for p in manager.paths.calibration_packages_dir.iterdir()}
 
     # 模拟 runtime 在激活新包时失败
     real_activate = service.activate
@@ -303,7 +305,7 @@ def test_import_package_runtime_failure_restores_previous_state(tmp_path: Path):
     service.activate = failing_activate
 
     bad_file = make_package_file(tmp_path, "bad.json", "bad-v1", "BAD")
-    with pytest.raises(RuntimeError, match="运行时激活失败"):
+    with pytest.raises(RuntimeError, match="导入失败，已恢复并清理"):
         manager.import_package(bad_file)
 
     # DB active 恢复为 builtin
@@ -312,3 +314,53 @@ def test_import_package_runtime_failure_restores_previous_state(tmp_path: Path):
     assert service.calibration_version == "builtin-v1"
     # DB 与 runtime version 一致
     assert manager.active_package()["version"] == service.calibration_version
+    # 失败导入不留脏 package：注册记录与包目录均被清理
+    assert all(item["version"] != "bad-v1" for item in manager.list_packages())
+    assert len(manager.list_packages()) == count_before
+    dirs_after = {p.name for p in manager.paths.calibration_packages_dir.iterdir()}
+    assert dirs_after == dirs_before
+
+
+def test_compensation_recovery_failure_reports_severe_error(tmp_path: Path):
+    """补偿恢复本身失败时不得声称“已恢复”，必须报严重错误并要求重新校验。"""
+    manager, service, _ = setup_manager(tmp_path)
+    builtin = next(item for item in manager.list_packages() if item["metadata"].get("builtin"))
+    custom = manager.import_package(
+        make_package_file(tmp_path, "custom.json", "custom-v2", "CUSTOM")
+    )
+    manager.activate(builtin["id"])
+    assert manager.active_package()["id"] == builtin["id"]
+
+    # runtime 激活 custom 失败
+    real_activate = service.activate
+
+    def failing_activate(cal_path, *, version):
+        if version == "custom-v2":
+            raise ValueError("simulated runtime activation failure")
+        return real_activate(cal_path, version=version)
+
+    service.activate = failing_activate
+
+    # DB 恢复也失败：首次切换成功，补偿恢复调用（第二次）抛异常
+    real_db_activate = manager.store.activate_calibration
+    calls = {"n": 0}
+
+    def failing_db_activate(package_id):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise RuntimeError("simulated DB restore failure")
+        return real_db_activate(package_id)
+
+    manager.store.activate_calibration = failing_db_activate
+
+    with pytest.raises(RuntimeError) as exc_info:
+        manager.activate(custom["id"])
+
+    message = str(exc_info.value)
+    # 明确说明原始失败 + 补偿恢复失败 + 需要重新校验
+    assert "补偿恢复也失败" in message
+    assert "需要重新校验" in message
+    assert "simulated runtime activation failure" in message
+    assert "simulated DB restore failure" in message
+    # 不得声称已恢复
+    assert "已恢复到切换前状态" not in message
