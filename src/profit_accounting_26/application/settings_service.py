@@ -76,11 +76,43 @@ class SettingsService:
         seed_versions = list(current.get("seed_versions", []))
         merged["profit_rules"] = self._resolve_profit_rules(current, seed_versions)
         merged["seed_versions"] = seed_versions
+        needs_save = DEFAULT_RULE_SEED_VERSION not in seed_versions
         if DEFAULT_RULE_SEED_VERSION not in seed_versions:
-            # 一次性迁移：旧文件缺失 seed 标记时补记，避免后续“缺失就补回”。
+            # 一次性迁移：旧文件缺失 seed 标记时补记，避免后续"缺失就补回"。
             seed_versions.append(DEFAULT_RULE_SEED_VERSION)
+        # 修复失效的 selected_profit_rule_id
+        if self._repair_stale_selected_rule_id(merged):
+            needs_save = True
+        if needs_save:
             self.save(merged)
         return merged
+    
+    @staticmethod
+    def _repair_stale_selected_rule_id(settings: dict) -> bool:
+        """检查并修复失效的 selected_profit_rule_id。
+    
+        如果 selected_profit_rule_id 是非空字符串但不在 enabled=True 且 archived=False
+        的规则中，则自动修正为第一个有效规则 ID；如果没有有效规则则清空。
+        空字符串保持不变（代表用户明确选择"不使用规则"）。
+    
+        返回 True 表示发生了修正，需要持久化。
+        """
+        selected = str(settings.get("selected_profit_rule_id") or "")
+        if not selected:
+            # 空字符串代表用户明确选择"不使用规则"，保持不变
+            return False
+        # 找出所有有效规则：enabled=True 且 archived=False
+        valid_rule_ids = [
+            str(rule.get("id"))
+            for rule in settings.get("profit_rules", [])
+            if rule.get("enabled", True) and not rule.get("archived", False)
+        ]
+        if selected in valid_rule_ids:
+            # selected ID 仍然有效，无需修正
+            return False
+        # selected ID 已失效，修正为第一个有效规则或清空
+        settings["selected_profit_rule_id"] = valid_rule_ids[0] if valid_rule_ids else ""
+        return True
 
     @classmethod
     def _resolve_profit_rules(cls, current: dict, seed_versions: list[str]) -> list:
