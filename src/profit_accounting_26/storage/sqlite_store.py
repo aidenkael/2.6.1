@@ -254,6 +254,15 @@ class SQLiteStore:
             raise RuntimeError("校准包激活失败")
         return active
 
+    def delete_calibration_package(self, package_id: str) -> None:
+        """删除校准包注册记录（不删除文件，文件由 Manager 层在切换成功后清理）。"""
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM calibration_packages WHERE id = ?", (package_id,)
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(package_id)
+
     def activate_previous_calibration(self) -> dict[str, Any] | None:
         packages = self.list_calibration_packages()
         if len(packages) < 2:

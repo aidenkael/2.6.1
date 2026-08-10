@@ -206,6 +206,84 @@ class CalibrationManager:
     def active_package(self) -> dict[str, Any] | None:
         return self.store.get_active_calibration()
 
+    def activate(self, package_id: str) -> dict[str, Any]:
+        """启用任意已注册版本，并同步切换运行时包装估算服务。
+
+        不存在的 package 由 store 抛 KeyError；运行时数据无效时由
+        PackagingEstimationService.activate 抛 ValueError，均不静默成功。
+        """
+        active = self.store.activate_calibration(package_id)
+        self._activate_service(active)
+        return active
+
+    def delete_package(self, package_id: str) -> dict[str, Any]:
+        """删除指定校准包（注册记录 + 包目录文件）。
+
+        - builtin 包禁止删除；
+        - 删除当前启用版本时先 fallback 到 builtin（校验有效→切换→
+          通知运行时→确认切换成功）后才删除原包；fallback 失败则不删除。
+        返回删除后的 active package。
+        """
+        target = next(
+            (item for item in self.store.list_calibration_packages() if item["id"] == package_id),
+            None,
+        )
+        if target is None:
+            raise KeyError(package_id)
+        if target.get("metadata", {}).get("builtin"):
+            raise ValueError("内置校准版本不允许删除")
+        if target["active"]:
+            fallback = self._prepare_builtin_fallback()
+            active = self.store.activate_calibration(fallback["id"])
+            try:
+                self._activate_service(active)
+            except Exception as exc:
+                raise RuntimeError(f"切换到内置校准版本失败，已保留原启用版本：{exc}") from exc
+        self.store.delete_calibration_package(package_id)
+        self._remove_package_files(target)
+        current = self.store.get_active_calibration()
+        if current is None:
+            raise RuntimeError("删除后数据库中没有有效启用版本")
+        return current
+
+    def _prepare_builtin_fallback(self) -> dict[str, Any]:
+        """找到并校验 builtin 包；注册文件丢失时从原始源重写（与 ensure_builtin 同逻辑）。"""
+        builtin = next(
+            (
+                item
+                for item in self.store.list_calibration_packages()
+                if item.get("metadata", {}).get("builtin")
+            ),
+            None,
+        )
+        if builtin is None:
+            raise RuntimeError("没有可用的内置校准版本，无法删除当前启用版本")
+        target = Path(builtin["path"])
+        if not target.is_file():
+            source = builtin.get("metadata", {}).get("source")
+            if not source or not Path(source).is_file():
+                raise RuntimeError("内置校准版本文件丢失且无法恢复，无法删除当前启用版本")
+            samples, _ = self._read_json_payload(Path(source))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(
+                json.dumps(samples, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        try:
+            self._read_json_payload(target)
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"内置校准版本不可用，无法删除当前启用版本：{exc}") from exc
+        return builtin
+
+    def _remove_package_files(self, package: dict[str, Any]) -> None:
+        """只允许删除正式校准包数据目录内的包目录，不根据任意外部路径递归删除。"""
+        package_dir = Path(package["path"]).resolve().parent
+        base_dir = self.paths.calibration_packages_dir.resolve()
+        try:
+            package_dir.relative_to(base_dir)
+        except ValueError:
+            return
+        shutil.rmtree(package_dir, ignore_errors=True)
+
     def rollback(self) -> dict[str, Any] | None:
         target = self.store.activate_previous_calibration()
         if target is not None:
