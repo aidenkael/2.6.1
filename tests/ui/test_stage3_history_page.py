@@ -6,7 +6,7 @@
 - 成本列四行 key/value：总成本 / 国内成本 / 总头程（深圳|义乌）/ 尾程；
 - 总头程 = 保存的 weight_fee + fixed_fee，深圳货代→深圳、义乌货代→义乌；
 - 尾程使用保存的 tail + 保存时汇率快照（修改当前汇率不影响旧记录）；
-- 利润列“标价 / 活动后”读取保存的 profit_scenarios（修改当前规则不影响）；
+- 利润列“标价利润 / 活动利润”读取保存的 profit_scenarios（修改当前规则不影响）；
 - 成本列加宽、包装数据列缩窄。
 """
 
@@ -212,8 +212,8 @@ def test_profit_uses_saved_snapshot_not_current_rules(qapp, context):
     page1 = HistoryPage(context)
     row = _row_for(page1, record_id)
     before = _cell_text(page1, row, 5)
-    assert "标价" in before and "¥78.74 / 50.00%" in before
-    assert "活动后" in before and "¥55.12 / 35.00%" in before
+    assert "标价利润" in before and "¥78.74 / 50.00%" in before
+    assert "活动利润" in before and "¥55.12 / 35.00%" in before
     page1.deleteLater()
 
     settings = context.settings_service.load()

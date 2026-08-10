@@ -1,21 +1,26 @@
 """阶段 3：校准反馈导出 V1 服务测试。
 
 覆盖：
-- Sheet1 严格 8 列、Sheet2 技术元数据；
-- 商品简名 / AI首次发货估算 / 用户校准 / 实际物流 / 真实头程 的真实来源；
+- Sheet1 严格 7 列（不存在“实际物流数据”列）、Sheet2 技术元数据；
+- 商品简名 / AI首次发货估算 / 用户校准 / 真实头程 的真实来源；
 - current_estimate 不得进入导出；
+- Sheet1 图片列直接嵌入第一张主图缩略图（不嵌全部高清原图）；
+- images/ 仍包含全部原图；manifest.json 存在、可解析、相对路径有效、
+  不含经济字段/current_estimate；
 - 图片多原图复制、相对路径、thumbnail fallback warning、完全缺失报错；
 - 全部 / 自定义范围 / 未导出 三种模式；
-- 失败事务不标记已导出；删除记录后旧状态不崩溃；legacy 兼容。
+- 失败事务（Excel/manifest/状态写失败）不标记已导出；删除记录后旧状态不崩溃；legacy 兼容。
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("PySide6")
+pytest.importorskip("PIL")
 
 from PySide6.QtCore import QBuffer  # noqa: E402
 from PySide6.QtGui import QColor, QImage  # noqa: E402
@@ -171,14 +176,24 @@ def _load_workbook(path: Path):
 
 
 class TestExportShape:
-    def test_sheet1_exactly_eight_columns(self, context, tmp_path):
+    def test_sheet1_exactly_seven_columns(self, context, tmp_path):
         _create_v2(context)
         records = context.record_service.list()
         result = context.calibration_export_service.export(records, "all", tmp_path)
         workbook = _load_workbook(result.output_dir / "校准反馈.xlsx")
         sheet = workbook["校准反馈"]
-        assert sheet.max_column == 8
+        assert sheet.max_column == 7
         assert [cell.value for cell in sheet[1]] == list(SHEET1_COLUMNS)
+
+    def test_sheet1_has_no_actual_logistics_column(self, context, tmp_path):
+        """本轮删除“实际物流数据”列；底层 ActualLogistics 数据结构不变。"""
+        _create_v2(context)
+        records = context.record_service.list()
+        result = context.calibration_export_service.export(records, "all", tmp_path)
+        workbook = _load_workbook(result.output_dir / "校准反馈.xlsx")
+        headers = [cell.value for cell in workbook["校准反馈"][1]]
+        assert "实际物流数据" not in headers
+        assert headers == ["序号", "商品简名", "商品链接", "图片", "AI首次发货估算", "用户校准内容", "真实头程"]
 
     def test_sheet2_metadata_and_contract_version(self, context, tmp_path):
         record_id = _create_v2(context)
@@ -254,7 +269,7 @@ class TestExportSources:
         assert "用户反馈：正常袋装即可，不需要盒装" in cell
         assert "建议包装：25×20×4 cm / 550g" in cell
 
-    def test_actual_logistics_empty_when_no_actual(self, context, tmp_path):
+    def test_first_mile_empty_when_no_actual(self, context, tmp_path):
         record_id = _create_v2(context)
         service = context.calibration_feedback_service
         feedback_id = service.save({"record_id": record_id, "user_note": "只有文字反馈"})
@@ -263,9 +278,9 @@ class TestExportSources:
         result = context.calibration_export_service.export(records, "all", tmp_path)
         workbook = _load_workbook(result.output_dir / "校准反馈.xlsx")
         assert workbook["校准反馈"].cell(2, 7).value in (None, "")
-        assert workbook["校准反馈"].cell(2, 8).value in (None, "")
 
-    def test_actual_logistics_and_first_mile_use_actual_layer(self, context, tmp_path):
+    def test_first_mile_uses_actual_forwarder_and_fee(self, context, tmp_path):
+        """真实头程语义不变：actual_forwarder + actual_first_mile_fee_rmb（第 7 列）。"""
         record_id = _create_v2(context)
         service = context.calibration_feedback_service
         feedback_id = service.save(
@@ -287,63 +302,12 @@ class TestExportSources:
         records = context.record_service.list()
         result = context.calibration_export_service.export(records, "all", tmp_path)
         workbook = _load_workbook(result.output_dir / "校准反馈.xlsx")
-        actual = workbook["校准反馈"].cell(2, 7).value
-        assert "实际包装：24×19×4 cm" in actual
-        assert "实际重量：530g" in actual
-        assert "实际计费重：0.53kg" in actual
-        assert "实际包装方式：袋装" in actual
-        assert workbook["校准反馈"].cell(2, 8).value == "深圳 / ¥26.00"
-
-
-class TestActualEvidenceGate:
-    @pytest.mark.parametrize(
-        "evidence,should_export",
-        [
-            ("actual_measured", True),
-            ("actual_logistics", True),
-            ("user_estimate", False),
-            ("user_observation", False),
-            ("unknown", False),
-        ],
-    )
-    def test_sheet1_col7_evidence_gate(self, context, tmp_path, evidence, should_export):
-        """第 7 列只允许 actual_measured / actual_logistics；第 8 列不受影响。"""
-        record_id = _create_v2(context)
-        service = context.calibration_feedback_service
-        feedback_id = service.save(
-            {
-                "record_id": record_id,
-                "user_note": "反馈",
-                "actual_logistics": {
-                    "actual_package_dimensions": {"length_cm": 24, "width_cm": 19, "height_cm": 4},
-                    "actual_package_weight_g": 530,
-                    "actual_chargeable_weight_kg": 0.53,
-                    "actual_packaging_method": "袋装",
-                    "actual_forwarder": "深圳",
-                    "actual_first_mile_fee_rmb": 26.0,
-                    "evidence_level": evidence,
-                },
-            }
-        )
-        context.history_record_v2_service.link_feedback(record_id, feedback_id)
-        records = context.record_service.list()
-        result = context.calibration_export_service.export(records, "all", tmp_path)
-        workbook = _load_workbook(result.output_dir / "校准反馈.xlsx")
-        col7 = workbook["校准反馈"].cell(2, 7).value
-        col8 = workbook["校准反馈"].cell(2, 8).value
-        if should_export:
-            assert "实际包装：24×19×4 cm" in col7
-            assert "实际重量：530g" in col7
-            assert "实际计费重：0.53kg" in col7
-            assert "实际包装方式：袋装" in col7
-        else:
-            assert col7 in (None, ""), f"evidence={evidence} 不得进入第7列"
-        # 真实头程（第 8 列）是用户明确填写的独立字段，不受证据门影响
-        assert col8 == "深圳 / ¥26.00"
+        assert workbook["校准反馈"].cell(2, 7).value == "深圳 / ¥26.00"
 
 
 class TestExportImages:
-    def test_all_originals_copied_with_relative_paths(self, context, tmp_path):
+    def test_all_originals_copied_and_main_image_embedded(self, context, tmp_path):
+        """images/ 复制全部原图；Sheet1 只嵌入第一张缩略图，不嵌全部高清原图。"""
         refs = _image_refs(context, count=2)
         record_id = _create_v2(context, images=refs)
         records = [context.store.load_record(record_id)]
@@ -352,10 +316,26 @@ class TestExportImages:
         assert (images_dir / "001_1.png").is_file()
         assert (images_dir / "001_2.png").is_file()
         workbook = _load_workbook(result.output_dir / "校准反馈.xlsx")
-        cell = workbook["校准反馈"].cell(2, 4).value
-        assert cell == "images/001_1.png\nimages/001_2.png"
+        sheet = workbook["校准反馈"]
+        # 图片列不再写路径文本
+        assert sheet.cell(2, 4).value in (None, "")
+        # Sheet2 仍保留相对路径技术字段
         info = workbook["导出信息"].cell(2, 4).value
         assert "images/001_1.png" in info
+        # 只嵌入一张主图缩略图（两张原图不得全部嵌入）
+        assert len(sheet._images) == 1
+        embedded = sheet._images[0]
+        assert embedded.width <= 140 and embedded.height <= 140
+        assert str(embedded.anchor._from.row) == "1"  # 锚定在第一条记录行（0 基）
+
+    def test_record_without_images_embeds_nothing(self, context, tmp_path):
+        record_id = _create_v2(context, images=[])
+        records = [context.store.load_record(record_id)]
+        result = context.calibration_export_service.export(records, "all", tmp_path)
+        workbook = _load_workbook(result.output_dir / "校准反馈.xlsx")
+        sheet = workbook["校准反馈"]
+        assert sheet.cell(2, 4).value in (None, "")
+        assert len(sheet._images) == 0
 
     def test_thumbnail_fallback_records_warning(self, context, tmp_path):
         ref = _image_refs(context, count=1)[0]
@@ -386,6 +366,100 @@ class TestExportImages:
         result = context.calibration_export_service.export(records, "all", tmp_path)
         workbook = _load_workbook(result.output_dir / "校准反馈.xlsx")
         assert workbook["校准反馈"].cell(2, 4).value in (None, "")
+
+
+class TestManifest:
+    """manifest.json：供 Agent 直接读取的结构化校准数据。"""
+
+    def _export_with_feedback(self, context, tmp_path, *, images=None):
+        refs = _image_refs(context, count=2) if images else []
+        record_id = _create_v2(context, images=refs)
+        service = context.calibration_feedback_service
+        feedback_id = service.save(
+            {
+                "record_id": record_id,
+                "user_note": "实际是压缩袋装",
+                "suggested_package": {"length_cm": 25, "width_cm": 20, "height_cm": 4, "weight_g": 550},
+                "actual_logistics": {
+                    "actual_forwarder": "深圳",
+                    "actual_first_mile_fee_rmb": 26.0,
+                    "evidence_level": "actual_logistics",
+                },
+            }
+        )
+        context.history_record_v2_service.link_feedback(record_id, feedback_id)
+        records = [context.store.load_record(record_id)]
+        result = context.calibration_export_service.export(records, "all", tmp_path)
+        return record_id, result
+
+    def test_manifest_exists_and_parseable(self, context, tmp_path):
+        record_id, result = self._export_with_feedback(context, tmp_path, images=True)
+        manifest_path = result.output_dir / "manifest.json"
+        assert manifest_path.is_file()
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert manifest["contract_version"] == CONTRACT_VERSION
+        assert manifest["export_batch_id"] == result.batch_id
+        assert manifest["exported_at"] == result.exported_at
+        assert len(manifest["records"]) == 1
+        entry = manifest["records"][0]
+        assert entry["sequence"] == 1
+        assert entry["record_id"] == record_id
+        assert entry["product_short_name"] == "AI首次简名"
+        assert entry["ai_initial_shipment"] == "25×20×5 cm / 600g\n可压缩；袋装发货"
+        assert "用户反馈：实际是压缩袋装" in entry["user_calibration"]
+        assert entry["actual_first_mile"] == "深圳 / ¥26.00"
+        # 人可直接阅读：ensure_ascii=False，中文不是 \uXXXX
+        raw = manifest_path.read_text(encoding="utf-8")
+        assert "用户反馈" in raw
+
+    def test_manifest_image_relative_paths_exist_on_disk(self, context, tmp_path):
+        _record_id, result = self._export_with_feedback(context, tmp_path, images=True)
+        manifest = json.loads((result.output_dir / "manifest.json").read_text(encoding="utf-8"))
+        entry = manifest["records"][0]
+        assert entry["main_image"] == "images/001_1.png"
+        assert entry["images"] == ["images/001_1.png", "images/001_2.png"]
+        for relative in entry["images"]:
+            assert not Path(relative).is_absolute()
+            assert (result.output_dir / relative).is_file()
+
+    def test_manifest_has_no_economic_or_current_estimate_fields(self, context, tmp_path):
+        _record_id, result = self._export_with_feedback(context, tmp_path, images=True)
+        raw = (result.output_dir / "manifest.json").read_text(encoding="utf-8")
+        manifest = json.loads(raw)
+        allowed_top = {"contract_version", "export_batch_id", "exported_at", "records"}
+        assert set(manifest) == allowed_top
+        allowed_record = {
+            "sequence", "record_id", "product_short_name", "product_link",
+            "main_image", "images", "ai_initial_shipment",
+            "user_calibration", "actual_first_mile",
+        }
+        for entry in manifest["records"]:
+            assert set(entry) == allowed_record
+        for forbidden in (
+            "current_estimate", "product_cost", "domestic_shipping", "system_cost",
+            "sale_price", "profit", "subsidy", "tail_fee", "exchange_rate",
+            "length_cm", "width_cm", "height_cm", "weight_g",
+        ):
+            assert forbidden not in raw
+
+    def test_manifest_without_images_keeps_empty_paths(self, context, tmp_path):
+        _record_id, result = self._export_with_feedback(context, tmp_path, images=False)
+        manifest = json.loads((result.output_dir / "manifest.json").read_text(encoding="utf-8"))
+        entry = manifest["records"][0]
+        assert entry["main_image"] == ""
+        assert entry["images"] == []
+
+    def test_manifest_write_failure_does_not_mark_exported(self, context, tmp_path, monkeypatch):
+        record_id = _create_v2(context)
+        records = context.record_service.list()
+
+        def _boom(*_args, **_kwargs):
+            raise OSError("模拟 manifest 写入失败")
+
+        monkeypatch.setattr(context.calibration_export_service, "_write_manifest", _boom)
+        with pytest.raises(ExportIncompleteError):
+            context.calibration_export_service.export(records, "all", tmp_path)
+        assert record_id not in ExportStateStore(context.paths.data_dir).exported_record_ids()
 
 
 class TestExportModes:
@@ -482,9 +556,10 @@ class TestFailureAndLifecycle:
         records = [context.store.load_record(record_id)]
         result = context.calibration_export_service.export(records, "all", tmp_path)
         workbook = _load_workbook(result.output_dir / "校准反馈.xlsx")
-        assert workbook["校准反馈"].max_column == 8
+        assert workbook["校准反馈"].max_column == 7
         assert workbook["校准反馈"].cell(2, 2).value in ("", "—")
         assert workbook["校准反馈"].cell(2, 5).value in (None, "")
+        assert (result.output_dir / "manifest.json").is_file()
 
     def test_exported_at_and_batch_id_written_per_record(self, context, tmp_path):
         record_id = _create_v2(context)

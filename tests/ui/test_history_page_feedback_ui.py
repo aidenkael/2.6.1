@@ -294,13 +294,19 @@ def test_price_and_profit_columns_read_saved_snapshot(qapp, context):
     record_id = _create_v2(context)
     page = HistoryPage(context)
     row = _row_for(page, record_id)
-    price = _cell_label(page, row, 4).text()
-    assert "核价      $30.00" in price
-    assert "标价      $30.00" in price
-    assert "活动后    $27.00" in price
+    price = _cell_text(page, row, 4)
+    # 售价栏三行固定顺序：SHEIN标价 / 活动售价 / SHEIN核价
+    assert "SHEIN标价" in price and "$30.00" in price
+    assert "活动售价" in price and "$27.00" in price
+    assert "SHEIN核价" in price
+    keys = [
+        label.text()
+        for label in page.table.cellWidget(row, 4).findChildren(QLabel)
+    ][0::2]
+    assert keys == ["SHEIN标价", "活动售价", "SHEIN核价"]
     profit = _cell_text(page, row, 5)
-    assert "标价" in profit and "¥78.74 / 50.00%" in profit
-    assert "活动后" in profit and "¥55.12 / 35.00%" in profit
+    assert "标价利润" in profit and "¥78.74 / 50.00%" in profit
+    assert "活动利润" in profit and "¥55.12 / 35.00%" in profit
 
 
 def test_legacy_record_profit_falls_back_safely(qapp, context):
@@ -316,9 +322,10 @@ def test_packaging_column_shows_bare_ai_current(qapp, context):
     page = HistoryPage(context)
     row = _row_for(page, record_id)
     text = _cell_label(page, row, 6).text()
-    assert "裸品    45×30×15 / 580g" in text
-    assert "AI      17×32×17 / 720g" in text
-    assert "当前    17×32×17 / 720g" in text
+    # 包装数据列收窄后改为单空格前缀，避免窄列换行撑高行
+    assert "裸品 45×30×15 / 580g" in text
+    assert "AI 17×32×17 / 720g" in text
+    assert "当前 17×32×17 / 720g" in text
 
 
 def test_legacy_record_ai_column_not_faked(qapp, context):
@@ -326,8 +333,8 @@ def test_legacy_record_ai_column_not_faked(qapp, context):
     page = HistoryPage(context)
     row = _row_for(page, legacy_id)
     text = _cell_label(page, row, 6).text()
-    assert "AI      —" in text
-    assert "当前    30×20×10 / 200g" in text
+    assert "AI —" in text
+    assert "当前 30×20×10 / 200g" in text
 
 
 # ---------------------------------------------------------------- 26. 校准状态

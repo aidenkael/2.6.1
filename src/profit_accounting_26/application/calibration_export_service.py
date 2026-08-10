@@ -4,20 +4,25 @@
 
 ``校准反馈_YYYYMMDD_HHMMSS/``
 ├─ ``校准反馈.xlsx``
+├─ ``manifest.json``
 └─ ``images/``
 
-- Sheet1 ``校准反馈`` 严格 8 列，只回答“AI 第一次怎么判断 → 用户后来怎么修正 →
-  实际物流反馈是什么”，禁止经济字段与 current_estimate；
+- Sheet1 ``校准反馈`` 严格 7 列，只回答“AI 第一次怎么判断 → 用户后来怎么修正 →
+  真实头程是什么”，禁止经济字段与 current_estimate；
+- Sheet1 ``图片`` 列直接嵌入每条记录第一张主图的缩略图（不嵌高清原图）；
+- ``manifest.json`` 供 Agent 直接读取结构化校准数据，字段语义与 Sheet1 7 列一致，
+  UTF-8 / ensure_ascii=False，图片全部相对路径，不含任何经济字段；
 - Sheet2 ``导出信息`` 只放技术元数据（record_id / batch / exported_at /
   image_relative_paths / contract_version）；
 - 导出状态按 ``record_id`` 保存在 ``data_dir/calibration/export_state.json``，
-  只有整个批次真正成功后才标记已导出；取消/异常/图片缺失不标记；
+  只有 preflight、图片复制、Excel、manifest、状态落盘全部真正成功后才标记已导出；
 - 图片优先原图，原图缺失时允许 thumbnail fallback 并记录 warning；
   记录声明有图但原图与缩略图都缺失时批次失败，不静默成功。
 """
 
 from __future__ import annotations
 
+import io
 import json
 import shutil
 from dataclasses import dataclass, field
@@ -30,6 +35,7 @@ from profit_accounting_26.application.calibration_feedback_service import Calibr
 
 CONTRACT_VERSION = "Calibration Feedback Export V1"
 EXPORT_STATE_FILE = "export_state.json"
+MANIFEST_FILE = "manifest.json"
 SHEET1_COLUMNS = (
     "序号",
     "商品简名",
@@ -37,7 +43,6 @@ SHEET1_COLUMNS = (
     "图片",
     "AI首次发货估算",
     "用户校准内容",
-    "实际物流数据",
     "真实头程",
 )
 SHEET2_COLUMNS = (
@@ -48,7 +53,9 @@ SHEET2_COLUMNS = (
     "contract_version",
 )
 MODES = ("all", "range", "pending")
-ALLOWED_ACTUAL_EVIDENCE_LEVELS = ("actual_measured", "actual_logistics")
+# Excel 嵌入主图缩略图：只嵌第一张，尺寸限制在 100～140px 保持清晰
+_EXCEL_MAIN_IMAGE_MAX_PX = 112
+_EXCEL_ROW_HEIGHT_PT = 88
 
 
 def _utc_now_iso() -> str:
@@ -207,29 +214,6 @@ def user_calibration_text(feedback) -> str:
     return "\n".join(lines)
 
 
-def actual_logistics_text(feedback) -> str:
-    """只读真实 actual/measured 层；evidence_level 不符或缺失时为空。"""
-    actual = getattr(feedback, "actual_logistics", None)
-    if actual is None or actual.evidence_level not in ALLOWED_ACTUAL_EVIDENCE_LEVELS:
-        return ""
-    lines: list[str] = []
-    dimensions = actual.actual_package_dimensions if isinstance(actual.actual_package_dimensions, dict) else {}
-    dims = _fmt_dims_weight(
-        dimensions.get("length_cm"), dimensions.get("width_cm"),
-        dimensions.get("height_cm"), None,
-    )
-    if dims:
-        lines.append(f"实际包装：{dims}")
-    if actual.actual_package_weight_g is not None:
-        lines.append(f"实际重量：{actual.actual_package_weight_g:g}g")
-    if actual.actual_chargeable_weight_kg is not None:
-        lines.append(f"实际计费重：{actual.actual_chargeable_weight_kg:g}kg")
-    method = str(actual.actual_packaging_method or "").strip()
-    if method:
-        lines.append(f"实际包装方式：{method}")
-    return "\n".join(lines)
-
-
 def actual_first_mile_text(feedback) -> str:
     """真实头程：只读 actual_forwarder + actual_first_mile_fee_rmb。"""
     actual = getattr(feedback, "actual_logistics", None)
@@ -373,7 +357,20 @@ class CalibrationFeedbackExporter:
         except OSError as exc:
             raise ExportIncompleteError(f"Excel 写入失败：{exc}") from exc
 
-        # 5) 全部成功后才标记已导出；状态落盘失败视为批次失败，不宣称成功
+        # 5) 写 manifest.json（供 Agent 直接读取；写失败同样不得显示导出完成）
+        manifest_path = output_dir / MANIFEST_FILE
+        try:
+            self._write_manifest(
+                manifest_path,
+                records=selected,
+                image_relative_paths=image_relative_paths,
+                batch_id=batch_id,
+                exported_at=exported_at,
+            )
+        except OSError as exc:
+            raise ExportIncompleteError(f"manifest.json 写入失败：{exc}") from exc
+
+        # 6) 全部成功后才标记已导出；状态落盘失败视为批次失败，不宣称成功
         try:
             self.state_store.mark_exported(
                 record_ids, batch_id=batch_id, exported_at=exported_at
@@ -390,6 +387,26 @@ class CalibrationFeedbackExporter:
 
     # ------------------------------------------------------------------ Excel
 
+    @staticmethod
+    def _excel_thumbnail(source: Path) -> tuple[bytes, int, int] | None:
+        """生成嵌入 Excel 的主图缩略图（最长边 ≤ 112px），不嵌高清原图。
+
+        单张图片损坏时返回 None（降级为不嵌入 + warning），不阻断整批导出。
+        """
+        try:
+            from PIL import Image as PILImage
+        except ImportError as exc:  # pragma: no cover - 依赖缺失场景
+            raise ExportIncompleteError("缺少 Pillow，无法嵌入主图缩略图") from exc
+        try:
+            with PILImage.open(source) as image:
+                image.thumbnail((_EXCEL_MAIN_IMAGE_MAX_PX, _EXCEL_MAIN_IMAGE_MAX_PX))
+                size = image.size
+                buffer = io.BytesIO()
+                image.convert("RGB").save(buffer, format="JPEG", quality=85)
+                return buffer.getvalue(), size[0], size[1]
+        except (OSError, ValueError):
+            return None
+
     def _write_excel(
         self,
         path: Path,
@@ -401,6 +418,7 @@ class CalibrationFeedbackExporter:
     ) -> None:
         try:
             from openpyxl import Workbook
+            from openpyxl.drawing.image import Image as XLImage
             from openpyxl.styles import Alignment, Font
             from openpyxl.utils import get_column_letter
         except ImportError as exc:  # pragma: no cover - 依赖缺失场景
@@ -411,21 +429,36 @@ class CalibrationFeedbackExporter:
         sheet.title = "校准反馈"
         sheet.append(list(SHEET1_COLUMNS))
 
+        embed_warnings: list[str] = []
         for index, payload in enumerate(records):
             feedback = self._load_feedback(payload)
             row = [
                 index + 1,
                 first_ai_short_name(payload) or "—",
                 str(payload.get("product_link") or ""),
-                "\n".join(image_relative_paths[index]),
+                "",  # 图片列只嵌入主图缩略图，不再写路径文本
                 first_ai_shipment_text(payload),
                 user_calibration_text(feedback) if feedback is not None else "",
-                actual_logistics_text(feedback) if feedback is not None else "",
                 actual_first_mile_text(feedback) if feedback is not None else "",
             ]
             sheet.append(row)
+            # 只嵌入第一张主图缩略图；无图记录保持空白
+            relative_paths = image_relative_paths[index]
+            if relative_paths:
+                main_source = path.parent / relative_paths[0]
+                thumb = self._excel_thumbnail(main_source) if main_source.is_file() else None
+                if thumb is None:
+                    embed_warnings.append(f"记录 {payload.get('id')} 主图缩略图生成失败，图片列留空")
+                else:
+                    data, width_px, height_px = thumb
+                    xl_image = XLImage(io.BytesIO(data))
+                    xl_image.width = width_px
+                    xl_image.height = height_px
+                    sheet_row = index + 2
+                    sheet.add_image(xl_image, f"D{sheet_row}")
+                    sheet.row_dimensions[sheet_row].height = _EXCEL_ROW_HEIGHT_PT
 
-        widths = (8, 22, 38, 26, 30, 34, 28, 18)
+        widths = (8, 22, 38, 20, 30, 36, 18)
         for column, width in enumerate(widths, start=1):
             sheet.column_dimensions[get_column_letter(column)].width = width
         sheet.freeze_panes = "A2"
@@ -459,9 +492,60 @@ class CalibrationFeedbackExporter:
         for row in info.iter_rows(min_row=2, max_row=info.max_row):
             for cell in row:
                 cell.alignment = top_left
+        if embed_warnings:
+            # 嵌入失败不阻断导出，但写入 Sheet2 备注便于排查
+            info.append([])
+            info.append(["embed_warnings", "\n".join(embed_warnings), "", "", ""])
 
         path.parent.mkdir(parents=True, exist_ok=True)
         workbook.save(path)
+
+    # ------------------------------------------------------------------ manifest
+
+    def _write_manifest(
+        self,
+        path: Path,
+        *,
+        records: list[dict[str, Any]],
+        image_relative_paths: list[list[str]],
+        batch_id: str,
+        exported_at: str,
+    ) -> None:
+        """manifest.json：供 Agent 直接读取的结构化校准数据。
+
+        字段语义与 Sheet1 7 列一致；不含 current_estimate、采购成本、总成本、
+        标价、利润、补贴、尾程、汇率等经济字段；图片全部相对路径。
+        """
+        manifest_records: list[dict[str, Any]] = []
+        for index, payload in enumerate(records):
+            feedback = self._load_feedback(payload)
+            relative_paths = list(image_relative_paths[index])
+            manifest_records.append(
+                {
+                    "sequence": index + 1,
+                    "record_id": str(payload.get("id") or ""),
+                    "product_short_name": first_ai_short_name(payload) or "—",
+                    "product_link": str(payload.get("product_link") or ""),
+                    "main_image": relative_paths[0] if relative_paths else "",
+                    "images": relative_paths,
+                    "ai_initial_shipment": first_ai_shipment_text(payload),
+                    "user_calibration": user_calibration_text(feedback) if feedback is not None else "",
+                    "actual_first_mile": actual_first_mile_text(feedback) if feedback is not None else "",
+                }
+            )
+        manifest = {
+            "contract_version": CONTRACT_VERSION,
+            "export_batch_id": batch_id,
+            "exported_at": exported_at,
+            "records": manifest_records,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(path)
 
     def _load_feedback(self, payload: dict[str, Any]):
         v2 = payload.get("_v2") if isinstance(payload.get("_v2"), dict) else {}

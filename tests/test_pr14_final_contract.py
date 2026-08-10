@@ -127,7 +127,8 @@ def test_ai_shipment_judgment_has_one_visible_contract_location(qapp, app_contex
 
 def test_visual_and_reestimate_prompts_are_frozen_minimal_contracts():
     assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.2-frozen"
-    assert LocalReestimateService.PROMPT_VERSION == "2.6.1-reestimate-v1.1-frozen"
+    # 阶段 3 最后一次调整：重估 Prompt 按用户明确要求升级为 v1.2（冲突优先级）
+    assert LocalReestimateService.PROMPT_VERSION == "2.6.1-reestimate-v1.2"
     schema = RecognitionService.RESPONSE_SCHEMA
     assert set(schema["properties"]) == {"product_name", "observed", "bare_estimate", "shipment", "note"}
     assert "bare_estimate" in schema["properties"]
@@ -473,7 +474,7 @@ def test_reestimate_schema_unchanged():
     schema = LocalReestimateService.RESPONSE_SCHEMA
     assert set(schema["properties"]) == {"shipment", "note"}
     assert "bare_estimate" not in schema["properties"]
-    assert LocalReestimateService.PROMPT_VERSION == "2.6.1-reestimate-v1.1-frozen"
+    assert LocalReestimateService.PROMPT_VERSION == "2.6.1-reestimate-v1.2"
 
 
 def test_old_record_without_bare_estimate_loads(qapp, app_context):

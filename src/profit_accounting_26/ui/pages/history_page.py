@@ -145,6 +145,45 @@ def _short_forwarder_name(name: str) -> str:
     return name
 
 
+def _display_product_name(full_summary: str) -> str:
+    """历史名称只显示完整商品摘要的第一段（第一个“；”之前）。
+
+    底层仍保存完整摘要；这里只做显示层提取，不改动存储。
+    无分隔符用完整字符串；为空保持“未命名商品”。
+    """
+    text = str(full_summary or "").strip()
+    if not text:
+        return "未命名商品"
+    for separator in ("；", ";"):
+        if separator in text:
+            first = text.split(separator, 1)[0].strip()
+            if first:
+                return first
+            break
+    return text
+
+
+_CALIBRATION_MAX_LINES = 3
+_CALIBRATION_MAX_CHARS = 96
+
+
+def _truncate_multiline(text: str) -> str:
+    """校准内容显示层截断：最多 3 行、总字符数受限，超出追加“…”。
+
+    完整原文由 QLabel tooltip 承载；行高不被超长反馈无限撑高。
+    """
+    lines = text.split("\n")
+    display_lines = lines[:_CALIBRATION_MAX_LINES]
+    display = "\n".join(display_lines)
+    truncated = len(lines) > _CALIBRATION_MAX_LINES
+    if len(display) > _CALIBRATION_MAX_CHARS:
+        display = display[:_CALIBRATION_MAX_CHARS].rstrip()
+        truncated = True
+    if truncated:
+        display = display.rstrip() + "…"
+    return display
+
+
 def _dims_text(raw: dict[str, Any] | None) -> str:
     """格式：L×W×H / 重量g；完全缺失返回 —。"""
     if not isinstance(raw, dict):
@@ -222,16 +261,17 @@ class HistoryPage(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
         self.table.setColumnWidth(0, 50)
         self.table.setColumnWidth(1, _THUMB_SIZE * 2 + 16)
         self.table.setColumnWidth(2, 290)
         self.table.setColumnWidth(3, 250)
-        self.table.setColumnWidth(4, 125)
+        self.table.setColumnWidth(4, 150)
         self.table.setColumnWidth(5, 170)
-        self.table.setColumnWidth(6, 195)
-        self.table.setColumnWidth(7, 170)
+        # 包装数据列缩窄（裸品/AI首次/当前 三行稳定显示），释放宽度给校准内容
+        self.table.setColumnWidth(6, 150)
+        self.table.setColumnWidth(7, 340)
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(_ROW_HEIGHT)
         self.table.setAlternatingRowColors(True)
@@ -301,10 +341,10 @@ class HistoryPage(QWidget):
         self.table.setCellWidget(row, 1, self._with_column_border(self._build_image_cell(payload)))
         self.table.setCellWidget(row, 2, self._with_column_border(self._build_name_cell(payload)))
         self.table.setCellWidget(row, 3, self._with_column_border(self._kv_cell(self._cost_rows(payload))))
-        self.table.setCellWidget(row, 4, self._with_column_border(self._multiline_cell(self._price_text(payload))))
+        self.table.setCellWidget(row, 4, self._with_column_border(self._kv_cell(self._price_rows(payload))))
         self.table.setCellWidget(row, 5, self._with_column_border(self._kv_cell(self._profit_rows(payload))))
         self.table.setCellWidget(row, 6, self._with_column_border(self._multiline_cell(self._packaging_text(payload))))
-        self.table.setCellWidget(row, 7, self._multiline_cell(self._calibration_text(payload)))
+        self.table.setCellWidget(row, 7, self._calibration_cell(payload))
 
     @staticmethod
     def _with_column_border(container: QWidget, *, last: bool = False) -> QWidget:
@@ -314,10 +354,12 @@ class HistoryPage(QWidget):
         return container
 
     @staticmethod
-    def _multiline_cell(text: str) -> QWidget:
+    def _multiline_cell(text: str, *, tooltip: str | None = None) -> QWidget:
         """多行文字单元格：所有文字列第一行从统一顶部基线开始，不垂直居中。"""
         label = QLabel(text)
         label.setWordWrap(True)
+        if tooltip:
+            label.setToolTip(tooltip)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         container = QWidget()
         column = QVBoxLayout(container)
@@ -328,18 +370,25 @@ class HistoryPage(QWidget):
         return container
 
     @staticmethod
-    def _kv_cell(rows: list[tuple[str, str]]) -> QWidget:
-        """局部轻量 key/value 行布局：左侧字段名、右侧数值，不用空格模拟对齐。"""
+    def _kv_cell(rows: list[tuple]) -> QWidget:
+        """局部轻量 key/value 行布局：左侧字段名、右侧数值，不用空格模拟对齐。
+
+        行可为 (key, value) 或 (key, value, bold)，bold 仅强调字段名。
+        """
         container = QWidget()
         column = QVBoxLayout(container)
         column.setContentsMargins(6, 4, 6, 4)
         column.setSpacing(1)
-        for key, value in rows:
+        for row_data in rows:
+            key, value = row_data[0], row_data[1]
+            bold = bool(row_data[2]) if len(row_data) > 2 else False
             row_widget = QWidget()
             row = QHBoxLayout(row_widget)
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(6)
             key_label = QLabel(key)
+            if bold:
+                key_label.setStyleSheet("font-weight: 600;")
             value_label = QLabel(value)
             value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             value_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -384,9 +433,13 @@ class HistoryPage(QWidget):
         column = QVBoxLayout(container)
         column.setContentsMargins(6, 4, 6, 4)
         column.setSpacing(2)
-        name = str(payload.get("product_name") or "未命名商品")
+        full_summary = str(payload.get("product_name") or "")
+        name = _display_product_name(full_summary)
         name_label = QLabel(name)
         name_label.setWordWrap(False)
+        # 名称只显示首段；悬停可见完整商品摘要
+        if full_summary.strip() and full_summary.strip() != name:
+            name_label.setToolTip(full_summary.strip())
         column.addWidget(name_label)
         link = str(payload.get("product_link") or "").strip()
         if link:
@@ -407,13 +460,21 @@ class HistoryPage(QWidget):
 
     # ---------------------------------------------------------------- texts
 
-    def _cost_rows(self, payload: dict[str, Any]) -> list[tuple[str, str]]:
+    def _cost_rows(self, payload: dict[str, Any]) -> list[tuple]:
         """成本四行全部读取保存快照；历史页不重新计算旧记录。"""
         layers = payload.get("layers") if isinstance(payload.get("layers"), dict) else {}
         calculated = layers.get("calculated") if isinstance(layers.get("calculated"), dict) else {}
         quote = calculated.get("logistics_quote") if isinstance(calculated.get("logistics_quote"), dict) else {}
         forwarder_name = str(calculated.get("forwarder_name") or "").strip()
-        total = _fmt_rmb(calculated.get("system_cost_rmb"))
+        rate = _num(calculated.get("exchange_rate"))
+        total_rmb = _num(calculated.get("system_cost_rmb"))
+        if total_rmb is None:
+            total_value = "—"
+        elif rate and rate > 0:
+            # USD 必须用保存记录中的汇率快照，禁止用当前设置汇率补算
+            total_value = f"¥{total_rmb:.2f} / ${total_rmb / rate:.2f}"
+        else:
+            total_value = f"¥{total_rmb:.2f} / $—"
         product_cost = _num(payload.get("product_cost_rmb")) or 0.0
         domestic_shipping = _num(payload.get("domestic_shipping_rmb")) or 0.0
         domestic = _fmt_rmb(product_cost + domestic_shipping)
@@ -426,7 +487,6 @@ class HistoryPage(QWidget):
             first_mile_label = "总头程"
             first_mile_value = "—"
         tail_rmb = _num(quote.get("tail_fee_rmb")) if quote else None
-        rate = _num(calculated.get("exchange_rate"))
         if tail_rmb is None:
             tail_value = "—"
         elif rate and rate > 0:
@@ -434,25 +494,25 @@ class HistoryPage(QWidget):
         else:
             tail_value = f"¥{tail_rmb:.2f} / $—"
         return [
-            ("总成本", total),
+            ("总成本", total_value, True),
             ("国内成本", domestic),
             (first_mile_label, first_mile_value),
             ("尾程", tail_value),
         ]
 
-    def _price_text(self, payload: dict[str, Any]) -> str:
+    def _price_rows(self, payload: dict[str, Any]) -> list[tuple]:
+        """售价三行全部读取保存快照，禁止用当前利润规则重新计算。"""
         scenarios = extract_profit_scenarios(payload) or {}
         no_activity = scenarios.get("no_activity") or {}
         activity = scenarios.get("activity") or {}
-        quote_usd = _fmt_usd(payload.get("shein_quote_usd"))
-        return (
-            f"核价      {quote_usd}\n"
-            f"标价      {_fmt_usd(no_activity.get('sale_price_usd'))}\n"
-            f"活动后    {_fmt_usd(activity.get('sale_price_usd'))}"
-        )
+        return [
+            ("SHEIN标价", _fmt_usd(no_activity.get("sale_price_usd"))),
+            ("活动售价", _fmt_usd(activity.get("sale_price_usd"))),
+            ("SHEIN核价", _fmt_usd(payload.get("shein_quote_usd"))),
+        ]
 
-    def _profit_rows(self, payload: dict[str, Any]) -> list[tuple[str, str]]:
-        """利润列：标价 / 活动后，全部读取保存的 profit_scenarios 快照。"""
+    def _profit_rows(self, payload: dict[str, Any]) -> list[tuple]:
+        """利润列：标价利润 / 活动利润，全部读取保存的 profit_scenarios 快照。"""
         scenarios = extract_profit_scenarios(payload) or {}
         legacy = bool(scenarios.get("_legacy_compatible") or scenarios.get("legacy_compatible"))
         no_activity = scenarios.get("no_activity") or {}
@@ -472,7 +532,7 @@ class HistoryPage(QWidget):
             )
         else:
             activity_value = "—"
-        return [("标价", list_price_value), ("活动后", activity_value)]
+        return [("标价利润", list_price_value), ("活动利润", activity_value)]
 
     def _packaging_text(self, payload: dict[str, Any]) -> str:
         layers = payload.get("layers") if isinstance(payload.get("layers"), dict) else {}
@@ -487,7 +547,7 @@ class HistoryPage(QWidget):
             if isinstance(adopted_packaging, dict):
                 ai_text = _dims_text(adopted_packaging.get("normal"))
         current = _dims_text(v2.current_estimate)
-        return f"裸品    {bare}\nAI      {ai_text}\n当前    {current}"
+        return f"裸品 {bare}\nAI {ai_text}\n当前 {current}"
 
     def _calibration_text(self, payload: dict[str, Any]) -> str:
         """用户层面只有两态：未反馈 / 已反馈 + dims + note + 真实头程。
@@ -537,11 +597,18 @@ class HistoryPage(QWidget):
             lines.append(dims_text)
         note = str(feedback.user_note or "").strip().replace("\n", " ")
         if note:
-            lines.append(note[:40])
+            lines.append(note)
         if actual is not None and actual.actual_first_mile_fee_rmb is not None:
             forwarder = str(actual.actual_forwarder or "").rstrip("货代").strip() or "—"
             lines.append(f"真实头程：{forwarder} ¥{float(actual.actual_first_mile_fee_rmb):g}")
         return "\n".join(lines)
+
+    def _calibration_cell(self, payload: dict[str, Any]) -> QWidget:
+        """校准内容单元格：显示层截断 + tooltip 完整原文，不新增弹窗/详情页。"""
+        full_text = self._calibration_text(payload)
+        display = _truncate_multiline(full_text)
+        tooltip = full_text if display != full_text else None
+        return self._multiline_cell(display, tooltip=tooltip)
 
     # ---------------------------------------------------------------- actions
 

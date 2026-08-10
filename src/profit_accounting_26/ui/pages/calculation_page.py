@@ -202,8 +202,8 @@ class _UserCorrectionEdit(QTextEdit):
     """
 
     EXAMPLE_TEXT = (
-        "在此填写用于重估的修正\n"
-        "例如：这个睡帽可以压缩后发货"
+        "填写用于重估的修正（本框内容优先）\n"
+        "若商品识别错误，请同时修改上方摘要"
     )
     MIN_HEIGHT = 68
     MAX_HEIGHT = 88

@@ -162,3 +162,77 @@ def test_corrected_reestimate_timeout_reports_current_result_preserved(monkeypat
     )
     with pytest.raises(RecognitionUnavailableError, match="当前结果未改变"):
         LocalReestimateService(Store()).reestimate(**_context())
+
+
+# ------------------------------------------------------------------ 阶段 3 冲突优先级
+
+
+def test_prompt_version_is_v1_2():
+    assert LocalReestimateService.PROMPT_VERSION == "2.6.1-reestimate-v1.2"
+
+
+def test_conflicting_summary_and_correction_both_sent_with_correction_priority():
+    """A：摘要仍是 A，用户修正说其实是 B：两者都进 Prompt，且修正优先。"""
+    prompt = LocalReestimateService._context(
+        product_name="A；硬质；不可压缩",
+        confirmed_facts={},
+        current_shipment={"length_cm": 30, "width_cm": 20, "height_cm": 10, "weight_g": 400},
+        user_correction="其实是B，可以压缩袋装",
+    )
+    # 两者都存在
+    assert "A；硬质；不可压缩" in prompt
+    assert "其实是B，可以压缩袋装" in prompt
+    # Prompt 明确用户修正优先、不得因摘要旧内容忽略修正
+    assert "以用户修正为准" in prompt
+    assert "不得因为摘要仍是旧内容而忽略用户修正" in prompt
+    # 轻量合同保持：只输出一个 shipment，不算费用/利润
+    assert "只输出一个最终 shipment" in prompt
+    assert "物流费用" in prompt and "利润" in prompt
+
+
+def test_consistent_summary_and_correction_both_sent():
+    """B：摘要与修正都写 B：作为一致证据正常发送。"""
+    prompt = LocalReestimateService._context(
+        product_name="B；软质；可压缩",
+        confirmed_facts={},
+        current_shipment={},
+        user_correction="这个其实是B，可以压缩",
+    )
+    assert "B；软质；可压缩" in prompt
+    assert "这个其实是B，可以压缩" in prompt
+
+
+def test_confirmed_bare_facts_are_highest_hard_facts():
+    """C：确认裸尺寸/裸重存在时，Prompt 明确结构化确认事实优先。"""
+    prompt = LocalReestimateService._context(
+        product_name="睡帽；软布结构；可压缩",
+        confirmed_facts={"length_cm": 30, "width_cm": 25, "height_cm": 4, "weight_g": 90},
+        current_shipment={},
+        user_correction="压扁发货",
+    )
+    assert "30" in prompt and "90" in prompt
+    assert "最高优先级的硬事实" in prompt
+    assert "1. 用户明确确认的结构化裸尺寸/裸重" in prompt
+
+
+def test_current_shipment_still_sent():
+    """D：current_shipment 继续正常发送。"""
+    prompt = LocalReestimateService._context(
+        product_name="睡帽",
+        confirmed_facts={},
+        current_shipment={"length_cm": 26, "width_cm": 20, "height_cm": 6, "weight_g": 150},
+        user_correction="压缩发货",
+    )
+    assert "current_shipment" in prompt
+    assert "26" in prompt and "150" in prompt
+
+
+def test_reestimate_never_rewrites_summary_contract():
+    """服务合同：重估只返回一个 shipment，不得携带改写摘要/自动覆盖字段。"""
+    assert LocalReestimateService.RESPONSE_SCHEMA["required"] == ["shipment", "note"]
+    assert set(LocalReestimateService.RESPONSE_SCHEMA["properties"]) == {"shipment", "note"}
+    prompt = LocalReestimateService._context(
+        product_name="A；硬质", confirmed_facts={}, current_shipment={},
+        user_correction="其实是B",
+    )
+    assert "不要改写或返回新的商品摘要" in prompt
