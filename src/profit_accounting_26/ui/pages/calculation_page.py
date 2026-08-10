@@ -638,62 +638,103 @@ class CalculationPage(QWidget):
         # 标签与金额对齐由静态 main_window.ui 排版完成，旧的重量/计费重/物流总价行已删除
 
     def _apply_round3_ui_polish(self) -> None:
-        """利润区恢复历史单排布局：一整排字段 + RMB/USD 上下排列 + 纵向对齐。
+        """利润区等宽列 + 严格左对齐 + 统一状态行 + 微调间距。
 
-        规则状态（绿色已触发提示）放字段标题上方；仅比原版略微增加横向间距，
-        不使用分组框与竖向分隔线。只移动既有控件，不改任何计算逻辑与算法。
+        9 个业务字段各占等宽纵向列；标题严格左对齐；所有列预留相同高度的状态行
+        （普通字段留空，标价利润/活动后利润显示绿色补贴提示）。不使用分组框与竖向分隔线。
+        只移动既有控件，不改任何计算逻辑与算法。
         """
         f = self._root.findChild
-        # 利润区规则状态放字段标题上方；字号用 QFont（binder 用 setStyleSheet 只覆盖颜色）
         profit_grid = f(QGridLayout, "profitFieldsGrid")
-        if profit_grid is not None:
-            profit_grid.setHorizontalSpacing(16)
-            profit_grid.setVerticalSpacing(6)
-            for layout_name in ("layoutNoActivityProfitTitle", "layoutActivityProfitTitle"):
-                hbox = f(QHBoxLayout, layout_name)
-                if hbox is None or hbox.count() < 2:
-                    continue
-                index = profit_grid.indexOf(hbox)
-                if index < 0:
-                    continue
-                row, col, row_span, col_span = profit_grid.getItemPosition(index)
-                # 先取出控件再移除空布局：removeItem 会删除无主的子布局对象
-                title_widget = hbox.takeAt(0).widget()
-                status_widget = hbox.takeAt(0).widget()
-                profit_grid.removeItem(hbox)
-                if status_widget is not None:
-                    status_font = status_widget.font()
-                    if status_font.pointSize() > 8:
-                        status_font.setPointSize(status_font.pointSize() - 1)
-                    status_widget.setFont(status_font)
-                stack = QVBoxLayout()
-                stack.setContentsMargins(0, 0, 0, 0)
-                stack.setSpacing(1)
-                if status_widget is not None:
-                    stack.addWidget(status_widget)
-                if title_widget is not None:
-                    stack.addWidget(title_widget)
-                profit_grid.addLayout(stack, row, col, row_span, col_span)
+        if profit_grid is None:
+            return
 
-            # 统一标题和值的视觉中心（与历史单排版本一致，保持整排阅读自然）
-            for label_name in (
-                "lblSheinPrice", "lblProfitCost", "lblProfitRate",
-                "lblNoActivityPrice", "lblListPriceProfitRateTitle",
-                "lblPromotionReserve", "lblActivityPrice",
-            ):
-                label = f(QLabel, label_name)
-                if label is not None:
-                    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-            # 利润区横向铺满可用宽度（取消固定 1190px），让单排字段在 1920 下更舒展
-            profit_host = f(QWidget, "profitFieldsHost")
-            if profit_host is not None:
-                profit_host.setMinimumWidth(0)
-                profit_host.setMaximumWidth(16777215)
-                from PySide6.QtWidgets import QSizePolicy as _QSP
-                profit_host.setSizePolicy(_QSP(_QSP.Policy.Preferred, _QSP.Policy.Preferred))
-        # 此结论仅重复利润区标题提示，且在紧凑窗口中占用无效的独立行。
-        # 计算与字段布局完全不依赖它，因此隐藏该显示冗余项。
+        # ---- 1. 间距微调 ----
+        profit_grid.setHorizontalSpacing(10)
+        profit_grid.setVerticalSpacing(6)
+
+        # ---- 2. 两个补贴字段：状态标签上移到标题上方 ----
+        for layout_name in ("layoutNoActivityProfitTitle", "layoutActivityProfitTitle"):
+            hbox = f(QHBoxLayout, layout_name)
+            if hbox is None or hbox.count() < 2:
+                continue
+            index = profit_grid.indexOf(hbox)
+            if index < 0:
+                continue
+            row, col, row_span, col_span = profit_grid.getItemPosition(index)
+            title_widget = hbox.takeAt(0).widget()
+            status_widget = hbox.takeAt(0).widget()
+            profit_grid.removeItem(hbox)
+            if status_widget is not None:
+                status_font = status_widget.font()
+                if status_font.pointSize() > 8:
+                    status_font.setPointSize(status_font.pointSize() - 1)
+                status_widget.setFont(status_font)
+            stack = QVBoxLayout()
+            stack.setContentsMargins(0, 0, 0, 0)
+            stack.setSpacing(1)
+            if status_widget is not None:
+                stack.addWidget(status_widget)
+            if title_widget is not None:
+                stack.addWidget(title_widget)
+            profit_grid.addLayout(stack, row, col, row_span, col_span)
+
+        # ---- 3. 所有标题严格左对齐 ----
+        for label_name in (
+            "lblSheinPrice", "lblProfitCost", "lblProfitRate",
+            "lblNoActivityPrice", "lblListPriceProfitRateTitle",
+            "lblPromotionReserve", "lblActivityPrice",
+        ):
+            label = f(QLabel, label_name)
+            if label is not None:
+                label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        # ---- 4. 为所有列添加等高的状态行占位 ----
+        # 先测量补贴状态标签的实际高度（如果可见）
+        status_height = 0
+        for sname in ("lblNoActivitySubsidyStatus", "lblActivitySubsidyStatus"):
+            sw = f(QLabel, sname)
+            if sw is not None and sw.isVisible():
+                h = sw.sizeHint().height()
+                if h > status_height:
+                    status_height = h
+        # 如果状态标签当前不可见（未触发），用估算高度
+        if status_height <= 0:
+            status_height = 16
+
+        # 为没有状态行的列（c0,c1,c2,c3,c4,c6,c7）在 row 0 添加空白占位
+        empty_cols = [0, 1, 2, 3, 4, 6, 7]
+        for col in empty_cols:
+            existing = profit_grid.itemAtPosition(0, col)
+            if existing is not None:
+                w = existing.widget()
+                if w is not None:
+                    # 已有标题 widget，在其上方插入空白 spacer
+                    profit_grid.removeItem(existing)
+                    spacer = QWidget()
+                    spacer.setFixedHeight(status_height)
+                    spacer.setObjectName(f"profitStatusSpacer_col{col}")
+                    stack = QVBoxLayout()
+                    stack.setContentsMargins(0, 0, 0, 0)
+                    stack.setSpacing(1)
+                    stack.addWidget(spacer)
+                    stack.addWidget(w)
+                    profit_grid.addLayout(stack, 0, col)
+
+        # ---- 5. 统一列宽 ----
+        for col in range(9):
+            profit_grid.setColumnMinimumWidth(col, 136)
+            profit_grid.setColumnStretch(col, 0)
+
+        # ---- 6. profitFieldsHost 自适应宽度 ----
+        profit_host = f(QWidget, "profitFieldsHost")
+        if profit_host is not None:
+            profit_host.setMinimumWidth(0)
+            profit_host.setMaximumWidth(16777215)
+            from PySide6.QtWidgets import QSizePolicy as _QSP
+            profit_host.setSizePolicy(_QSP(_QSP.Policy.Preferred, _QSP.Policy.Preferred))
+
+        # 隐藏冗余结论标签
         profit_conclusion = f(QLabel, "lblProfitConclusion")
         if profit_conclusion is not None:
             profit_conclusion.setVisible(False)
