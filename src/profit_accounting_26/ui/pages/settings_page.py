@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from pathlib import Path
 from uuid import uuid4
 
 from PySide6.QtCore import Qt, Signal
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -145,6 +147,12 @@ class SettingsPage(QWidget):
         self.btn_disable_rule = f(QPushButton, "btnDisableProfitRule")
         self.btn_archive_rule = f(QPushButton, "btnArchiveProfitRule")
         self.btn_delete_rule = f(QPushButton, "btnDeleteProfitRule")
+        # 物流校准规则
+        self.calibration_table = f(QTableWidget, "tableCalibrationPackages")
+        self.btn_import_calibration = f(QPushButton, "btnImportCalibrationPackage")
+        self.btn_activate_calibration = f(QPushButton, "btnActivateCalibrationPackage")
+        self.btn_delete_calibration = f(QPushButton, "btnDeleteCalibrationPackage")
+        self.calibration_status = f(QLabel, "lblCalibrationActiveStatus")
 
     def _hide_preview_controls(self) -> None:
         """契约 §13.2：隐藏 Designer 预览行与无真实业务的测试/删除按钮。
@@ -219,6 +227,7 @@ class SettingsPage(QWidget):
         for button in (self.show_active, self.show_archived):
             if button:
                 button.setCheckable(True)
+        self._setup_calibration_table()
 
     def _connect_signals(self) -> None:
         if self.btn_save:
@@ -263,6 +272,15 @@ class SettingsPage(QWidget):
             self.btn_archive_rule.clicked.connect(self.archive_current_rule)
         if self.btn_delete_rule:
             self.btn_delete_rule.clicked.connect(self.delete_current_rule)
+        # 物流校准规则
+        if self.btn_import_calibration:
+            self.btn_import_calibration.clicked.connect(self._import_calibration_package)
+        if self.btn_activate_calibration:
+            self.btn_activate_calibration.clicked.connect(self._activate_selected_calibration)
+        if self.btn_delete_calibration:
+            self.btn_delete_calibration.clicked.connect(self._delete_selected_calibration)
+        if self.calibration_table:
+            self.calibration_table.itemSelectionChanged.connect(self._update_calibration_buttons)
         # 脏标记
         if self.display_name:
             self.display_name.textChanged.connect(lambda _text: self._mark_dirty())
@@ -338,6 +356,141 @@ class SettingsPage(QWidget):
         if not self.dirty:
             self.dirty = True
             self.dirtyChanged.emit(True)
+
+    # ------------------------------------------------------------------
+    # 物流校准规则（校准包版本管理）
+    # ------------------------------------------------------------------
+
+    def _setup_calibration_table(self) -> None:
+        table = self.calibration_table
+        if table is None:
+            return
+        table.setHorizontalHeaderLabels(["版本", "状态", "导入时间", "文件名"])
+        table.setAlternatingRowColors(True)
+        table.verticalHeader().setVisible(False)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        table.setColumnWidth(1, 90)
+        table.setColumnWidth(2, 170)
+        table.horizontalHeader().setStretchLastSection(True)
+
+    def _refresh_calibration_packages(self) -> None:
+        """重新加载校准包版本列表；进入设置页/导入/启用/删除成功后调用。"""
+        table = self.calibration_table
+        if table is None:
+            return
+        packages = self.context.calibration_manager.list_packages()
+        table.setRowCount(0)
+        for package in packages:
+            row = table.rowCount()
+            table.insertRow(row)
+            metadata = package.get("metadata", {})
+            file_name = str(metadata.get("original_name") or Path(package["path"]).name)
+            if metadata.get("builtin"):
+                file_name = f"{file_name}（内置）"
+            values = [
+                str(package["version"]),
+                "当前启用" if package["active"] else "未启用",
+                str(package["imported_at"]),
+                file_name,
+            ]
+            for col, value in enumerate(values):
+                table.setItem(row, col, QTableWidgetItem(value))
+            table.item(row, 0).setData(Qt.ItemDataRole.UserRole, package["id"])
+        active = self.context.calibration_manager.active_package()
+        if self.calibration_status:
+            if active:
+                count = active.get("metadata", {}).get("sample_count", "未知")
+                self.calibration_status.setText(f"当前启用：{active['version']} · {count} 条样本")
+            else:
+                self.calibration_status.setText("当前没有启用的校准版本")
+        self._update_calibration_buttons()
+
+    def _selected_calibration_package(self) -> dict | None:
+        table = self.calibration_table
+        if table is None:
+            return None
+        row = table.currentRow()
+        if row < 0:
+            return None
+        item = table.item(row, 0)
+        package_id = str(item.data(Qt.ItemDataRole.UserRole)) if item else ""
+        return next(
+            (pkg for pkg in self.context.calibration_manager.list_packages() if pkg["id"] == package_id),
+            None,
+        )
+
+    def _update_calibration_buttons(self) -> None:
+        package = self._selected_calibration_package()
+        if self.btn_activate_calibration:
+            self.btn_activate_calibration.setEnabled(bool(package) and not package["active"])
+        if self.btn_delete_calibration:
+            # builtin 受保护：删除按钮对内置版本禁用
+            self.btn_delete_calibration.setEnabled(
+                bool(package) and not package.get("metadata", {}).get("builtin")
+            )
+
+    def _import_calibration_package(self) -> None:
+        selected, _ = QFileDialog.getOpenFileName(self, "导入校准包", "", "校准包 (*.json *.zip);;全部文件 (*)")
+        if not selected:
+            return
+        try:
+            result = self.context.calibration_manager.import_package(selected)
+        except Exception as exc:
+            QMessageBox.warning(self, "导入失败", str(exc))
+            return
+        self._refresh_calibration_packages()
+        QMessageBox.information(self, "导入成功", f"已导入并启用：{result['version']}")
+
+    def _activate_selected_calibration(self) -> None:
+        package = self._selected_calibration_package()
+        if package is None:
+            QMessageBox.information(self, "启用校准版本", "请先选择一个校准版本。")
+            return
+        if package["active"]:
+            return
+        try:
+            self.context.calibration_manager.activate(package["id"])
+        except Exception as exc:
+            QMessageBox.warning(self, "启用失败", str(exc))
+            return
+        self._refresh_calibration_packages()
+
+    def _delete_selected_calibration(self) -> None:
+        package = self._selected_calibration_package()
+        if package is None:
+            QMessageBox.information(self, "删除校准版本", "请先选择一个校准版本。")
+            return
+        if package.get("metadata", {}).get("builtin"):
+            QMessageBox.information(self, "删除校准版本", "内置校准版本不允许删除。")
+            return
+        if package["active"]:
+            confirmed = confirm_action(
+                self,
+                "删除当前启用的校准版本",
+                f"即将删除当前启用的校准版本：{package['version']}。\n"
+                "删除后将自动切换到内置默认校准版本。",
+                confirm_text="删除并切换",
+                danger=True,
+            )
+        else:
+            confirmed = confirm_action(
+                self,
+                "删除校准版本",
+                f"确定删除校准版本：{package['version']} 吗？",
+                confirm_text="删除",
+                danger=True,
+            )
+        if not confirmed:
+            return
+        try:
+            self.context.calibration_manager.delete_package(package["id"])
+        except Exception as exc:
+            QMessageBox.warning(self, "删除失败", str(exc))
+            return
+        self._refresh_calibration_packages()
 
     # ------------------------------------------------------------------
     # API Profile
@@ -522,6 +675,8 @@ class SettingsPage(QWidget):
             self.vision_key.setEchoMode(QLineEdit.EchoMode.Password)
         if self.btn_show_key:
             self.btn_show_key.setChecked(False)
+        # 校准包版本列表随进入设置页自动加载
+        self._refresh_calibration_packages()
         self._updating = False
         self.dirty = False
         self.dirtyChanged.emit(False)
