@@ -642,7 +642,9 @@ class CalculationPage(QWidget):
 
         9 个业务字段各占等宽纵向列；标题严格左对齐；所有列预留相同高度的状态行
         （普通字段留空，标价利润/活动后利润显示绿色补贴提示）。不使用分组框与竖向分隔线。
-        只移动既有控件，不改任何计算逻辑与算法。
+        阶段2：在 核价成本区→标价区、标价区→活动区 之间保留两个轻量组间空隙列
+        （6px 无边框 QFrame），板块内部视觉节奏不变。只移动既有控件，
+        不改任何计算逻辑与算法。
         """
         f = self._root.findChild
         profit_grid = f(QGridLayout, "profitFieldsGrid")
@@ -702,8 +704,8 @@ class CalculationPage(QWidget):
         if status_height <= 0:
             status_height = 16
 
-        # 为没有状态行的列（c0,c1,c2,c3,c4,c6,c7）在 row 0 添加空白占位
-        empty_cols = [0, 1, 2, 3, 4, 6, 7]
+        # 为没有状态行的列（c0,c1,c3,c4,c7,c8,c9；c2/c6 为组间空隙列）在 row 0 添加空白占位
+        empty_cols = [0, 1, 3, 4, 7, 8, 9]
         for col in empty_cols:
             existing = profit_grid.itemAtPosition(0, col)
             if existing is not None:
@@ -721,9 +723,10 @@ class CalculationPage(QWidget):
                     stack.addWidget(w)
                     profit_grid.addLayout(stack, 0, col)
 
-        # ---- 5. 统一列宽 ----
-        for col in range(9):
-            profit_grid.setColumnMinimumWidth(col, 136)
+        # ---- 5. 统一列宽（组间空隙列保持 6px 轻量间隔）----
+        group_gap_cols = {2, 6}
+        for col in range(11):
+            profit_grid.setColumnMinimumWidth(col, 6 if col in group_gap_cols else 136)
             profit_grid.setColumnStretch(col, 0)
 
         # ---- 6. profitFieldsHost 自适应宽度 ----

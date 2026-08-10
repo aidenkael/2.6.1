@@ -34,12 +34,14 @@ from profit_accounting_26.engines.profit import (
 DRIVER_PROFIT_RATE = "profit_rate"
 DRIVER_NO_ACTIVITY_PRICE = "no_activity_price"
 DRIVER_NO_ACTIVITY_PROFIT = "no_activity_profit"
+DRIVER_NO_ACTIVITY_PROFIT_RATE = "no_activity_profit_rate"
 DRIVER_ACTIVITY_PROFIT = "activity_profit"
 
 _VALID_DRIVERS = (
     DRIVER_PROFIT_RATE,
     DRIVER_NO_ACTIVITY_PRICE,
     DRIVER_NO_ACTIVITY_PROFIT,
+    DRIVER_NO_ACTIVITY_PROFIT_RATE,
     DRIVER_ACTIVITY_PROFIT,
 )
 
@@ -164,9 +166,10 @@ class CalculationBinder(QObject):
         # 利润结论
         self.lbl_conclusion: QLabel = f(QLabel, "lblProfitConclusion")
 
-        # 标价利率（正式写入 main_window.ui，不再动态注入）
+        # 标价利率（正式写入 main_window.ui，可编辑百分比输入）
         self.lbl_list_price_rate_title: QLabel = f(QLabel, "lblListPriceProfitRateTitle")
-        self.txt_list_price_rate: QLabel = f(QLabel, "txtListPriceProfitRate")
+        self.txt_list_price_rate: QDoubleSpinBox = f(QDoubleSpinBox, "txtListPriceProfitRate")
+        self.unit_list_price_rate: QLabel = f(QLabel, "unit_txtListPriceProfitRate")
 
     def _setup_frozen_states(self) -> None:
         """设置冻结字段为只读。
@@ -207,6 +210,7 @@ class CalculationBinder(QObject):
             (self.txt_act_price_usd, 0.0, 1_000_000.0),
             (self.txt_act_price_rmb, 0.0, 10_000_000.0),
             (self.spin_profit_rate, -10_000.0, 10_000.0),
+            (self.txt_list_price_rate, -10_000.0, 10_000.0),
             (self.spin_reserve, 0.0, 99.0),
         ]
         for widget, lo, hi in range_specs:
@@ -220,6 +224,7 @@ class CalculationBinder(QObject):
             self.txt_act_profit_rmb,
             self.txt_act_profit_usd,
             self.spin_profit_rate,
+            self.txt_list_price_rate,
         ]
         for widget in profit_widgets:
             if widget:
@@ -235,6 +240,7 @@ class CalculationBinder(QObject):
             (self.txt_shein_usd, self._on_shein_quote_changed),
             (self.txt_cost_rmb, self._on_calc_cost_changed),
             (self.spin_profit_rate, self._on_profit_rate_changed),
+            (self.txt_list_price_rate, self._on_list_price_rate_changed),
             (self.txt_na_price_usd, self._on_na_price_changed),
             (self.txt_na_profit_rmb, self._on_na_profit_changed),
             (self.spin_reserve, self._on_reserve_changed),
@@ -351,6 +357,7 @@ class CalculationBinder(QObject):
                 self.txt_act_price_rmb,
                 self.txt_act_profit_rmb,
                 self.txt_act_profit_usd,
+                self.txt_list_price_rate,
             ):
                 if widget:
                     widget.setValue(0.0)
@@ -455,13 +462,12 @@ class CalculationBinder(QObject):
         self._shein_quote_usd = shein_usd
         self._set_spin(self.txt_shein_rmb, shein_usd * rate if rate > 0 else 0.0)
         self._update_shein_comparison_from_values()
-        # 标价利率：快照模式使用保存时的标价利润与保存时成本
+        # 标价利率：快照模式使用保存时的标价利润与保存时成本（派生显示，
+        # 不退出快照模式；成本为 0 时安全显示 0，禁止异常）。
         if self.txt_list_price_rate is not None:
             na_profit_snap = self.txt_na_profit_rmb.value() if self.txt_na_profit_rmb else 0.0
-            if cost > 0:
-                self.txt_list_price_rate.setText(f"{na_profit_snap / cost * 100.0:.2f}%")
-            else:
-                self.txt_list_price_rate.setText("--")
+            rate_value = (na_profit_snap / cost * 100.0) if cost > 0 else 0.0
+            self._set_spin(self.txt_list_price_rate, rate_value)
         self._update_snapshot_status_label()
 
     def _do_refresh(self) -> None:
@@ -496,6 +502,20 @@ class CalculationBinder(QObject):
             na_price = self.txt_na_price_usd.value()
         elif driver == DRIVER_NO_ACTIVITY_PROFIT and self.txt_na_profit_rmb:
             target_na_profit = self.txt_na_profit_rmb.value()
+            try:
+                na_price = sale_price_for_scenario_target_profit(
+                    total_cost_rmb=cost,
+                    target_profit_rmb=target_na_profit,
+                    exchange_rate=rate,
+                    rules=rules,
+                    scenario="no_activity",
+                )
+            except ValueError:
+                na_price = 0.0
+        elif driver == DRIVER_NO_ACTIVITY_PROFIT_RATE and self.txt_list_price_rate:
+            # 标价利率 = 标价利润 ÷ 计算总成本 × 100%；
+            # 目标标价利润 = 计算总成本 × 标价利率 / 100，再复用单场景 solver 反推标价。
+            target_na_profit = cost * self.txt_list_price_rate.value() / 100.0
             try:
                 na_price = sale_price_for_scenario_target_profit(
                     total_cost_rmb=cost,
@@ -567,14 +587,12 @@ class CalculationBinder(QObject):
         # SHEIN 核价比较
         self._update_shein_comparison(na)
 
-        # 标价利率 = 标价利润 RMB ÷ 计算总成本 RMB × 100%（正式写入 .ui，不再动态注入）
-        if self.txt_list_price_rate is not None:
+        # 标价利率 = 标价利润 RMB ÷ 计算总成本 RMB × 100%。
+        # 只有标价利率自身作为 driver 时保持用户输入，其余 driver 派生显示。
+        if driver != DRIVER_NO_ACTIVITY_PROFIT_RATE and self.txt_list_price_rate is not None:
             na_profit = na.profit_rmb if na else 0.0
-            if cost > 0:
-                list_price_rate = na_profit / cost * 100.0
-                self.txt_list_price_rate.setText(f"{list_price_rate:.2f}%")
-            else:
-                self.txt_list_price_rate.setText("--")
+            list_price_rate = (na_profit / cost * 100.0) if cost > 0 else 0.0
+            self._set_spin(self.txt_list_price_rate, list_price_rate)
 
         # 快照状态提示（在核价比较之后，合并 tooltip）
         self._update_snapshot_status_label()
@@ -721,6 +739,12 @@ class CalculationBinder(QObject):
     def _on_profit_rate_changed(self, _value: float) -> None:
         self._exit_snapshot_mode()
         self._profit_driver = DRIVER_PROFIT_RATE
+        self._refresh_all()
+
+    def _on_list_price_rate_changed(self, _value: float) -> None:
+        """标价利率编辑：退出快照模式，标价利率成为当前 driver。"""
+        self._exit_snapshot_mode()
+        self._profit_driver = DRIVER_NO_ACTIVITY_PROFIT_RATE
         self._refresh_all()
 
     def _on_na_price_changed(self, _value: float) -> None:
@@ -1044,6 +1068,7 @@ class CalculationBinder(QObject):
             self.txt_shein_usd,
             self.txt_cost_rmb,
             self.spin_profit_rate,
+            self.txt_list_price_rate,
             self.txt_na_price_usd,
             self.txt_na_profit_rmb,
             self.spin_reserve,

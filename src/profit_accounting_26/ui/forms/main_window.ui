@@ -4856,7 +4856,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </property>
                         </widget>
                        </item>
-                       <item row="0" column="2">
+                       <item row="0" column="9">
                         <widget class="QLabel" name="lblProfitRate">
                          <property name="text">
                           <string>利润率（活动后）</string>
@@ -4912,21 +4912,21 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="0" column="6">
+                       <item row="0" column="7">
                         <widget class="QLabel" name="lblPromotionReserve">
                          <property name="text">
                           <string>活动预留</string>
                          </property>
                         </widget>
                        </item>
-                       <item row="0" column="7">
+                       <item row="0" column="8">
                         <widget class="QLabel" name="lblActivityPrice">
                          <property name="text">
                           <string>活动后售价</string>
                          </property>
                         </widget>
                        </item>
-                       <item row="0" column="8">
+                       <item row="0" column="10">
                         <layout class="QHBoxLayout" name="layoutActivityProfitTitle">
                          <property name="spacing">
                           <number>5</number>
@@ -5364,7 +5364,32 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="1" column="2">
+                       <item row="0" column="2" rowspan="3">
+                        <widget class="QFrame" name="profitGroupSpacer1">
+                         <property name="minimumSize">
+                          <size>
+                           <width>6</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                         <property name="maximumSize">
+                          <size>
+                           <width>6</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                         <property name="sizePolicy">
+                          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                           <horstretch>0</horstretch>
+                           <verstretch>0</verstretch>
+                          </sizepolicy>
+                         </property>
+                         <property name="frameShape">
+                          <enum>QFrame::Shape::NoFrame</enum>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="1" column="9">
                         <layout class="QHBoxLayout" name="layout_spinProfitRate">
                          <property name="spacing">
                           <number>4</number>
@@ -5859,7 +5884,32 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="1" column="6">
+                       <item row="0" column="6" rowspan="3">
+                        <widget class="QFrame" name="profitGroupSpacer2">
+                         <property name="minimumSize">
+                          <size>
+                           <width>6</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                         <property name="maximumSize">
+                          <size>
+                           <width>6</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                         <property name="sizePolicy">
+                          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                           <horstretch>0</horstretch>
+                           <verstretch>0</verstretch>
+                          </sizepolicy>
+                         </property>
+                         <property name="frameShape">
+                          <enum>QFrame::Shape::NoFrame</enum>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="1" column="7">
                         <layout class="QHBoxLayout" name="layout_spinPromotionReserve">
                          <property name="spacing">
                           <number>4</number>
@@ -5958,7 +6008,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="1" column="7">
+                       <item row="1" column="8">
                         <layout class="QHBoxLayout" name="layout_txtActivityPriceRmb">
                          <property name="spacing">
                           <number>4</number>
@@ -6057,7 +6107,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="2" column="7">
+                       <item row="2" column="8">
                         <layout class="QHBoxLayout" name="layout_txtActivityPriceUsd">
                          <property name="spacing">
                           <number>4</number>
@@ -6156,7 +6206,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="1" column="8">
+                       <item row="1" column="10">
                         <layout class="QHBoxLayout" name="layout_txtActivityProfitRmb">
                          <property name="spacing">
                           <number>4</number>
@@ -6258,7 +6308,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <item row="2" column="8">
+                       <item row="2" column="10">
                         <layout class="QHBoxLayout" name="layout_txtActivityProfitUsd">
                          <property name="spacing">
                           <number>4</number>
@@ -6357,52 +6407,108 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          </item>
                         </layout>
                        </item>
-                       <property name="columnMinimumWidth">
-                        <string>140,140,140,140,140,140,140,140</string>
-                       </property>
                       <item row="0" column="4">
                        <widget class="QLabel" name="lblListPriceProfitRateTitle">
                         <property name="text">
                          <string>标价利率</string>
                         </property>
                         <property name="toolTip">
-                         <string>标价利润RMB ÷ 计算总成本RMB × 100%；冻结只读</string>
+                         <string>标价利润RMB ÷ 计算总成本RMB × 100%；编辑后按标价利率反推标价。</string>
                         </property>
                        </widget>
                       </item>
 <item row="1" column="4">
-                       <widget class="QLabel" name="txtListPriceProfitRate">
-                        <property name="minimumSize">
-                         <size>
-                          <width>96</width>
-                          <height>36</height>
-                         </size>
+                       <layout class="QHBoxLayout" name="layout_txtListPriceProfitRate">
+                        <property name="spacing">
+                         <number>4</number>
                         </property>
-                        <property name="maximumSize">
-                         <size>
-                          <width>96</width>
-                          <height>36</height>
-                         </size>
+                        <property name="leftMargin">
+                         <number>0</number>
                         </property>
-                        <property name="sizePolicy">
-                         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-                          <horstretch>0</horstretch>
-                          <verstretch>0</verstretch>
-                         </sizepolicy>
+                        <property name="topMargin">
+                         <number>0</number>
                         </property>
-                        <property name="text">
-                         <string>--</string>
+                        <property name="rightMargin">
+                         <number>0</number>
                         </property>
-                        <property name="alignment">
-                         <set>Qt::AlignmentFlag::AlignCenter</set>
+                        <property name="bottomMargin">
+                         <number>0</number>
                         </property>
-                        <property name="toolTip">
-                         <string>标价利润RMB ÷ 计算总成本RMB × 100%；只读</string>
-                        </property>
-                        <property name="preview" stdset="0">
-                         <bool>true</bool>
-                        </property>
-                       </widget>
+                        <item>
+                         <widget class="QDoubleSpinBox" name="txtListPriceProfitRate">
+                          <property name="minimumSize">
+                           <size>
+                            <width>96</width>
+                            <height>36</height>
+                           </size>
+                          </property>
+                          <property name="toolTip">
+                           <string>标价利润RMB ÷ 计算总成本RMB × 100%；编辑后按标价利率反推SHEIN标价。</string>
+                          </property>
+                          <property name="buttonSymbols">
+                           <enum>QAbstractSpinBox::NoButtons</enum>
+                          </property>
+                          <property name="decimals">
+                           <number>2</number>
+                          </property>
+                          <property name="minimum">
+                           <double>-999999.000000000000000</double>
+                          </property>
+                          <property name="maximum">
+                           <double>999999.000000000000000</double>
+                          </property>
+                          <property name="singleStep">
+                           <double>1.000000000000000</double>
+                          </property>
+                          <property name="value">
+                           <double>0.000000000000000</double>
+                          </property>
+                          <property name="maximumSize">
+                           <size>
+                            <width>96</width>
+                            <height>36</height>
+                           </size>
+                          </property>
+                          <property name="sizePolicy">
+                           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                            <horstretch>0</horstretch>
+                            <verstretch>0</verstretch>
+                           </sizepolicy>
+                          </property>
+                         </widget>
+                        </item>
+                        <item>
+                         <widget class="QLabel" name="unit_txtListPriceProfitRate">
+                          <property name="minimumSize">
+                           <size>
+                            <width>32</width>
+                            <height>36</height>
+                           </size>
+                          </property>
+                          <property name="text">
+                           <string>%</string>
+                          </property>
+                          <property name="alignment">
+                           <set>Qt::AlignmentFlag::AlignCenter</set>
+                          </property>
+                          <property name="unitLabel" stdset="0">
+                           <bool>true</bool>
+                          </property>
+                          <property name="maximumSize">
+                           <size>
+                            <width>32</width>
+                            <height>36</height>
+                           </size>
+                          </property>
+                          <property name="sizePolicy">
+                           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                            <horstretch>0</horstretch>
+                            <verstretch>0</verstretch>
+                           </sizepolicy>
+                          </property>
+                         </widget>
+                        </item>
+                       </layout>
                       </item>
 </layout>
                      </item>

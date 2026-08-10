@@ -106,7 +106,7 @@ def build_profit_scenarios(
     """构建 ``profit_scenarios`` 字段。
 
     ``driver`` 取值：``profit_rate`` / ``no_activity_price`` /
-    ``no_activity_profit`` / ``activity_profit``。
+    ``no_activity_profit`` / ``no_activity_profit_rate`` / ``activity_profit``。
 
     记录快照附加字段（验收修正轮新增）：
     - ``exchange_rate``：保存时汇率，重开时用它而非当前设置；
