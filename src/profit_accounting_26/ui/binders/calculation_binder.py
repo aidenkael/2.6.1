@@ -51,6 +51,9 @@ _COLOR_NORMAL = "#607089"
 _COLOR_TRIGGERED_INCOME = "#168A58"  # 绿色：增加收入
 _COLOR_TRIGGERED_COST = "#C77600"  # 警示色：增加成本
 
+DEFAULT_RESERVE_PERCENT = 15.0
+DEFAULT_ACTIVITY_PROFIT_RATE_PERCENT = 25.0
+
 
 class CalculationBinder(QObject):
     """利润区双场景 Binder。
@@ -69,16 +72,14 @@ class CalculationBinder(QObject):
 
         # 利润区状态
         self._profit_updating = False
-        self._profit_driver: str = DRIVER_NO_ACTIVITY_PRICE
+        self._profit_driver: str = DRIVER_PROFIT_RATE
         self._calculation_total_cost_rmb: float = 0.0
         self._exchange_rate: float = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
         self._shein_quote_usd: float = 0.0
-        self._reserve_percent: float = 0.0
+        self._reserve_percent: float = DEFAULT_RESERVE_PERCENT
         self._no_activity_price_usd: float = 0.0
         self._rules: tuple[AdjustmentRule, ...] = ()
         self._selected_rule_id: str = ""
-        # 活动预留刚变化标志：刷新时保持无活动售价不变、不反推
-        self._reserve_just_changed = False
         # 记录快照加载标志：load_from_record 后置位，供页面判断历史/当前推算
         self._snapshot_loaded = False
         self._snapshot_legacy = False
@@ -112,11 +113,14 @@ class CalculationBinder(QObject):
     def _sync_initial_values(self) -> None:
         """从 .ui 控件读取初始值，同步到内部状态。
 
-        .ui 文件可能设置了非零默认值（如 spinPromotionReserve=10），
-        但 valueChanged 不会因 setValue(相同值) 触发，所以必须主动同步。
+        新建记录的业务默认值固定为活动预留 15%、活动后利润率 25%。
+        此方法在信号连接前执行，不会被误判为用户编辑。
         """
         if self.spin_reserve:
-            self._reserve_percent = self.spin_reserve.value()
+            self.spin_reserve.setValue(DEFAULT_RESERVE_PERCENT)
+            self._reserve_percent = DEFAULT_RESERVE_PERCENT
+        if self.spin_profit_rate:
+            self.spin_profit_rate.setValue(DEFAULT_ACTIVITY_PROFIT_RATE_PERCENT)
         if self.txt_shein_usd:
             self._shein_quote_usd = self.txt_shein_usd.value()
         if self.txt_na_price_usd:
@@ -258,6 +262,7 @@ class CalculationBinder(QObject):
             self._live_exchange_rate = rate
             return
         self._exchange_rate = rate
+        self._profit_driver = DRIVER_PROFIT_RATE
         self._refresh_all()
 
     def set_calculation_cost(self, cost_rmb: float) -> None:
@@ -280,6 +285,7 @@ class CalculationBinder(QObject):
             # 加载完成后系统成本变化 → 退出快照，恢复当前设置后用新成本重算
             self._exit_snapshot_mode()
         self._calculation_total_cost_rmb = cost_rmb
+        self._profit_driver = DRIVER_PROFIT_RATE
         self._refresh_all()
 
     def set_selected_rule_id(self, rule_id: str) -> None:
@@ -297,6 +303,7 @@ class CalculationBinder(QObject):
             return
         self._rules = rules
         self._refresh_rule_combo()
+        self._profit_driver = DRIVER_PROFIT_RATE
         self._refresh_all()
 
     @property
@@ -318,14 +325,14 @@ class CalculationBinder(QObject):
         self._shein_quote_usd = float(value)
 
     def reset(self) -> None:
-        """清空并新建时复位利润区（driver 回到无活动售价，全部数值归零）。"""
+        """清空并新建时复位利润区，并恢复 15% / 25% 业务默认值。"""
         self._snapshot_display_mode = False
         self._snapshot_loaded = False
         self._snapshot_legacy = False
         self._legacy_exited = False
         self._loading_record = False
         self._legacy_snapshot = None
-        self._profit_driver = DRIVER_NO_ACTIVITY_PRICE
+        self._profit_driver = DRIVER_PROFIT_RATE
         self._calculation_total_cost_rmb = 0.0
         self._no_activity_price_usd = 0.0
         self._shein_quote_usd = 0.0
@@ -336,7 +343,6 @@ class CalculationBinder(QObject):
                 self.txt_shein_rmb,
                 self.txt_cost_rmb,
                 self.txt_cost_usd,
-                self.spin_profit_rate,
                 self.txt_na_price_usd,
                 self.txt_na_price_rmb,
                 self.txt_na_profit_rmb,
@@ -345,11 +351,14 @@ class CalculationBinder(QObject):
                 self.txt_act_price_rmb,
                 self.txt_act_profit_rmb,
                 self.txt_act_profit_usd,
-                self.spin_reserve,
             ):
                 if widget:
                     widget.setValue(0.0)
-            self._reserve_percent = 0.0
+            if self.spin_reserve:
+                self.spin_reserve.setValue(DEFAULT_RESERVE_PERCENT)
+            if self.spin_profit_rate:
+                self.spin_profit_rate.setValue(DEFAULT_ACTIVITY_PROFIT_RATE_PERCENT)
+            self._reserve_percent = DEFAULT_RESERVE_PERCENT
         finally:
             self._profit_updating = False
         self._refresh_all()
@@ -401,6 +410,7 @@ class CalculationBinder(QObject):
     def _on_rule_changed(self, _index: int) -> None:
         self._exit_snapshot_mode()
         self._selected_rule_id = self.cmb_rule.currentData() if self.cmb_rule else ""
+        self._profit_driver = DRIVER_PROFIT_RATE
         self._refresh_all()
         self.selectedRuleChanged.emit(str(self._selected_rule_id))
 
@@ -414,8 +424,6 @@ class CalculationBinder(QObject):
         防递归：如果 _profit_updating 为 True，直接返回。
         """
         if self._profit_updating:
-            # 程序化更新期间不处理“活动预留刚变化”标记，丢弃以免泄漏到下一次用户刷新
-            self._reserve_just_changed = False
             return
         if self._snapshot_display_mode:
             # 记录快照显示模式：保持保存时/恢复的界面结果，只更新冻结换算显示，
@@ -426,7 +434,6 @@ class CalculationBinder(QObject):
                 self._do_display_only_refresh()
             finally:
                 self._profit_updating = False
-                self._reserve_just_changed = False
             self.profitChanged.emit()
             return
         self._profit_updating = True
@@ -434,7 +441,6 @@ class CalculationBinder(QObject):
             self._do_refresh()
         finally:
             self._profit_updating = False
-            self._reserve_just_changed = False
         self.profitChanged.emit()
 
     def _do_display_only_refresh(self) -> None:
@@ -466,29 +472,21 @@ class CalculationBinder(QObject):
         reserve = self._reserve_percent
         na_price = self._no_activity_price_usd
 
-        # 从 UI 读取当前 driver 的目标值。
-        # 例外：活动预留刚变化时，无条件保持修改前的无活动售价 USD 不变，
-        # 跳过所有按 driver 反推售价的分支（不保持原利润率/原活动利润），
-        # 只重算活动后售价/活动后利润/利润率/两规则状态。
-        if self._reserve_just_changed:
-            na_price = max(0.0, na_price)
-        elif driver == DRIVER_PROFIT_RATE and self.spin_profit_rate:
+        # 从 UI 读取当前 driver 的目标值。上游自动变化和 reserve 编辑会先
+        # 把 driver 固定为当前活动后利润率；只有用户显式编辑售价/利润字段
+        # 才进入对应的反推分支。
+        if driver == DRIVER_PROFIT_RATE and self.spin_profit_rate:
             target_rate = self.spin_profit_rate.value() / 100.0
             if cost > 0:
                 target_act_profit = cost * target_rate
-                # 反推活动后售价，再反推无活动售价
                 try:
-                    act_price = sale_price_for_scenario_target_profit(
+                    na_price = sale_price_for_dual_activity_target(
                         total_cost_rmb=cost,
-                        target_profit_rmb=target_act_profit,
+                        target_activity_profit_rmb=target_act_profit,
+                        reserve_percent=reserve,
                         exchange_rate=rate,
                         rules=rules,
-                        scenario="activity",
                     )
-                    if reserve < 100:
-                        na_price = act_price / (1 - reserve / 100.0)
-                    else:
-                        na_price = 0.0
                 except ValueError:
                     na_price = 0.0
             else:
@@ -511,17 +509,13 @@ class CalculationBinder(QObject):
         elif driver == DRIVER_ACTIVITY_PROFIT and self.txt_act_profit_rmb:
             target_act_profit = self.txt_act_profit_rmb.value()
             try:
-                act_price = sale_price_for_scenario_target_profit(
+                na_price = sale_price_for_dual_activity_target(
                     total_cost_rmb=cost,
-                    target_profit_rmb=target_act_profit,
+                    target_activity_profit_rmb=target_act_profit,
+                    reserve_percent=reserve,
                     exchange_rate=rate,
                     rules=rules,
-                    scenario="activity",
                 )
-                if reserve < 100:
-                    na_price = act_price / (1 - reserve / 100.0)
-                else:
-                    na_price = 0.0
             except ValueError:
                 na_price = 0.0
 
@@ -557,9 +551,8 @@ class CalculationBinder(QObject):
         self._set_spin(self.txt_cost_rmb, cost)
         self._set_spin(self.txt_cost_usd, cost / rate if rate > 0 and cost > 0 else 0.0)
 
-        # 利润率（只在非 profit_rate driver 时更新，避免覆盖用户输入；
-        # 例外：活动预留刚变化时，即使 driver 是 profit_rate 也必须重算利润率显示）
-        if (driver != DRIVER_PROFIT_RATE or self._reserve_just_changed) and self.spin_profit_rate:
+        # 利润率只在显式售价/利润 driver 下反推；目标利润率 driver 保持用户输入。
+        if driver != DRIVER_PROFIT_RATE and self.spin_profit_rate:
             rate_pct = (profit_rate * 100.0) if profit_rate is not None else 0.0
             self._set_spin(self.spin_profit_rate, rate_pct)
 
@@ -722,6 +715,7 @@ class CalculationBinder(QObject):
         # 用户手动成本优先于快照期间捕获的系统成本
         if self.txt_cost_rmb:
             self._calculation_total_cost_rmb = self.txt_cost_rmb.value()
+        self._profit_driver = DRIVER_PROFIT_RATE
         self._refresh_all()
 
     def _on_profit_rate_changed(self, _value: float) -> None:
@@ -742,17 +736,11 @@ class CalculationBinder(QObject):
         self._refresh_all()
 
     def _on_reserve_changed(self, _value: float) -> None:
-        """活动预留变化：无活动售价保持不变，活动后售价/利润/利润率重算。
-
-        无论当前 driver 是什么（profit_rate / no_activity_price /
-        no_activity_profit / activity_profit），都不得为保持原利润率或原活动
-        利润而反推改写无活动售价 USD；只重算活动后售价、活动后利润、利润率
-        与两规则状态。driver 保持当前状态，不切换。
-        """
+        """活动预留变化：保持当前活动后利润率目标，重算其余依赖值。"""
         if self.spin_reserve:
             self._reserve_percent = self.spin_reserve.value()
         self._exit_snapshot_mode()
-        self._reserve_just_changed = True
+        self._profit_driver = DRIVER_PROFIT_RATE
         self._refresh_all()
 
     def _on_act_profit_changed(self, _value: float) -> None:

@@ -86,7 +86,7 @@ def temp_context(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 修正 1：活动预留联动（4 种 driver 均保持无活动售价不变）
+# 修正 1：活动预留联动（保持活动后利润率，重算售价与利润）
 # ---------------------------------------------------------------------------
 
 
@@ -96,14 +96,11 @@ def test_reserve_keeps_na_price_driver_no_activity_price(binder):
     binder.txt_na_price_usd.setValue(30.0)
     assert binder.txt_na_price_usd.value() == pytest.approx(30.0)
 
+    rate_before = binder.spin_profit_rate.value()
     binder.spin_reserve.setValue(20.0)
 
-    assert binder.txt_na_price_usd.value() == pytest.approx(30.0)
-    assert binder._no_activity_price_usd == pytest.approx(30.0)
-    assert binder.txt_act_price_usd.value() == pytest.approx(24.0)
-    # 活动预留变化后利润率被重算
-    expected_rate = (24.0 * RATE - 100.0) / 100.0 * 100.0
-    assert binder.spin_profit_rate.value() == pytest.approx(expected_rate, abs=0.02)
+    assert binder.spin_profit_rate.value() == pytest.approx(rate_before, abs=0.02)
+    assert binder._no_activity_price_usd != pytest.approx(30.0)
 
 
 def _setup_profit_rate_driver(binder):
@@ -119,8 +116,7 @@ def _setup_profit_rate_driver(binder):
     [DRIVER_PROFIT_RATE, DRIVER_NO_ACTIVITY_PROFIT, DRIVER_ACTIVITY_PROFIT],
 )
 def test_reserve_keeps_na_price_other_drivers(binder, driver_setup):
-    """profit_rate / no_activity_profit / activity_profit 三种 driver 下，
-    修改活动预留不得反推改写无活动售价。"""
+    """无论之前的显式 driver 是什么，修改 reserve 都固定当前利润率目标。"""
     binder.set_calculation_cost(100.0)
     # 先在 no_activity_price driver 下建立 30 USD 基准
     binder._profit_driver = DRIVER_NO_ACTIVITY_PRICE
@@ -138,13 +134,12 @@ def test_reserve_keeps_na_price_other_drivers(binder, driver_setup):
         binder._profit_driver = DRIVER_ACTIVITY_PROFIT
         binder.txt_act_profit_rmb.setValue(binder.txt_act_profit_rmb.value())
 
+    rate_before = binder.spin_profit_rate.value()
     binder.spin_reserve.setValue(25.0)
 
-    # 无活动售价完全不变
-    assert binder._no_activity_price_usd == pytest.approx(30.0)
-    assert binder.txt_na_price_usd.value() == pytest.approx(30.0)
-    # 活动后售价按新预留重算：30 × 0.75 = 22.5
-    assert binder.txt_act_price_usd.value() == pytest.approx(22.5)
+    assert binder.spin_profit_rate.value() == pytest.approx(rate_before, abs=0.02)
+    assert binder._profit_driver == DRIVER_PROFIT_RATE
+    assert binder._no_activity_price_usd != pytest.approx(30.0)
 
 
 # ---------------------------------------------------------------------------
@@ -183,10 +178,10 @@ class TestMultiRuleRealBinderPath:
         rules = (_income_rule("r1", "补贴A", 29.0, 2.99), _income_rule("r2", "补贴B", 29.0, 1.00))
         binder.set_rules(rules)
         binder.set_calculation_cost(100.0)
-        binder._profit_driver = DRIVER_NO_ACTIVITY_PRICE
-        binder.txt_na_price_usd.setValue(30.0)
         binder.spin_reserve.setValue(10.0)
         binder.cmb_rule.setCurrentIndex(binder.cmb_role_find(ALL_ENABLED_RULES_ID))
+        binder._profit_driver = DRIVER_NO_ACTIVITY_PRICE
+        binder.txt_na_price_usd.setValue(30.0)
         binder._refresh_all()
 
         # 无活动 30 >= 29 → 两条都未触发；活动 27 < 29 → 两条都触发
@@ -215,12 +210,12 @@ def _fill_and_save(page, monkeypatch, rule_id=ALL_ENABLED_RULES_ID, na_price=30.
     page.recalculate()
     assert page.current_quote is not None
     b = page.profit_binder
-    b._profit_driver = DRIVER_NO_ACTIVITY_PRICE
-    b.txt_na_price_usd.setValue(na_price)
     b.spin_reserve.setValue(10.0)
     idx = b.cmb_role_find(rule_id)
     assert idx >= 0
     b.cmb_rule.setCurrentIndex(idx)
+    b._profit_driver = DRIVER_NO_ACTIVITY_PRICE
+    b.txt_na_price_usd.setValue(na_price)
     b._refresh_all()
     page.save_record()
     assert page.record_id
@@ -657,9 +652,9 @@ class TestLegacyRecordSaveLogic:
             assert b._snapshot_display_mode is False
             snap = b.export_profit_scenarios()
             assert snap["legacy_compatible"] is False
-            act = snap.get("activity", {})
-            assert act.get("sale_price_usd", 0) > 0.0
-            assert act.get("profit_rmb", 0) != 0.0
+            assert snap["reserve_percent"] == pytest.approx(10.0)
+            # 旧记录未保存活动后利润率时不捏造一个目标值。
+            assert b.spin_profit_rate.value() == pytest.approx(0.0)
         finally:
             page.deleteLater()
             qapp.processEvents()

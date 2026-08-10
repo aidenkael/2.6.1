@@ -24,6 +24,7 @@ def test_confirmed_facts_are_serialized_and_win_over_ai_observation():
     session = CalculationSession()
     session.confirm_value("weight_g", 110)
     session.confirm_value("length_cm", 55)
+    session.confirm_value("product_name", "用户确认名称")
     facts = session.confirmed_facts()
     assert facts["weight_g"]["source"] == "user_confirmed"
     assert facts["weight_g"]["value"] == 110
@@ -31,8 +32,10 @@ def test_confirmed_facts_are_serialized_and_win_over_ai_observation():
     observation = session.observation
     observation.weight_g = 100
     observation.length_cm = 50
+    observation.product_name = "AI 新名称"
     conflicts = session.protect_confirmed_values(observation)
     assert observation.weight_g == 110
     assert observation.length_cm == 55
     assert observation.weight_scope == "net_weight"
-    assert set(conflicts) == {"weight_g", "length_cm"}
+    assert observation.product_name == "用户确认名称"
+    assert set(conflicts) == {"weight_g", "length_cm", "product_name"}

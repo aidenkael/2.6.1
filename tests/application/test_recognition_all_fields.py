@@ -5,10 +5,13 @@ from profit_accounting_26.application.recognition_service import RecognitionServ
 
 def test_prompt_scans_every_image_without_slot_restrictions():
     prompt = RecognitionService._prompt(2)
-    assert "scan every image" in prompt
-    assert "do not restrict by image slot" in prompt
-    assert "domestic shipping" in prompt
-    assert "confirmed_facts supplied in context are authoritative facts" in prompt
+    assert "逐张查看全部图片" in prompt
+    assert "图片顺序和图片框类型不代表字段职责" in prompt
+    assert "页面运费" in prompt
+    assert "confirmed_facts 是用户已经确认的数据，优先级最高" in prompt
+    assert "体积重" in prompt and "利润率" in prompt
+    assert "rigidity" not in prompt
+    assert "normal" not in prompt
 
 
 def test_parse_keeps_evidence_money_types_and_normalized_category():

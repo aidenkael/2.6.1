@@ -7,12 +7,12 @@
 - 图片框（3–6 个）与货代报价卡片为运行时动态生成，分别挂到
   ``imageSlotsLayout`` / ``forwarderCardsLayout``（Designer 预览卡片被清除）；
 - 利润双场景（无活动 / 活动后）委托 ``CalculationBinder`` 的 driver 状态机；
-- AI 识图、局部重估、包装估算、货代报价、记录保存逻辑与旧版完全一致。
+- AI 识图与按修正重估走 V1 轻量合同；物流、利润和记录保存沿用稳定链路。
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any
 
 from PySide6.QtCore import QEvent, QObject, QThread, Qt, QSignalBlocker, Signal, Slot
@@ -35,12 +35,11 @@ from PySide6.QtWidgets import (
 )
 
 from profit_accounting_26.application import AppContext, CalculationService, ImageSession
-from profit_accounting_26.application.api_profile_store import VISUAL_AI
+from profit_accounting_26.application.api_profile_store import LOCAL_REESTIMATE, VISUAL_AI
 from profit_accounting_26.application.calculation_session import CalculationSession
 from profit_accounting_26.application.category_normalizer import normalize_observation
 from profit_accounting_26.application.packaging_presentation import (
     normal_reminder,
-    packaging_method_zh,
     packaging_summary,
     product_summary,
 )
@@ -48,6 +47,7 @@ from profit_accounting_26.application.recognition_service import (
     RecognitionCancellation,
     RecognitionCancelledError,
     RecognitionResponseError,
+    RecognitionService,
     RecognitionUnavailableError,
 )
 from profit_accounting_26.domain.models import (
@@ -202,11 +202,11 @@ class _UserCorrectionEdit(QTextEdit):
     """
 
     EXAMPLE_TEXT = (
-        "这个包可以压扁，肩带可以拆下来，深圳货代纯头程预估26元\n"
-        "这种小商品通常可以缠绕打包，预计袋装即可，义乌货代纯头程预估10元"
+        "在此填写用于重估的修正\n"
+        "例如：这个睡帽可以压缩后发货"
     )
-    MIN_HEIGHT = 104
-    MAX_HEIGHT = 148
+    MIN_HEIGHT = 68
+    MAX_HEIGHT = 88
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -362,7 +362,15 @@ class CalculationPage(QWidget):
         # AI 摘要区
         self.product_summary = _TextAdapter(f(QLineEdit, "txtAiSummary"))
         self.structure_summary = _TextAdapter(f(QLineEdit, "txtPackingState"))
+        self.structure_summary._widget.setReadOnly(True)
+        # 发货判断只在 AI 估算卡正式展示。保留旧 objectName 和绑定，
+        # 仅隐藏顶部重复入口以兼容历史 payload 与现有自动化。
+        packing_state_title = f(QLabel, "lblPackingStateTitle")
+        if packing_state_title is not None:
+            packing_state_title.setVisible(False)
+        self.structure_summary._widget.setVisible(False)
         self.btn_partial_reestimate = f(QPushButton, "btnPartialReestimate")
+        self.btn_partial_reestimate.setText("按修正重估")
         ai_layout = f(QGridLayout, "aiSummaryLayout")
         # 该字段仅保存 AI 材质事实，不再作为摘要卡的隐藏第二行。
         # 保留 parent 以维持现有数据绑定和生命周期。
@@ -392,6 +400,25 @@ class CalculationPage(QWidget):
         self.bare_width = self._dim_spin("spinBareWidthCm")
         self.bare_height = self._dim_spin("spinBareHeightCm")
         self.bare_weight = self._weight_spin("spinBareWeightG")
+        # 裸尺寸/裸重来源标签（小字号，不抢主数据视觉）
+        self.lbl_bare_dim_source = QLabel("\u672a\u8bc6\u522b")
+        self.lbl_bare_dim_source.setObjectName("lblBareDimensionSource")
+        _src_font = self.lbl_bare_dim_source.font()
+        if _src_font.pointSize() > 8:
+            _src_font.setPointSize(_src_font.pointSize() - 1)
+        self.lbl_bare_dim_source.setFont(_src_font)
+        self.lbl_bare_dim_source.setStyleSheet("color:#607089;")
+        self.lbl_bare_weight_source = QLabel("\u672a\u8bc6\u522b")
+        self.lbl_bare_weight_source.setObjectName("lblBareWeightSource")
+        self.lbl_bare_weight_source.setFont(_src_font)
+        self.lbl_bare_weight_source.setStyleSheet("color:#607089;")
+        # 把来源标签插入现有布局尾部
+        _bare_height_layout = f(QHBoxLayout, "layout_spinBareHeightCm")
+        if _bare_height_layout is not None:
+            _bare_height_layout.addWidget(self.lbl_bare_dim_source)
+        _bare_weight_layout = f(QHBoxLayout, "layout_spinBareWeightG")
+        if _bare_weight_layout is not None:
+            _bare_weight_layout.addWidget(self.lbl_bare_weight_source)
         # AI估算（原正常档位置）：第一次 AI 结果，全部只读，不参与正式计算
         self.normal_fields: dict[str, Any] = {
             "name": "AI估算",
@@ -544,16 +571,17 @@ class CalculationPage(QWidget):
                 weight_hbox.addLayout(weight_row)
             grid.addLayout(weight_hbox, 3, 0, 1, 3)
             # 行 4/5：底部区域
-            # AI估算：包装方式标签 + 只读多行框（保持原样）
+            # AI估算：唯一正式展示的 AI 发货判断 + 只读多行框
             # 当前采用：用户修正多行框直接放在包装后重量下一行（无独立“用户修正”小标题）
             #          + 最底部“真实头程（选填）”一行
             if is_ai:
-                bottom_label = QLabel("包装方式")
+                bottom_label = QLabel("AI发货判断")
+                bottom_label.setObjectName("lblAiShipmentJudgment")
                 bottom_label.setFixedHeight(20)
                 grid.addWidget(bottom_label, 4, 0, 1, 3)
                 note_edit = method_widget
                 note_edit.setReadOnly(True)
-                note_edit.setPlaceholderText("AI估算包装方式（第一次 AI 结果，只读）")
+                note_edit.setPlaceholderText("AI发货判断（第一次 AI 结果，只读）")
                 if not isinstance(note_edit, _UserCorrectionEdit):
                     note_edit.setFixedHeight(104)
                 note_edit.setMinimumWidth(90)
@@ -610,41 +638,103 @@ class CalculationPage(QWidget):
         # 标签与金额对齐由静态 main_window.ui 排版完成，旧的重量/计费重/物流总价行已删除
 
     def _apply_round3_ui_polish(self) -> None:
-        """利润区规则状态放字段标题上方（尾程输入已在 main_window.ui 静态独立卡内）。
+        """利润区等宽列 + 严格左对齐 + 统一状态行 + 微调间距。
 
+        9 个业务字段各占等宽纵向列；标题严格左对齐；所有列预留相同高度的状态行
+        （普通字段留空，标价利润/活动后利润显示绿色补贴提示）。不使用分组框与竖向分隔线。
         只移动既有控件，不改任何计算逻辑与算法。
         """
         f = self._root.findChild
-        # 利润区规则状态放字段标题上方；字号用 QFont（binder 用 setStyleSheet 只覆盖颜色）
         profit_grid = f(QGridLayout, "profitFieldsGrid")
-        if profit_grid is not None:
-            for layout_name in ("layoutNoActivityProfitTitle", "layoutActivityProfitTitle"):
-                hbox = f(QHBoxLayout, layout_name)
-                if hbox is None or hbox.count() < 2:
-                    continue
-                index = profit_grid.indexOf(hbox)
-                if index < 0:
-                    continue
-                row, col, row_span, col_span = profit_grid.getItemPosition(index)
-                # 先取出控件再移除空布局：removeItem 会删除无主的子布局对象
-                title_widget = hbox.takeAt(0).widget()
-                status_widget = hbox.takeAt(0).widget()
-                profit_grid.removeItem(hbox)
-                if status_widget is not None:
-                    status_font = status_widget.font()
-                    if status_font.pointSize() > 8:
-                        status_font.setPointSize(status_font.pointSize() - 1)
-                    status_widget.setFont(status_font)
-                stack = QVBoxLayout()
-                stack.setContentsMargins(0, 0, 0, 0)
-                stack.setSpacing(1)
-                if status_widget is not None:
-                    stack.addWidget(status_widget)
-                if title_widget is not None:
-                    stack.addWidget(title_widget)
-                profit_grid.addLayout(stack, row, col, row_span, col_span)
-        # 此结论仅重复利润区标题提示，且在紧凑窗口中占用无效的独立行。
-        # 计算与字段布局完全不依赖它，因此隐藏该显示冗余项。
+        if profit_grid is None:
+            return
+
+        # ---- 1. 间距微调 ----
+        profit_grid.setHorizontalSpacing(10)
+        profit_grid.setVerticalSpacing(6)
+
+        # ---- 2. 两个补贴字段：状态标签上移到标题上方 ----
+        for layout_name in ("layoutNoActivityProfitTitle", "layoutActivityProfitTitle"):
+            hbox = f(QHBoxLayout, layout_name)
+            if hbox is None or hbox.count() < 2:
+                continue
+            index = profit_grid.indexOf(hbox)
+            if index < 0:
+                continue
+            row, col, row_span, col_span = profit_grid.getItemPosition(index)
+            title_widget = hbox.takeAt(0).widget()
+            status_widget = hbox.takeAt(0).widget()
+            profit_grid.removeItem(hbox)
+            if status_widget is not None:
+                status_font = status_widget.font()
+                if status_font.pointSize() > 8:
+                    status_font.setPointSize(status_font.pointSize() - 1)
+                status_widget.setFont(status_font)
+            stack = QVBoxLayout()
+            stack.setContentsMargins(0, 0, 0, 0)
+            stack.setSpacing(1)
+            if status_widget is not None:
+                stack.addWidget(status_widget)
+            if title_widget is not None:
+                stack.addWidget(title_widget)
+            profit_grid.addLayout(stack, row, col, row_span, col_span)
+
+        # ---- 3. 所有标题严格左对齐 ----
+        for label_name in (
+            "lblSheinPrice", "lblProfitCost", "lblProfitRate",
+            "lblNoActivityPrice", "lblListPriceProfitRateTitle",
+            "lblPromotionReserve", "lblActivityPrice",
+        ):
+            label = f(QLabel, label_name)
+            if label is not None:
+                label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        # ---- 4. 为所有列添加等高的状态行占位 ----
+        # 先测量补贴状态标签的实际高度（如果可见）
+        status_height = 0
+        for sname in ("lblNoActivitySubsidyStatus", "lblActivitySubsidyStatus"):
+            sw = f(QLabel, sname)
+            if sw is not None and sw.isVisible():
+                h = sw.sizeHint().height()
+                if h > status_height:
+                    status_height = h
+        # 如果状态标签当前不可见（未触发），用估算高度
+        if status_height <= 0:
+            status_height = 16
+
+        # 为没有状态行的列（c0,c1,c2,c3,c4,c6,c7）在 row 0 添加空白占位
+        empty_cols = [0, 1, 2, 3, 4, 6, 7]
+        for col in empty_cols:
+            existing = profit_grid.itemAtPosition(0, col)
+            if existing is not None:
+                w = existing.widget()
+                if w is not None:
+                    # 已有标题 widget，在其上方插入空白 spacer
+                    profit_grid.removeItem(existing)
+                    spacer = QWidget()
+                    spacer.setFixedHeight(status_height)
+                    spacer.setObjectName(f"profitStatusSpacer_col{col}")
+                    stack = QVBoxLayout()
+                    stack.setContentsMargins(0, 0, 0, 0)
+                    stack.setSpacing(1)
+                    stack.addWidget(spacer)
+                    stack.addWidget(w)
+                    profit_grid.addLayout(stack, 0, col)
+
+        # ---- 5. 统一列宽 ----
+        for col in range(9):
+            profit_grid.setColumnMinimumWidth(col, 136)
+            profit_grid.setColumnStretch(col, 0)
+
+        # ---- 6. profitFieldsHost 自适应宽度 ----
+        profit_host = f(QWidget, "profitFieldsHost")
+        if profit_host is not None:
+            profit_host.setMinimumWidth(0)
+            profit_host.setMaximumWidth(16777215)
+            from PySide6.QtWidgets import QSizePolicy as _QSP
+            profit_host.setSizePolicy(_QSP(_QSP.Policy.Preferred, _QSP.Policy.Preferred))
+
+        # 隐藏冗余结论标签
         profit_conclusion = f(QLabel, "lblProfitConclusion")
         if profit_conclusion is not None:
             profit_conclusion.setVisible(False)
@@ -733,6 +823,9 @@ class CalculationPage(QWidget):
         for key, widget in (("length_cm", self.bare_length), ("width_cm", self.bare_width), ("height_cm", self.bare_height), ("weight_g", self.bare_weight)):
             widget.editingFinished.connect(lambda k=key: self._accept_bare_field(k))
         self.product_summary.textChanged.connect(lambda _text: self._upstream_changed())
+        self.product_summary._widget.editingFinished.connect(
+            lambda: self._accept_text_field("product_name", self.product_summary)
+        )
         self.material_summary.textChanged.connect(lambda _text: self._upstream_changed())
         self.structure_summary.textChanged.connect(lambda _text: self._upstream_changed())
         for combo in (self.rigidity_combo, self.foldability_combo, self.compressibility_combo):
@@ -921,6 +1014,13 @@ class CalculationPage(QWidget):
                 "height_cm": self.bare_height, "weight_g": self.bare_weight,
             }
             self._accept_numeric_field(key, widgets[key])
+            # 用户手动编辑后更新来源标签
+            if key in ("length_cm", "width_cm", "height_cm"):
+                if hasattr(self, "lbl_bare_dim_source"):
+                    self.lbl_bare_dim_source.setText("\u7528\u6237\u786e\u8ba4")
+            elif key == "weight_g":
+                if hasattr(self, "lbl_bare_weight_source"):
+                    self.lbl_bare_weight_source.setText("\u7528\u6237\u786e\u8ba4")
 
     def _accept_numeric_field(self, key: str, widget: Any) -> None:
         if self._updating:
@@ -932,6 +1032,11 @@ class CalculationPage(QWidget):
         else:
             self.session.confirm_value(key, value if value > 0 else None)
         self.recalculate()
+
+    def _accept_text_field(self, key: str, widget: _TextAdapter) -> None:
+        if self._updating:
+            return
+        self.session.confirm_value(key, widget.text().strip() or None)
 
     def _confirmed_facts(self) -> dict[str, dict[str, Any]]:
         facts = self.session.confirmed_facts()
@@ -960,26 +1065,62 @@ class CalculationPage(QWidget):
     def _apply_observation(self, observation: AIObservation) -> None:
         previous_updating = self._updating
         self._updating = True
-        if observation.product_name or observation.product_type:
-            self.product_summary.setText(product_summary(observation))
+        if "product_name" not in self.session.user_overrides:
+            has_product_fact = bool(
+                observation.product_name
+                or observation.product_type
+                or observation.display_product_summary
+            )
+            self.product_summary.setText(product_summary(observation) if has_product_fact else "")
         if observation.material:
             self.material_summary.setText(observation.material)
         self.structure_summary.setText(observation.display_packaging_summary or self._observation_structure_summary(observation))
         self._set_combo_data(self.rigidity_combo, observation.rigidity)
         self._set_combo_data(self.foldability_combo, observation.foldability)
         self._set_combo_data(self.compressibility_combo, observation.compressibility)
-        if observation.product_cost_rmb is not None and "product_cost_rmb" not in self.session.user_overrides:
-            self.product_cost.setValue(observation.product_cost_rmb)
-        if observation.domestic_shipping_rmb is not None and "domestic_shipping_rmb" not in self.session.user_overrides:
-            self.domestic_shipping.setValue(observation.domestic_shipping_rmb)
-        if observation.length_cm is not None and "length_cm" not in self.session.user_overrides:
-            self.bare_length.setValue(observation.length_cm)
-        if observation.width_cm is not None and "width_cm" not in self.session.user_overrides:
-            self.bare_width.setValue(observation.width_cm)
-        if observation.height_cm is not None and "height_cm" not in self.session.user_overrides:
-            self.bare_height.setValue(observation.height_cm)
-        if observation.weight_g is not None and "weight_g" not in self.session.user_overrides:
-            self.bare_weight.setValue(observation.weight_g)
+        # bare_estimate: AI 推测的裸品近似值，仅在 observed 无值时作为回退
+        bare_est = {}
+        if isinstance(observation.raw_payload, dict):
+            raw_be = observation.raw_payload.get("bare_estimate")
+            if isinstance(raw_be, dict):
+                bare_est = raw_be
+        # 优先级：用户确认 > 图片识别(observed) > AI估算(bare_estimate) > 空值
+        dim_source = "\u672a\u8bc6\u522b"
+        weight_source = "\u672a\u8bc6\u522b"
+        observed_widgets = {
+            "product_cost_rmb": (self.product_cost, observation.product_cost_rmb, None),
+            "domestic_shipping_rmb": (self.domestic_shipping, observation.domestic_shipping_rmb, None),
+            "length_cm": (self.bare_length, observation.length_cm, bare_est.get("length_cm")),
+            "width_cm": (self.bare_width, observation.width_cm, bare_est.get("width_cm")),
+            "height_cm": (self.bare_height, observation.height_cm, bare_est.get("height_cm")),
+            "weight_g": (self.bare_weight, observation.weight_g, bare_est.get("weight_g")),
+        }
+        for field_name, (widget, observed_val, est_val) in observed_widgets.items():
+            if field_name in self.session.user_overrides:
+                if field_name in ("length_cm", "width_cm", "height_cm"):
+                    dim_source = "\u7528\u6237\u786e\u8ba4"
+                elif field_name == "weight_g":
+                    weight_source = "\u7528\u6237\u786e\u8ba4"
+                continue
+            if observed_val is not None:
+                widget.setValue(float(observed_val))
+                if field_name in ("length_cm", "width_cm", "height_cm"):
+                    dim_source = "\u56fe\u7247\u8bc6\u522b"
+                elif field_name == "weight_g":
+                    weight_source = "\u56fe\u7247\u8bc6\u522b"
+            elif est_val is not None and field_name in ("length_cm", "width_cm", "height_cm", "weight_g"):
+                widget.setValue(float(est_val))
+                if field_name in ("length_cm", "width_cm", "height_cm"):
+                    dim_source = "AI\u4f30\u7b97"
+                elif field_name == "weight_g":
+                    weight_source = "AI\u4f30\u7b97"
+            else:
+                widget.setValue(0.0)
+        # 更新裸尺寸/裸重来源标签
+        if hasattr(self, "lbl_bare_dim_source"):
+            self.lbl_bare_dim_source.setText(dim_source)
+        if hasattr(self, "lbl_bare_weight_source"):
+            self.lbl_bare_weight_source.setText(weight_source)
         flags = {
             "has_hard_bottom": observation.has_hard_bottom,
             "has_hard_backboard": observation.has_hard_backboard,
@@ -998,7 +1139,13 @@ class CalculationPage(QWidget):
     def _refresh_display_summaries(self, observation: AIObservation, proposal: PackagingProposal) -> None:
         previous_updating = self._updating
         self._updating = True
-        self.product_summary.setText(product_summary(observation))
+        if "product_name" not in self.session.user_overrides:
+            has_product_fact = bool(
+                observation.product_name
+                or observation.product_type
+                or observation.display_product_summary
+            )
+            self.product_summary.setText(product_summary(observation) if has_product_fact else "")
         self.structure_summary.setText(packaging_summary(observation, proposal))
         self._updating = previous_updating
 
@@ -1033,7 +1180,7 @@ class CalculationPage(QWidget):
             image_items,
             self._recognition_cancellation,
             self._diagnostic_operation,
-            {"confirmed_facts": confirmed_facts},
+            confirmed_facts,
         )
         self._recognition_worker.moveToThread(self._recognition_thread)
         self._recognition_thread.started.connect(self._recognition_worker.run)
@@ -1090,6 +1237,7 @@ class CalculationPage(QWidget):
     ) -> dict[str, Any]:
         """第一次完整视觉识图成功后捕获 AI 初始快照；无法可靠获得的字段不写、不猜。"""
         adopted = self._adopted_packaging()
+        metadata_proposal = adopted or external_proposal
         provider = None
         try:
             bound = self.context.api_profile_store.bound_profile(VISUAL_AI)
@@ -1102,8 +1250,8 @@ class CalculationPage(QWidget):
             "provider": str(provider).strip() or None,
             "model": observation.model or None,
             "prompt_version": observation.prompt_version or None,
-            "engine_version": self.context.packaging_service.ENGINE_VERSION,
-            "calibration_version": self.context.packaging_service.calibration_version,
+            "engine_version": metadata_proposal.engine_version if metadata_proposal else "vision-runtime-v1",
+            "calibration_version": metadata_proposal.calibration_version if metadata_proposal else "",
             "observation": observation.to_dict(),
             "external_ai_packaging_proposal": external_proposal.to_dict() if external_proposal else None,
             "adopted_packaging": adopted.to_dict() if adopted else None,
@@ -1114,45 +1262,50 @@ class CalculationPage(QWidget):
         observation: AIObservation,
         external_proposal: PackagingProposal | None,
     ) -> None:
-        """只在 snapshot 尚不存在时捕获；第二次识图/局部重估/人工修改均不得覆盖。"""
+        """只在 snapshot 尚不存在时捕获；第二次识图/按修正重估/人工修改均不得覆盖。"""
         if self.initial_ai_snapshot is None:
             self.initial_ai_snapshot = self._capture_initial_ai_snapshot(observation, external_proposal)
 
     @Slot(object, object)
     def _recognition_completed(self, observation: AIObservation, external_proposal: PackagingProposal | None) -> None:
+        is_first_visual_result = self.initial_ai_snapshot is None
         conflicts = self.session.protect_confirmed_values(observation)
         self.session.ai_raw_response = observation.raw_payload
         self.session.ai_raw_observation = dict(observation.raw_payload.get("observation") or {})
         self.session.normalized_observation = observation
         self.session.money_candidates = list(observation.raw_payload.get("money_candidates") or [])
-        self.session.ai_packaging_proposal = external_proposal
+        if is_first_visual_result:
+            self.session.ai_packaging_proposal = external_proposal
         self.session.observation = observation
         self.observation = self.session.observation
-        self._adopt_packaging(self.context.packaging_service.estimate(observation, external_proposal=external_proposal))
-        self._restore_confirmed_normal(self._adopted_packaging())
+        runtime_proposal = external_proposal or RecognitionService.proposal_from_shipment({})
+        if is_first_visual_result:
+            self._adopt_packaging(runtime_proposal)
         if conflicts:
             self._adopted_packaging().review_reasons.append("user confirmed facts conflict with image evidence")
         self._apply_observation(observation)
         self._refresh_display_summaries(observation, self._adopted_packaging())
         self.apply_proposal(self._adopted_packaging())
-        self._maybe_capture_initial_ai_snapshot(observation, external_proposal)
-        self._ai_baseline = {
-            "summary": self._current_summary(),
-            "product_summary": self.product_summary.text(),
-            "packaging_summary": self.structure_summary.text(),
-            "bare_spec": {
-                "length_cm": observation.length_cm, "width_cm": observation.width_cm,
-                "height_cm": observation.height_cm, "weight_g": observation.weight_g,
-            },
-            "normal_packaging": self._scenario_data(self.normal_fields),
-        }
-        self._accepted_bare_fields.clear()
-        self._pending_confirmed_normal = {}
+        if is_first_visual_result:
+            self._maybe_capture_initial_ai_snapshot(observation, external_proposal)
+            self._ai_baseline = {
+                "summary": self._current_summary(),
+                "product_summary": self.product_summary.text(),
+                "packaging_summary": self.structure_summary.text(),
+                "bare_spec": {
+                    "length_cm": observation.length_cm, "width_cm": observation.width_cm,
+                    "height_cm": observation.height_cm, "weight_g": observation.weight_g,
+                },
+                "normal_packaging": self._scenario_data(self.normal_fields),
+            }
+            self._accepted_bare_fields.clear()
+            self._pending_confirmed_normal = {}
         self._recognized_image_fingerprint = self._image_fingerprint()
         self.ai_button.setText("AI识图")
         self.ai_button.setEnabled(False)
-        self.packaging_stale = False
-        self.manual_scenarios.clear()
+        if is_first_visual_result:
+            self.packaging_stale = False
+            self.manual_scenarios.clear()
         self._mark_dirty()
         self.recalculate()
         payload = observation.to_dict()
@@ -1165,13 +1318,13 @@ class CalculationPage(QWidget):
         if salvage:
             op.event("candidate_field_salvage", **dict(salvage.get("diagnostic") or {}),
                      final_source=adopted.proposal_source, adjustments=salvage.get("adjustments", []))
-        op.event("ai_request_completed"); op.event("ai_response_parsed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing); op.event("calibration_completed", matched_rule_ids=adopted.applied_profile_ids)
+        op.event("ai_request_completed"); op.event("ai_response_parsed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing); op.event("calibration_bypassed", reason="CAL77 runtime shipment arbitration disabled")
         generated=adopted.normal.is_complete() and adopted.conservative.is_complete()
-        op.event("packaging_generated" if generated else "packaging_skipped", skip_reason=None if generated else "AI未返回尺寸/重量，且本地CAL未生成可用回退值")
+        op.event("packaging_generated" if generated else "packaging_skipped", skip_reason=None if generated else "AI未返回完整发货尺寸/重量，等待人工填写")
         op.event("logistics_calculated" if self.current_quote else "logistics_skipped", reason=None if self.current_quote else "无可用包装尺寸和重量")
         op.event("page_updated", filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)])
         op.event("operation_completed")
-        op.summary(status="completed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing, field_evidence=observation.raw_payload.get("field_evidence",{}), raw_observation=observation.raw_payload.get("observation", {}), normalized_codes={"product_type_code": observation.product_type_code, "product_family_code": observation.product_family_code, "material_family_code": observation.material_family_code}, value_types={"product_cost": observation.product_cost_value_type, "domestic_shipping": observation.domestic_shipping_value_type}, value_sources={"dimensions": observation.dimension_value_source, "weight": observation.weight_value_source}, ai_packaging_proposal=external_proposal.to_dict() if external_proposal else None, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=adopted.applied_profile_ids, cal_rejected_rules=[], cal_rejection_reasons=[], generic_fallback=adopted.proposal_source == "generic_candidate", packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["AI未返回尺寸/重量，且本地CAL未生成可用回退值"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "无可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)], page_empty_fields=missing, warnings=adopted.review_reasons)
+        op.summary(status="completed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing, field_evidence=observation.raw_payload.get("field_evidence",{}), raw_observation=observation.raw_payload.get("observation", {}), normalized_codes={"product_type_code": observation.product_type_code, "product_family_code": observation.product_family_code, "material_family_code": observation.material_family_code}, value_types={"product_cost": observation.product_cost_value_type, "domestic_shipping": observation.domestic_shipping_value_type}, value_sources={"dimensions": observation.dimension_value_source, "weight": observation.weight_value_source}, ai_packaging_proposal=external_proposal.to_dict() if external_proposal else None, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], generic_fallback=False, packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["AI未返回完整发货尺寸/重量，等待人工填写"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "无可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)], page_empty_fields=missing, warnings=adopted.review_reasons)
 
     @Slot(str, str)
     def _recognition_failed(self, category: str, message: str) -> None:
@@ -1238,51 +1391,50 @@ class CalculationPage(QWidget):
         return observation
 
     # ------------------------------------------------------------------
-    # 局部重估
+    # 按修正重估
     # ------------------------------------------------------------------
 
     def reestimate_packaging(self) -> None:
         if self._local_thread is not None:
             return
         if self._ai_baseline is None:
-            QMessageBox.information(self, "需要先识图", "请先完成一次 AI识图，再根据摘要进行局部重估。")
+            QMessageBox.information(self, "需要先识图", "请先完成一次 AI识图，再按用户修正重估。")
             return
-        if self._image_fingerprint() != self._recognized_image_fingerprint:
-            if confirm_action(
-                self,
-                "图片已修改",
-                "图片已修改，是否使用新图片重新识图？",
-            ):
-                # Overall recognition is explicit; never start another visual
-                # request as a side effect of clicking local reestimate.
-                return
+        user_correction = self.user_correction.text().strip()
+        if not user_correction:
+            QMessageBox.information(self, "需要用户修正", "请先填写修正原因，再点击“按修正重估”。")
+            return
         current = self.collect_observation()
-        adopted_bare = {
-            key: getattr(current, key)
-            for key in self._accepted_bare_fields
-            if getattr(current, key) is not None
-        }
-        adopted_normal: dict[str, Any] = {}
-        if "正常档" in self.manual_scenarios:
-            adopted_normal = self._scenario_data(self.normal_fields)
-        original = self._ai_baseline
+        session_facts = self.session.confirmed_facts()
+        confirmed_facts: dict[str, Any] = {}
+        for field in ("length_cm", "width_cm", "height_cm", "weight_g"):
+            if field in session_facts:
+                confirmed_facts[field] = session_facts[field]["value"]
         context = {
-            "original_summary": str(original["summary"]),
-            "current_summary": self._current_summary(),
-            "original_observation": dict(self.session.ai_raw_observation or self.observation.to_dict()),
-            "user_overrides": self._confirmed_facts(),
-            "adopted_normal": adopted_normal or (self._adopted_packaging().normal.to_dict() if self._adopted_packaging() else {}),
-            "original_product_summary": str(original.get("product_summary") or ""),
-            "current_product_summary": self.product_summary.text().strip(),
-            "original_packaging_summary": str(original.get("packaging_summary") or ""),
-            "current_packaging_summary": self.structure_summary.text().strip(),
-            "cal_summary": list(self.session.matched_cal_rules),
-            "rejected_candidates": dict(self._adopted_packaging().rejected_candidates) if self._adopted_packaging() else {},
-            "visual_evidence": dict(self.session.ai_raw_response.get("field_evidence") or {}),
+            "product_name": self.product_summary.text().strip(),
+            "confirmed_facts": confirmed_facts,
+            "current_shipment": self._scenario_data(self.conservative_fields),
+            "user_correction": user_correction,
         }
         self._local_diagnostic_operation = self.context.diagnostic_logger.begin_operation("local-reestimate")
-        self._local_diagnostic_operation.event("local_reestimate_requested", observation_patch=adopted_bare)
-        self._local_diagnostic_operation.request(request_type="local-reestimate", original_summary=context["original_summary"], current_summary=context["current_summary"], original_observation=context["original_observation"], user_overrides=context["user_overrides"], adopted_normal=context["adopted_normal"])
+        self._local_diagnostic_operation.event("corrected_reestimate_requested")
+        reestimate_svc = self.context.local_reestimate_service
+        bound = reestimate_svc.profile_store.bound_profile(LOCAL_REESTIMATE) if reestimate_svc.profile_store else None
+        provider_info: dict[str, Any] = {}
+        if bound is not None:
+            _profile, _ = bound
+            from urllib.parse import urlparse as _urlparse
+            provider_info = {
+                "provider": _profile.provider,
+                "model": _profile.model_name,
+                "provider_host": _urlparse(_profile.api_url).netloc,
+            }
+        self._local_diagnostic_operation.request(
+            request_type="corrected-reestimate-v1",
+            prompt_version=reestimate_svc.PROMPT_VERSION,
+            **provider_info,
+            **context,
+        )
         self._show_local_dialog()
         self._local_thread = QThread(self)
         self._local_worker = LocalReestimateWorker(self.context.local_reestimate_service, context)
@@ -1312,12 +1464,12 @@ class CalculationPage(QWidget):
 
     def _show_local_dialog(self) -> None:
         dialog = QDialog(self)
-        dialog.setWindowTitle("局部重估")
+        dialog.setWindowTitle("按修正重估")
         dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
         dialog.setFixedSize(300, 92)
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(18, 16, 18, 14)
-        label = QLabel("局部重估中，请稍候")
+        label = QLabel("正在按修正重新估算，请稍候")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setProperty("sectionTitle", True)
         layout.addWidget(label)
@@ -1326,50 +1478,65 @@ class CalculationPage(QWidget):
 
     @Slot(object)
     def _local_reestimate_completed(self, result: Any) -> None:
-        confirmed_normal = self._scenario_data(self.normal_fields) if "正常档" in self.manual_scenarios else None
+        if self._local_dialog is not None:
+            self._local_dialog.close()
+        proposal = result.packaging_proposal
+        scenario = result.shipment or (proposal.normal if proposal else None)
+        if proposal is None or scenario is None or not scenario.is_complete():
+            QMessageBox.warning(self, "按修正重估失败", "模型未返回完整有效的发货尺寸和重量，当前采用未改变。")
+            return
+        message = (
+            "重新估算结果\n\n"
+            f"{scenario.length_cm:g} × {scenario.width_cm:g} × {scenario.height_cm:g} cm\n"
+            f"{scenario.weight_g:g} g\n"
+            f"{scenario.packaging_method or '发货状态待确认'}"
+        )
+        accepted = confirm_action(
+            self,
+            "重新估算结果",
+            message,
+            confirm_text="采用此结果",
+        )
+        op = getattr(self, "_local_diagnostic_operation", None)
+        provider_meta = {"provider": result.provider, "model": result.model, "provider_host": result.provider_host}
+        if not accepted:
+            if op:
+                op.event("corrected_reestimate_cancelled", elapsed_ms=result.elapsed_ms)
+                op.response(provider_raw_response=None, normalized_result={"shipment": scenario.to_dict()}, parse_error=None, elapsed_ms=result.elapsed_ms, **provider_meta)
+                op.summary(status="cancelled", returned_fields=["shipment"], missing_fields=[], field_evidence={}, parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=True, normal_packaging=scenario.to_dict(), conservative_packaging=None, not_generated_reason=[], entered_logistics=False, logistics_skip_reason="候选已取消，当前采用未改变", logistics_inputs=None, logistics_outputs=None, page_filled_fields=[], page_empty_fields=[], warnings=[])
+            return
+
+        baseline = self._adopted_packaging()
+        if baseline is None:
+            return
+        adopted_current = replace(scenario, label="当前采用")
+        self._adopt_packaging(replace(baseline, conservative=adopted_current))
         previous_updating = self._updating
         self._updating = True
-        current_product_summary = self.product_summary.text().strip()
-        current_packaging_summary = self.structure_summary.text().strip()
-        changed = self.session.apply_observation_patch(result.observation_patch)
-        self.observation = self.session.observation
-        self.observation.display_product_summary = result.product_summary or current_product_summary
-        self.observation.display_packaging_summary = result.packaging_summary or current_packaging_summary
-        self._updating = previous_updating
-        self._apply_observation(self.observation)
-        self.observation = self.collect_observation()
-        self.session.observation = self.observation
-        self.session.observation = normalize_observation(self.observation)
-        self.observation = self.session.observation
-        self._adopt_packaging(self.context.packaging_service.estimate(self.observation, external_proposal=result.packaging_proposal))
-        self.apply_proposal(self._adopted_packaging())
-        if confirmed_normal:
-            self._updating = True
-            for key, field in (("length_cm", self.normal_fields["length"]),
-                               ("width_cm", self.normal_fields["width"]), ("height_cm", self.normal_fields["height"]),
-                               ("weight_g", self.normal_fields["weight"])):
-                value = confirmed_normal.get(key)
-                field.setValue(float(value or 0))
-            self._updating = False
-        self._refresh_display_summaries(self.observation, self._adopted_packaging())
-        if not changed:
-            self.review_badge.setText("结构条件未变化")
+        try:
+            self.conservative_fields["method"].setText(scenario.packaging_method)
+            for key, field in (("length_cm", self.conservative_fields["length"]),
+                               ("width_cm", self.conservative_fields["width"]),
+                               ("height_cm", self.conservative_fields["height"]),
+                               ("weight_g", self.conservative_fields["weight"])):
+                field.setValue(float(getattr(scenario, key) or 0))
+        finally:
+            self._updating = previous_updating
+        self.manual_scenarios.add("当前采用")
+        self.user_calibration_dirty = True
         self.packaging_stale = False
+        self.review_badge.setText("已采用修正重估 · 需要复核")
+        self.review_badge.setProperty("warning", True)
+        self.review_badge.setProperty("success", False)
+        self._refresh_badge_style()
         self._mark_dirty()
         self.recalculate()
-        op = self._local_diagnostic_operation
-        op.event("local_reestimate_completed", observation_patch=result.observation_patch, changed_fields=result.changed_fields, elapsed_ms=result.elapsed_ms)
-        adopted = self._adopted_packaging()
-        salvage = adopted.candidate_records.get("candidate_field_salvage", {})
-        if salvage:
-            op.event("candidate_field_salvage", **dict(salvage.get("diagnostic") or {}),
-                     final_source=adopted.proposal_source, adjustments=salvage.get("adjustments", []))
-        op.event("calibration_completed", matched_rule_ids=adopted.applied_profile_ids)
-        generated = adopted.normal.is_complete() and adopted.conservative.is_complete()
-        op.event("packaging_generated" if generated else "packaging_skipped")
-        op.event("operation_completed")
-        op.response(provider_raw_response=None, normalized_result={"observation_patch": result.observation_patch, "changed_fields": result.changed_fields}, parse_error=None, elapsed_ms=result.elapsed_ms)
-        op.summary(status="completed", returned_fields=list(result.observation_patch), missing_fields=[], field_evidence={}, observation_patch=result.observation_patch, normalized_codes={"product_type_code": self.observation.product_type_code, "product_family_code": self.observation.product_family_code, "material_family_code": self.observation.material_family_code}, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=adopted.applied_profile_ids, cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["重估后没有完整包装数据"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "没有可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=result.changed_fields, page_empty_fields=[], warnings=adopted.review_reasons)
+        if op:
+            op.event("corrected_reestimate_adopted", elapsed_ms=result.elapsed_ms)
+            op.event("calibration_bypassed", reason="CAL77 runtime shipment arbitration disabled")
+            op.event("operation_completed")
+            op.response(provider_raw_response=None, normalized_result={"shipment": scenario.to_dict()}, parse_error=None, elapsed_ms=result.elapsed_ms, **provider_meta)
+            op.summary(status="completed", returned_fields=["shipment"], missing_fields=[], field_evidence={}, parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=True, normal_packaging=scenario.to_dict(), conservative_packaging=scenario.to_dict(), not_generated_reason=[], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "没有可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=["length_cm", "width_cm", "height_cm", "weight_g", "state"], page_empty_fields=[], warnings=[], **provider_meta)
 
     @Slot(str, str)
     def _local_reestimate_failed(self, category: str, message: str) -> None:
@@ -1377,8 +1544,8 @@ class CalculationPage(QWidget):
             self._local_diagnostic_operation.event("local_reestimate_failed", category=category, message=message)
             self._local_diagnostic_operation.event("operation_completed", status="failed")
             self._local_diagnostic_operation.response(provider_raw_response=None, normalized_result=None, parse_error=message)
-            self._local_diagnostic_operation.summary(status="failed", returned_fields=[], missing_fields=[], field_evidence={}, parse_error=message, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=False, normal_packaging=None, conservative_packaging=None, not_generated_reason=[message], entered_logistics=False, logistics_skip_reason="局部重估失败", logistics_inputs=None, logistics_outputs=None, page_filled_fields=[], page_empty_fields=[], warnings=[])
-        title = "局部重估不可用" if category == "unavailable" else "局部重估失败"
+            self._local_diagnostic_operation.summary(status="failed", returned_fields=[], missing_fields=[], field_evidence={}, parse_error=message, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], packaging_generated=False, normal_packaging=None, conservative_packaging=None, not_generated_reason=[message], entered_logistics=False, logistics_skip_reason="按修正重估失败", logistics_inputs=None, logistics_outputs=None, page_filled_fields=[], page_empty_fields=[], warnings=[])
+        title = "按修正重估不可用" if category == "unavailable" else "按修正重估失败"
         QMessageBox.warning(self, title, message)
 
     def _local_thread_finished(self) -> None:
@@ -1401,14 +1568,12 @@ class CalculationPage(QWidget):
         self._updating = True
         # 只在第一次 AI（initial_ai_snapshot 尚未捕获）时写入两框：
         # AI估算与当前采用复制完全相同的首次 AI 数据；
-        # 同会话再次 AI / 局部重估不得静默覆盖已冻结的首次结果或用户已编辑的当前采用；
+        # 同会话再次 AI / 按修正重估不得静默覆盖已冻结的首次结果或用户已编辑的当前采用；
         # 历史编辑模式下（含无 ai_initial 的旧记录）同样不得覆盖已恢复的两卡。
         if self.initial_ai_snapshot is None and self.editing_record_id is None:
             for fields in (self.normal_fields, self.conservative_fields):
                 method_text = proposal.normal.packaging_method
-                fields["method"].setText(
-                    packaging_method_zh(method_text) if fields is self.normal_fields else method_text
-                )
+                fields["method"].setText(method_text)
                 fields["length"].setValue(proposal.normal.length_cm or 0)
                 fields["width"].setValue(proposal.normal.width_cm or 0)
                 fields["height"].setValue(proposal.normal.height_cm or 0)
@@ -1706,14 +1871,50 @@ class CalculationPage(QWidget):
             exchange_rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
             system_cost_for_record = self.current_system_cost
             adopted_cost = self.profit_binder._calculation_total_cost_rmb
+        # ai_raw.observation 必须保存真正的 AI observation，不能被 bare_estimate 回填或用户修改污染。
+        # 使用 session.normalized_observation（AI 标准化结果）作为基础，
+        # 但裸品字段（length/width/height/weight）必须从 normalized_observation 读取，
+        # 而不是从页面控件读取（collect_observation 会从页面读取，可能已被污染）。
+        ai_observation = self.session.normalized_observation
+        if ai_observation is None or not any(
+            getattr(ai_observation, f) is not None
+            for f in ("length_cm", "width_cm", "height_cm", "weight_g", "product_name")
+        ):
+            # 兼容：没有 normalized_observation 时回退到 collect_observation
+            ai_observation = self.collect_observation()
+        else:
+            # 使用 normalized_observation 的完整副本，但补充页面收集的非裸品字段
+            ai_observation = AIObservation.from_dict(ai_observation.to_dict())
+            collected = self.collect_observation()
+            # 非裸品字段从页面收集（这些不会被 bare_estimate 污染）
+            ai_observation.product_name = collected.product_name
+            ai_observation.display_product_summary = collected.display_product_summary
+            ai_observation.display_packaging_summary = collected.display_packaging_summary
+            ai_observation.material = collected.material
+            ai_observation.rigidity = collected.rigidity
+            ai_observation.foldability = collected.foldability
+            ai_observation.compressibility = collected.compressibility
+            for key in (
+                "has_hard_bottom", "has_hard_backboard", "has_frame",
+                "has_rigid_insert", "has_rigid_parts",
+                "requires_shape_retention", "retail_box_visible", "hard_card_visible",
+            ):
+                setattr(ai_observation, key, getattr(collected, key))
+            ai_observation.product_cost_rmb = collected.product_cost_rmb
+            ai_observation.domestic_shipping_rmb = collected.domestic_shipping_rmb
         return {
             "product_name": self.product_summary.text().strip(),
             "product_link": self.product_link.text().strip() if self.product_link else "",
             "status": "active",
             "layers": {
                 "ai_raw": {
-                    "observation": self.collect_observation().to_dict(),
-                    "packaging_proposal": self._adopted_packaging().to_dict() if self._adopted_packaging() else {},
+                    "observation": ai_observation.to_dict(),
+                    "packaging_proposal": (
+                        self.session.ai_packaging_proposal.to_dict()
+                        if self.session.ai_packaging_proposal else (
+                            self._adopted_packaging().to_dict() if self._adopted_packaging() else {}
+                        )
+                    ),
                 },
                 "adopted": {
                     "bare": {
@@ -1744,8 +1945,14 @@ class CalculationPage(QWidget):
                     "logistics_quote": asdict(self.current_quote) if self.current_quote else {},
                     "forwarder_name": self.current_forwarder.name if self.current_forwarder else "",
                     "logistics_engine_version": "deterministic-logistics-v1",
-                    "packaging_engine_version": self.context.packaging_service.ENGINE_VERSION,
-                    "calibration_version": self.context.packaging_service.calibration_version,
+                    "packaging_engine_version": (
+                        self._adopted_packaging().engine_version
+                        if self._adopted_packaging() else "vision-runtime-v1"
+                    ),
+                    "calibration_version": (
+                        self._adopted_packaging().calibration_version
+                        if self._adopted_packaging() else ""
+                    ),
                     "schema_version": "2.6.1",
                 },
                 "actual": {},
@@ -2065,6 +2272,53 @@ class CalculationPage(QWidget):
         self.bare_width.setValue(float(bare.get("width_cm") or 0))
         self.bare_height.setValue(float(bare.get("height_cm") or 0))
         self.bare_weight.setValue(float(bare.get("weight_g") or 0))
+        # 恢复裸尺寸/裸重来源标签：根据 adopted.bare、observed、bare_estimate 三层判断来源
+        # 读取 bare_estimate（从 observation_raw.raw_payload 中）
+        _raw_payload = observation_raw.get("raw_payload") if isinstance(observation_raw, dict) else {}
+        if not isinstance(_raw_payload, dict):
+            _raw_payload = {}
+        _bare_estimate = _raw_payload.get("bare_estimate") if isinstance(_raw_payload.get("bare_estimate"), dict) else {}
+        if not isinstance(_bare_estimate, dict):
+            _bare_estimate = {}
+
+        def _source_for_field(adopted_val, observed_val, estimate_val):
+            """判断单个字段的来源：图片识别 / AI估算 / 用户确认 / 未识别"""
+            if adopted_val is None or adopted_val == 0:
+                return "\u672a\u8bc6\u522b"
+            # 情况2：observed 有值且 adopted == observed → 图片识别
+            if observed_val is not None and observed_val != 0:
+                if abs(float(adopted_val) - float(observed_val)) < 0.001:
+                    return "\u56fe\u7247\u8bc6\u522b"
+            # 情况3：observed 为空，adopted == bare_estimate → AI估算
+            if (observed_val is None or observed_val == 0) and estimate_val is not None and estimate_val != 0:
+                if abs(float(adopted_val) - float(estimate_val)) < 0.001:
+                    return "AI\u4f30\u7b97"
+            # 情况4：adopted 与 observed / bare_estimate 均不同 → 用户确认
+            # 或者 observed 有值但 adopted != observed → 用户确认
+            return "\u7528\u6237\u786e\u8ba4"
+
+        _adopted_dims = [bare.get(k) for k in ("length_cm", "width_cm", "height_cm")]
+        _observed_dims = [observation_raw.get(k) for k in ("length_cm", "width_cm", "height_cm")] if isinstance(observation_raw, dict) else [None, None, None]
+        _estimate_dims = [_bare_estimate.get(k) for k in ("length_cm", "width_cm", "height_cm")]
+        _adopted_weight = bare.get("weight_g")
+        _observed_weight = observation_raw.get("weight_g") if isinstance(observation_raw, dict) else None
+        _estimate_weight = _bare_estimate.get("weight_g")
+
+        if hasattr(self, "lbl_bare_dim_source"):
+            _has_bare_dim = any(v is not None and v != 0 for v in _adopted_dims)
+            if not _has_bare_dim:
+                self.lbl_bare_dim_source.setText("\u672a\u8bc6\u522b")
+            else:
+                # 逐字段判断，取第一个非空字段的来源（通常三个维度来源一致）
+                _dim_source = "\u672a\u8bc6\u522b"
+                for a, o, e in zip(_adopted_dims, _observed_dims, _estimate_dims):
+                    if a is not None and a != 0:
+                        _dim_source = _source_for_field(a, o, e)
+                        break
+                self.lbl_bare_dim_source.setText(_dim_source)
+
+        if hasattr(self, "lbl_bare_weight_source"):
+            self.lbl_bare_weight_source.setText(_source_for_field(_adopted_weight, _observed_weight, _estimate_weight))
         # AI估算（左卡）：优先第一次 AI 结果（_v2.ai_initial），旧记录回退 adopted.normal
         v2 = record.get("_v2") if isinstance(record.get("_v2"), dict) else {}
         ai_initial = v2.get("ai_initial") if isinstance(v2.get("ai_initial"), dict) else {}
@@ -2181,9 +2435,6 @@ class CalculationPage(QWidget):
         """把包装 dict 写入卡片字段（缺失归一为 0/空）。"""
         raw = raw if isinstance(raw, dict) else {}
         method_text = str(raw.get("packaging_method") or "")
-        if fields.get("name") == "AI估算":
-            # 仅显示层中文化：AI 英文包装方式转中文，原始 payload 不变
-            method_text = packaging_method_zh(method_text)
         fields["method"].setText(method_text)
         fields["length"].setValue(float(raw.get("length_cm") or 0))
         fields["width"].setValue(float(raw.get("width_cm") or 0))

@@ -67,6 +67,10 @@ class CalculationSession:
             if ai_value is not None and ai_value != value:
                 conflicts[field] = {"user_confirmed": value, "ai_returned": ai_value}
             setattr(observation, field, value)
+            if field == "product_name":
+                # The page summary prefers this normalized display field, so it
+                # must share the same user-confirmed authority as product_name.
+                observation.display_product_summary = str(value)
         if "weight_g" in self.confirmed_fields:
             observation.weight_scope = "net_weight"
         if any(field in self.confirmed_fields for field in ("length_cm", "width_cm", "height_cm")):

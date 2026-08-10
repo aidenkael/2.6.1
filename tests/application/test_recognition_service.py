@@ -6,6 +6,94 @@ from profit_accounting_26.application.diagnostic_logger import DiagnosticLogger
 from profit_accounting_26.application.recognition_service import RecognitionResponseError, RecognitionService
 
 
+def _v1_response() -> dict:
+    return {
+        "choices": [{"message": {"content": json.dumps({
+            "product_name": "女士单肩包",
+            "observed": {
+                "product_price_rmb": None, "page_shipping_rmb": None,
+                "bare_dimensions_cm": {"length": None, "width": None, "height": None},
+                "bare_weight_g": None,
+            },
+            "shipment": {"length_cm": 17, "width_cm": 32, "height_cm": 17, "weight_g": 720, "state": "袋装"},
+            "note": "",
+        }, ensure_ascii=False)}}],
+    }
+
+
+def _recognition_service_for_provider(provider: str):
+    class Settings:
+        @staticmethod
+        def load():
+            return {"vision_api_timeout_seconds": 30}
+
+    class Profile:
+        api_url = "https://example.invalid"
+        model_name = "vision-test"
+
+    Profile.provider = provider
+
+    class Store:
+        @staticmethod
+        def bound_profile(_purpose):
+            return Profile(), "secret"
+
+    return RecognitionService(Settings(), Store())
+
+
+def test_openai_vision_request_keeps_strict_schema_and_simple_prompt(tmp_path, monkeypatch):
+    image = tmp_path / "product.png"
+    image.write_bytes(b"image")
+    captured = {}
+    service = _recognition_service_for_provider("OpenAI")
+    monkeypatch.setattr(service, "_request_payload", lambda **kwargs: captured.update(kwargs) or _v1_response())
+
+    observation, proposal = service.recognize([{"path": str(image)}])
+
+    assert observation.product_name == "女士单肩包"
+    assert proposal is not None and proposal.normal.weight_g == 720
+    assert captured["response_format"]["json_schema"]["strict"] is True
+    prompt = captured["content"][0]["text"]
+    assert '"bare_dimensions_cm"' not in prompt
+    assert "符合给定 JSON Schema" in prompt
+
+
+@pytest.mark.parametrize("provider", ["DeepSeek", "GLM", "阿里云百炼", "自定义"])
+def test_non_openai_vision_request_uses_prompt_contract_without_response_format(tmp_path, monkeypatch, provider):
+    image = tmp_path / "product.png"
+    image.write_bytes(b"image")
+    captured = {}
+    service = _recognition_service_for_provider(provider)
+    monkeypatch.setattr(service, "_request_payload", lambda **kwargs: captured.update(kwargs) or _v1_response())
+
+    service.recognize(
+        [{"path": str(image)}],
+        user_context={"product_name": {"value": "用户确认名称", "source": "user_confirmed"}},
+    )
+
+    assert captured["response_format"] is None
+    prompt = captured["content"][0]["text"]
+    for field in ("product_name", "product_price_rmb", "page_shipping_rmb", "bare_dimensions_cm", "bare_weight_g", "shipment", "length_cm", "weight_g", "state", "note"):
+        assert field in prompt
+
+
+def test_recognition_request_sends_confirmed_facts_at_one_level(tmp_path, monkeypatch):
+    image = tmp_path / "product.png"
+    image.write_bytes(b"image")
+    captured = {}
+    service = _recognition_service_for_provider("DeepSeek")
+    monkeypatch.setattr(service, "_request_payload", lambda **kwargs: captured.update(kwargs) or _v1_response())
+
+    service.recognize(
+        [{"path": str(image)}],
+        user_context={"confirmed_facts": {"weight_g": {"value": 580, "source": "user_confirmed"}}},
+    )
+
+    fact_text = next(item["text"] for item in captured["content"] if item["type"] == "text" and item["text"].startswith("confirmed_facts"))
+    assert fact_text.count('"confirmed_facts"') == 0
+    assert '"weight_g"' in fact_text
+
+
 def test_parse_openai_compatible_vision_payload():
     content = {
         "observation": {
@@ -106,8 +194,8 @@ def test_multi_image_payload_order_is_stable_for_product_and_weight_evidence(tmp
 
     assert forward == reversed_order
     prompt = RecognitionService._prompt(2)
-    assert "Merge product, price, dimensions, weight, structure, and packaging evidence" in prompt
-    assert "image sequence and image slot have no semantic meaning" in prompt
+    assert "逐张查看全部图片" in prompt
+    assert "图片顺序和图片框类型不代表字段职责" in prompt
 
 
 def test_ambiguous_bare_dimension_is_ignored_and_reported_without_losing_weight():
@@ -239,3 +327,58 @@ def test_recognizable_outline_with_missing_weight_gets_complete_low_confidence_c
     assert proposal.normal.confidence == "low"
     assert proposal.normal.length_cm >= observation.length_cm
     assert observation.raw_payload["vision_packaging_completion"] == "generated_from_recognized_outline"
+
+
+def test_v1_observed_facts_and_shipment_are_independent():
+    payload = {
+        "product_name": "女士单肩包",
+        "observed": {
+            "product_price_rmb": None,
+            "page_shipping_rmb": 0,
+            "bare_dimensions_cm": {"length": 45, "width": None, "height": 15},
+            "bare_weight_g": 580,
+        },
+        "shipment": {
+            "length_cm": 46, "width_cm": 31, "height_cm": 8,
+            "weight_g": 760, "state": "压扁并整理肩带后紧凑发货",
+        },
+        "note": "",
+    }
+    observation, proposal = RecognitionService.parse_payload(
+        {"choices": [{"message": {"content": json.dumps(payload, ensure_ascii=False)}}]},
+        model="vision-v1",
+    )
+
+    assert observation.product_cost_rmb is None  # 看不到价格时不补造
+    assert observation.domestic_shipping_rmb == 0
+    assert (observation.length_cm, observation.width_cm, observation.height_cm) == (45, None, 15)
+    assert observation.weight_g == 580
+    assert proposal is not None
+    assert proposal.normal.weight_g == 760
+    assert proposal.normal.packaging_method == "压扁并整理肩带后紧凑发货"
+    assert proposal.normal.to_dict() != observation.to_dict()
+    assert proposal.applied_profile_ids == []
+    assert proposal.proposal_source == "vision_ai_v1"
+
+
+def test_v1_nonpositive_shipment_values_fail_basic_validation_without_cal_fallback():
+    payload = {
+        "product_name": "金属发夹",
+        "observed": {
+            "product_price_rmb": None, "page_shipping_rmb": None,
+            "bare_dimensions_cm": {"length": None, "width": None, "height": None},
+            "bare_weight_g": None,
+        },
+        "shipment": {"length_cm": -1, "width_cm": 5, "height_cm": 2, "weight_g": 0, "state": "袋装"},
+        "note": "",
+    }
+    _, proposal = RecognitionService.parse_payload(
+        {"choices": [{"message": {"content": json.dumps(payload, ensure_ascii=False)}}]},
+        model="vision-v1",
+    )
+    assert proposal is not None
+    assert proposal.normal.length_cm is None
+    assert proposal.normal.weight_g is None
+    assert not proposal.normal.is_complete()
+    issues = proposal.candidate_records["runtime_v1_validation"]["parse_issues"]
+    assert issues["shipment.length_cm"]["reason"] == "nonpositive_shipment_value"

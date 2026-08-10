@@ -33,6 +33,23 @@ class RecognitionCancelledError(RuntimeError):
     pass
 
 
+# Keywords that indicate fulfillment/timing info rather than physical shipping state.
+_INVALID_STATE_KEYWORDS: tuple[str, ...] = (
+    "小时发货", "天发货", "现货", "包邮", "发货时效", "商家履约",
+    "快递速度", "快递时效", "物流速度", "物流时效",
+    "顺丰", "中通", "圆通", "申通", "韵达", "邮政", "EMS", "DHL", "FedEx", "UPS",
+    "48小时", "24小时", "72小时", "当日", "次日", "当天",
+)
+
+
+def _is_invalid_shipment_state(state: str) -> bool:
+    """Reject state values that describe fulfillment timing rather than physical form."""
+    if not state:
+        return False
+    lower = state.lower()
+    return any(kw.lower() in lower for kw in _INVALID_STATE_KEYWORDS)
+
+
 class RecognitionCancellation:
     def __init__(self) -> None:
         self._event = threading.Event()
@@ -75,7 +92,59 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-vision-semantic-packaging-v8"
+    PROMPT_VERSION = "2.6.1-visual-v1.2-frozen"
+    RESPONSE_SCHEMA = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["product_name", "observed", "bare_estimate", "shipment", "note"],
+        "properties": {
+            "product_name": {"type": "string"},
+            "observed": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["product_price_rmb", "page_shipping_rmb", "bare_dimensions_cm", "bare_weight_g"],
+                "properties": {
+                    "product_price_rmb": {"type": ["number", "null"]},
+                    "page_shipping_rmb": {"type": ["number", "null"]},
+                    "bare_dimensions_cm": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["length", "width", "height"],
+                        "properties": {
+                            "length": {"type": ["number", "null"]},
+                            "width": {"type": ["number", "null"]},
+                            "height": {"type": ["number", "null"]},
+                        },
+                    },
+                    "bare_weight_g": {"type": ["number", "null"]},
+                },
+            },
+            "bare_estimate": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["length_cm", "width_cm", "height_cm", "weight_g"],
+                "properties": {
+                    "length_cm": {"type": ["number", "null"]},
+                    "width_cm": {"type": ["number", "null"]},
+                    "height_cm": {"type": ["number", "null"]},
+                    "weight_g": {"type": ["number", "null"]},
+                },
+            },
+            "shipment": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["length_cm", "width_cm", "height_cm", "weight_g", "state"],
+                "properties": {
+                    "length_cm": {"type": "number"},
+                    "width_cm": {"type": "number"},
+                    "height_cm": {"type": "number"},
+                    "weight_g": {"type": "number"},
+                    "state": {"type": "string"},
+                },
+            },
+            "note": {"type": "string"},
+        },
+    }
 
     def __init__(self, settings_service: SettingsService, profile_store: ApiProfileStore | None = None) -> None:
         self.settings_service = settings_service
@@ -107,116 +176,53 @@ class RecognitionService:
         return [path for _, _, path in sorted(keyed_paths)]
 
     @classmethod
-    def _prompt(cls, image_count: int) -> str:
-        return f"""
+    def _prompt(cls, image_count: int, *, include_json_shape: bool = True) -> str:
+        prompt = f"""
 你是跨境电商商品图片识别助手。本次共有 {image_count} 张图片。
 
-重要规则：
-1. 不存在“主图只识别商品、信息图只识别价格”的限制。
-2. 必须逐张扫描全部可见信息；字段出现在任何图片中都要识别。
-3. 一次请求完成全部识别，不要求后续视觉重试。
-4. 清晰文字优先于视觉猜测；无法确认时返回 null，并说明证据不足。
-5. 不得输出物流费用、利润、售价建议或货代选择。
+只完成商品识别、图片事实读取和发货判断。不要计算或推理其余事项。
 
-必须先根据主图、实拍图和结构图识别商品主体与各部件，再判断整体物理结构、折叠/盘绕/压缩/套叠/拆分能力，最后结合文字证据和 confirmed_facts 推算单件运输包装。
-必须识别：商品名称与规范化类型、材质、包装相关摘要、整体形态、包装动作和约束、软硬、折叠/压缩能力、保形和硬结构、商品成本、国内运费、数量、尺寸、重量、尺寸/重量语义，以及正常档和保守档包装候选。
+逐张查看全部图片，但图片顺序和图片框类型不代表字段职责。返回：
+1. product_name：简短、规范、可搜索的商品名称，不复制供应商 SEO 长标题。
+2. observed：只填写图片中能可靠读到的页面价格、页面运费、裸品尺寸和裸重。看不清就返回 null；价格和运费禁止凭经验猜测；只确认部分裸尺寸时其余维度保持 null。
+3. bare_estimate：当图片没有明确标注裸品尺寸或裸重时，可根据商品本身估算 bare_estimate。bare_estimate 是 AI 推测，不是图片事实。最终 shipment 判断应结合用户确认事实、图片事实及必要的 bare_estimate。
+4. shipment：独立判断商品真正交给物流时最可能的外部尺寸、总重量和简短发货状态。即使图片没有标注尺寸，也应根据商品本身尽量给出一套完整判断。
+shipment.state 是面向用户的一句简短"AI发货判断"，必须同时描述商品交给物流时的主要物理形态/处理状态、处理方式和简单包装方式，例如"可折叠；袋装发货"。不要只返回"折叠""压缩""保持原形"等单一处理词。
+shipment.state 禁止填写发货时效、48小时发货、现货、包邮、快递速度、商家履约、物流费用、货代、CAL、体积重或利润。
+5. note：仅写必要的简短补充。
 
-尺寸语义规则：
-- 只有明确的单件三维外廓、单件运输包装或原盒三维尺寸才能填写 length_cm、width_cm、height_cm。
-- 可调长度范围、不同部件长度、尺码范围、展开长度、周长、拉伸前后长度、多 SKU 规格、批量外箱和件/箱信息都不是单件三维外廓；这些数字必须写入 field_evidence.dimensions.raw_text，并将三维字段设为 null。
-- 不得取范围中点、平均值或把多个部件长度拼成三维尺寸。若没有明确外廓但商品可识别，仍应依据视觉结构生成低置信包装候选。
-- 包装动作必须与包装外廓一致：声明平折、盘绕、压缩、套叠或拆分时，候选外廓必须体现相应变化；没有单件盒装证据时，不得猜测包装盒、硬质包装盒、纸箱、纸盒或礼盒。
-- 对 `has_hard_bottom`、`has_hard_backboard`、`has_frame`、`has_rigid_insert`、`has_rigid_parts`、`retail_box_visible`、`hard_card_visible` 返回 true 时，必须在 field_evidence.structure 中给出对应 source_image_index 和可见文字或区域定位；没有可定位证据时返回 null，不得把推断当作事实。
-- 当展示尺寸可能包含把手、肩带、挂环、带子、软突出部、自然撑开厚度或展开状态时，必须在 field_evidence.transport_outline 中说明可见部位及 source_image_index；没有明确刚性/原盒事实，也没有收纳、折叠、盘绕或压缩动作时，不得把展示尺寸直接作为完整运输外廓。
-
-价格与运费要求：
-- 区分当前单价、划线价、区间价、优惠券、订单总额；优先返回当前规格可用单价。
-- 国内运费为0时返回0，不得因0而返回null。
-- 对价格、运费、尺寸、重量返回来源图片序号、原始文字和置信度。
-
-只返回一个JSON对象，不要Markdown：
-{{
-  "observation": {{
-    "product_name": "",
-     "product_type": "",
-     "product_family": "",
-     "product_type_raw": "",
-     "product_type_code": "unknown",
-     "product_family_code": "unknown",
-     "material": "",
-     "material_family": "",
-     "material_family_code": "unknown",
-     "display_product_summary": "",
-     "display_packaging_summary": "",
-     "overall_form": "soft_flat|soft_bulky|flexible_chain|articulated|hard_flat|hard_long|hard_3d|hollow_crushable|fragile_protruding|mixed|unknown",
-     "packing_actions": [],
-     "packing_constraints": [],
-    "rigidity": "unknown|soft|semi_rigid|hard",
-    "foldability": "unknown|none|limited|good",
-    "compressibility": "unknown|none|limited|good",
-    "packaging_state_hint": "unknown|full_flat_fold|strong_compression|moderate_compression|shape_retained",
-    "requires_shape_retention": null,
-    "has_hard_bottom": null,
-    "has_hard_backboard": null,
-    "has_frame": null,
-    "has_rigid_insert": null,
-    "has_rigid_parts": null,
-    "retail_box_visible": null,
-    "hard_card_visible": null,
-    "protrusion_flattenable": null,
-    "product_cost_rmb": null,
-    "product_cost_value_type": "exact|estimated|starting_from|range_min|unknown",
-    "domestic_shipping_rmb": null,
-    "domestic_shipping_value_type": "exact|estimated|starting_from|range_min|unknown",
-    "length_cm": null,
-    "width_cm": null,
-    "height_cm": null,
-    "weight_g": null,
-    "dimension_value_source": "image_text|ai_visual_estimate|unknown",
-    "weight_value_source": "image_text|ai_visual_estimate|unknown",
-     "dimension_scope": "unknown|product_size|shipping_package_size|original_box_size|display_size|adjustable_range|component_length|sku_range|circumference|extended_length|bulk_carton",
-    "weight_scope": "unknown|net_weight|packaged_weight|original_box_weight",
-    "quantity": 1,
-    "confidence": "low|medium|high"
-  }},
-  "field_evidence": {{
-    "product_cost_rmb": {{"source_image_index": null, "raw_text": "", "confidence": "low"}},
-    "domestic_shipping_rmb": {{"source_image_index": null, "raw_text": "", "confidence": "low"}},
-     "dimensions": {{"source_image_index": null, "raw_text": "", "meaning": "", "semantic_note": "", "confidence": "low"}},
-     "weight": {{"source_image_index": null, "raw_text": "", "confidence": "low"}},
-     "structure": {{
-       "has_hard_bottom": {{"source_image_index": null, "raw_text": "", "region_description": "", "confidence": "low"}},
-       "has_hard_backboard": {{"source_image_index": null, "raw_text": "", "region_description": "", "confidence": "low"}},
-       "has_frame": {{"source_image_index": null, "raw_text": "", "region_description": "", "confidence": "low"}},
-       "has_rigid_insert": {{"source_image_index": null, "raw_text": "", "region_description": "", "confidence": "low"}},
-       "has_rigid_parts": {{"source_image_index": null, "raw_text": "", "region_description": "", "confidence": "low"}},
-       "retail_box_visible": {{"source_image_index": null, "raw_text": "", "region_description": "", "confidence": "low"}},
-       "hard_card_visible": {{"source_image_index": null, "raw_text": "", "region_description": "", "confidence": "low"}}
-     }},
-     "transport_outline": {{"source_image_index": null, "raw_text": "", "visible_features": [], "region_description": "", "confidence": "low"}}
-   }},
-  "packaging_proposal": {{
-    "normal": {{
-      "label": "正常档",
-      "packaging_state": "unknown|full_flat_fold|strong_compression|moderate_compression|shape_retained",
-      "packaging_method": "",
-      "length_cm": null, "width_cm": null, "height_cm": null, "weight_g": null,
-      "reasoning_summary": "", "confidence": "low|medium|high", "needs_review": true
-    }},
-    "conservative": {{
-      "label": "保守档",
-      "packaging_state": "unknown|full_flat_fold|strong_compression|moderate_compression|shape_retained",
-      "packaging_method": "",
-      "length_cm": null, "width_cm": null, "height_cm": null, "weight_g": null,
-      "reasoning_summary": "", "confidence": "low|medium|high", "needs_review": true
-    }},
-    "proposal_source": "vision_api",
-    "needs_review": true,
-    "review_reasons": []
-  }}
-}}
-Additional required behavior: scan every image and Merge product, price, dimensions, weight, structure, and packaging evidence before deciding structure or packaging; do not restrict by image slot. The image sequence and image slot have no semantic meaning. confirmed_facts supplied in context are authoritative facts: do not overwrite them, use them as the starting point for packaging inference, and report only a risk if they conflict with images. `product_cost_rmb` and `domestic_shipping_rmb` (domestic shipping) must only come from visible text, but visible approximate, starting-from, or range text still must be extracted. Return `product_cost_value_type` and `domestic_shipping_value_type` as exact, estimated, starting_from, range_min, or unknown. If the product is recognizable but dimensions or weight are not printed, return low-confidence visual estimates and complete non-empty normal and conservative packaging candidates. Only leave dimensions, weight, and packaging empty when the product itself is not recognizable. Return `dimension_value_source` and `weight_value_source` as image_text, ai_visual_estimate, or unknown. Every price, shipping, dimension, and weight field must be a JSON number or null. Never put ranges, multiple values, size labels, or units in numeric fields; preserve those original strings only in `field_evidence.raw_text`. Include product_type_raw, product_type_code, product_family_code and material_family_code if known.
+confirmed_facts 是用户已经确认的数据，优先级最高，不得修改。observed 是裸品/页面事实，bare_estimate 是 AI 推测的裸品近似值（不是图片事实），shipment 是发货外廓和发货总重量，三者不得混淆。
+不得输出或计算体积重、计费重、头程、固定服务费、尾程、总成本、利润、利润率、货代选择、CAL、规则编号、多候选方案或复杂分类字段。
 """.strip()
+        if not include_json_shape:
+            return prompt + "\n只返回符合给定 JSON Schema 的一个 JSON 对象，不要 Markdown。"
+        return prompt + "\n严格按以下 JSON 结构返回一个对象，不要 Markdown：\n" + json.dumps(
+            {
+                "product_name": "",
+                "observed": {
+                    "product_price_rmb": None,
+                    "page_shipping_rmb": None,
+                    "bare_dimensions_cm": {"length": None, "width": None, "height": None},
+                    "bare_weight_g": None,
+                },
+                "bare_estimate": {
+                    "length_cm": None,
+                    "width_cm": None,
+                    "height_cm": None,
+                    "weight_g": None,
+                },
+                "shipment": {
+                    "length_cm": 0,
+                    "width_cm": 0,
+                    "height_cm": 0,
+                    "weight_g": 0,
+                    "state": "",
+                },
+                "note": "",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     @staticmethod
     def _extract_content(response: dict[str, Any]) -> str:
@@ -281,6 +287,143 @@ Additional required behavior: scan every image and Merge product, price, dimensi
                 cleaned[field] = cls._parse_optional_number(cleaned[field], field_name=f"{prefix}.{field}", parse_issues=parse_issues)
         return cleaned
 
+    @classmethod
+    def _positive_shipment_number(cls, value: Any, *, field_name: str,
+                                  parse_issues: dict[str, dict[str, Any]]) -> float | None:
+        parsed = cls._parse_optional_number(value, field_name=field_name, parse_issues=parse_issues)
+        if parsed is not None and parsed <= 0:
+            parse_issues[field_name] = {"raw_value": value, "reason": "nonpositive_shipment_value"}
+            return None
+        return parsed
+
+    @classmethod
+    def proposal_from_shipment(cls, shipment: dict[str, Any], *, note: str = "",
+                               source: str = "vision_ai_v1") -> PackagingProposal:
+        """Adapt the small V1 shipment contract to the stable internal dual-slot model.
+
+        Both legacy slots intentionally contain the same single AI candidate.  No
+        local packaging rule or CAL asset is consulted here.
+        """
+        parse_issues: dict[str, dict[str, Any]] = {}
+        values = {
+            field: cls._positive_shipment_number(
+                shipment.get(field), field_name=f"shipment.{field}", parse_issues=parse_issues,
+            )
+            for field in ("length_cm", "width_cm", "height_cm", "weight_g")
+        }
+        state = str(shipment.get("state") or "").strip()
+        if _is_invalid_shipment_state(state):
+            parse_issues["shipment.state"] = {"raw_value": state, "reason": "fulfillment_or_timing_info"}
+            state = ""
+        complete = all(value is not None for value in values.values())
+        scenario_data = {
+            "packaging_state": PackagingState.UNKNOWN,
+            "packaging_method": state,
+            **values,
+            "reasoning_summary": str(note or "").strip(),
+            "confidence": "medium" if complete else "low",
+            "needs_review": not complete,
+        }
+        normal = PackagingScenario(label="AI估算", **scenario_data)
+        conservative = PackagingScenario(label="当前采用", **scenario_data)
+        review_reasons = []
+        if not complete:
+            review_reasons.append("AI发货尺寸或重量不完整，请人工填写")
+        if parse_issues:
+            review_reasons.append("AI发货数值未通过基础校验")
+        return PackagingProposal(
+            normal=normal,
+            conservative=conservative,
+            proposal_source=source,
+            needs_review=not complete,
+            review_reasons=review_reasons,
+            candidate_records={"runtime_v1_validation": {"parse_issues": parse_issues}},
+            engine_version="vision-runtime-v1",
+            calibration_version="",
+        )
+
+    @classmethod
+    def _parse_v1_payload(cls, payload: dict[str, Any], *, model: str) -> tuple[AIObservation, PackagingProposal]:
+        observed = payload.get("observed") if isinstance(payload.get("observed"), dict) else {}
+        dimensions = (
+            observed.get("bare_dimensions_cm")
+            if isinstance(observed.get("bare_dimensions_cm"), dict)
+            else {}
+        )
+        parse_issues: dict[str, dict[str, Any]] = {}
+        raw_observation = {
+            "product_name": str(payload.get("product_name") or "").strip(),
+            "display_product_summary": str(payload.get("product_name") or "").strip(),
+            "product_cost_rmb": cls._parse_optional_number(
+                observed.get("product_price_rmb"), field_name="observed.product_price_rmb",
+                parse_issues=parse_issues,
+            ),
+            "domestic_shipping_rmb": cls._parse_optional_number(
+                observed.get("page_shipping_rmb"), field_name="observed.page_shipping_rmb",
+                parse_issues=parse_issues,
+            ),
+            "length_cm": cls._parse_optional_number(
+                dimensions.get("length"), field_name="observed.bare_dimensions_cm.length",
+                parse_issues=parse_issues,
+            ),
+            "width_cm": cls._parse_optional_number(
+                dimensions.get("width"), field_name="observed.bare_dimensions_cm.width",
+                parse_issues=parse_issues,
+            ),
+            "height_cm": cls._parse_optional_number(
+                dimensions.get("height"), field_name="observed.bare_dimensions_cm.height",
+                parse_issues=parse_issues,
+            ),
+            "weight_g": cls._parse_optional_number(
+                observed.get("bare_weight_g"), field_name="observed.bare_weight_g",
+                parse_issues=parse_issues,
+            ),
+        }
+        if any(raw_observation[key] is not None for key in ("length_cm", "width_cm", "height_cm")):
+            raw_observation.update(dimension_scope="product_size", dimension_value_source="image_text")
+        if raw_observation["weight_g"] is not None:
+            raw_observation.update(weight_scope="net_weight", weight_value_source="image_text")
+        # bare_estimate: AI 推测的裸品近似值，仅在 observed 无值时作为回退
+        bare_est = payload.get("bare_estimate") if isinstance(payload.get("bare_estimate"), dict) else {}
+        raw_observation["bare_estimate"] = {
+            "length_cm": cls._parse_optional_number(
+                bare_est.get("length_cm"), field_name="bare_estimate.length_cm",
+                parse_issues=parse_issues,
+            ),
+            "width_cm": cls._parse_optional_number(
+                bare_est.get("width_cm"), field_name="bare_estimate.width_cm",
+                parse_issues=parse_issues,
+            ),
+            "height_cm": cls._parse_optional_number(
+                bare_est.get("height_cm"), field_name="bare_estimate.height_cm",
+                parse_issues=parse_issues,
+            ),
+            "weight_g": cls._parse_optional_number(
+                bare_est.get("weight_g"), field_name="bare_estimate.weight_g",
+                parse_issues=parse_issues,
+            ),
+        }
+        if raw_observation["product_cost_rmb"] is not None:
+            raw_observation["product_cost_value_type"] = "exact"
+        if raw_observation["domestic_shipping_rmb"] is not None:
+            raw_observation["domestic_shipping_value_type"] = "exact"
+        normalized_payload = dict(payload)
+        normalized_payload["observation"] = dict(raw_observation)
+        if parse_issues:
+            normalized_payload["numeric_parse_issues"] = parse_issues
+        observation = AIObservation.from_dict(raw_observation)
+        observation.source = "vision_api"
+        observation.model = model
+        observation.prompt_version = cls.PROMPT_VERSION
+        observation.raw_payload = normalized_payload
+        shipment = payload.get("shipment") if isinstance(payload.get("shipment"), dict) else {}
+        proposal = cls.proposal_from_shipment(
+            shipment,
+            note=str(payload.get("note") or ""),
+            source="vision_ai_v1",
+        )
+        return observation, proposal
+
     @staticmethod
     def _dimension_evidence_is_not_outer_dimensions(payload: dict[str, Any], observation: AIObservation) -> bool:
         """Keep range and component measurements as evidence, never transport input."""
@@ -308,6 +451,8 @@ Additional required behavior: scan every image and Merge product, price, dimensi
             raise RecognitionResponseError("视觉API返回内容不是有效JSON。") from exc
         if not isinstance(payload, dict):
             raise RecognitionResponseError("视觉API返回根节点必须是JSON对象。")
+        if "observed" in payload or "shipment" in payload:
+            return cls._parse_v1_payload(payload, model=model)
         raw = payload.get("observation")
         if not isinstance(raw, dict):
             raw = payload
@@ -398,13 +543,16 @@ Additional required behavior: scan every image and Merge product, price, dimensi
                                  original_scenarios=proposal.to_dict() if proposal else {})
 
     def _request_payload(self, *, endpoint: str, api_key: str, model: str,
-                         content: list[dict[str, Any]], timeout: int,
-                         cancellation: RecognitionCancellation | None) -> dict[str, Any]:
+                          content: list[dict[str, Any]], timeout: int,
+                          cancellation: RecognitionCancellation | None,
+                          response_format: dict[str, Any] | None = None) -> dict[str, Any]:
         body = {
             "model": model,
             "temperature": 0,
             "messages": [{"role": "user", "content": content}],
         }
+        if response_format:
+            body["response_format"] = response_format
         request = Request(
             endpoint,
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
@@ -448,10 +596,12 @@ Additional required behavior: scan every image and Merge product, price, dimensi
             profile, api_key = binding
             endpoint = self._endpoint(profile.api_url)
             model = profile.model_name
+            provider = profile.provider
         else:
             endpoint = self._endpoint(str(settings.get("vision_api_endpoint") or ""))
             api_key = str(settings.get("vision_api_key") or "").strip()
             model = str(settings.get("vision_api_model") or "").strip()
+            provider = "OpenAI" if urlparse(endpoint).netloc.lower() == "api.openai.com" else ""
         if not endpoint or not api_key or not model:
             raise RecognitionUnavailableError("AI识图尚未配置，请先在设置中填写API地址、密钥和模型。")
 
@@ -459,9 +609,16 @@ Additional required behavior: scan every image and Merge product, price, dimensi
         if not paths:
             raise RecognitionUnavailableError("没有可用于AI识图的图片。")
 
-        content: list[dict[str, Any]] = [{"type": "text", "text": self._prompt(len(paths))}]
-        if user_context:
-            content.append({"type": "text", "text": "confirmed_facts (authoritative; do not replace): " + json.dumps(user_context, ensure_ascii=False)})
+        uses_openai_schema = str(provider or "").strip().casefold() == "openai"
+        prompt = self._prompt(len(paths), include_json_shape=not uses_openai_schema)
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        confirmed_facts = dict(user_context or {})
+        # Accept the previous wrapper for callers still on the old contract, but
+        # always send exactly one confirmed_facts level to the model.
+        if set(confirmed_facts) == {"confirmed_facts"} and isinstance(confirmed_facts["confirmed_facts"], dict):
+            confirmed_facts = dict(confirmed_facts["confirmed_facts"])
+        if confirmed_facts:
+            content.append({"type": "text", "text": "confirmed_facts (authoritative; do not replace): " + json.dumps(confirmed_facts, ensure_ascii=False)})
         for path in paths:
             content.append({"type": "text", "text": "证据图：请扫描全部字段；位置不代表字段职责。"})
             content.append({"type": "image_url", "image_url": {"url": self._image_data_url(path), "detail": "high"}})
@@ -469,7 +626,7 @@ Additional required behavior: scan every image and Merge product, price, dimensi
         if diagnostic_operation:
             diagnostic_operation.request(
                 request_type="ai-recognition", provider_host=urlparse(endpoint).netloc,
-                model=model, prompt=self._prompt(len(paths)), schema_version=self.PROMPT_VERSION,
+                model=model, prompt=prompt, schema_version=self.PROMPT_VERSION,
                 temperature=0, timeout_seconds=timeout,
                 request_started_at=diagnostic_operation.started_at.isoformat(),
                 images=[DiagnosticLogger.image_metadata(path) for path in paths],
@@ -480,6 +637,12 @@ Additional required behavior: scan every image and Merge product, price, dimensi
             payload = self._request_payload(
                 endpoint=endpoint, api_key=api_key, model=model,
                 content=content, timeout=timeout, cancellation=cancellation,
+                response_format=(
+                    {"type": "json_schema", "json_schema": {
+                        "name": "vision_runtime_v1", "strict": True, "schema": self.RESPONSE_SCHEMA,
+                    }}
+                    if uses_openai_schema else None
+                ),
             )
             if diagnostic_operation:
                 # Persist the sanitized provider payload before parsing so parser

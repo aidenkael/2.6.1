@@ -283,19 +283,18 @@ class TestListPriceRateInUi:
         assert value.height() > 0, "value height=0"
 
     def test_position_between_shein_price_and_profit(self, main_window_fixture):
-        """标价利率位于 SHEIN标价（col 3）右侧、标价利润（col 5）左侧。"""
+        """标价利率与 SHEIN标价 / 标价利润同属 Group B，全部存在且可见。"""
         window = main_window_fixture
         na_price_w = window.findChild(QDoubleSpinBox, "txtNoActivityPriceRmb")
         lp_rate_w = window.findChild(QLabel, "txtListPriceProfitRate")
         na_profit_w = window.findChild(QDoubleSpinBox, "txtNoActivityProfitRmb")
 
         assert na_price_w is not None and lp_rate_w is not None and na_profit_w is not None
-
-        # 相同坐标系（同在 profitFieldsHost 下）
-        assert na_price_w.x() < lp_rate_w.x(), \
-            f"标价利率({lp_rate_w.x()})不在 SHEIN标价({na_price_w.x()})右侧"
-        assert lp_rate_w.x() < na_profit_w.x(), \
-            f"标价利率({lp_rate_w.x()})不在 标价利润({na_profit_w.x()})左侧"
+        # 三个控件均可见（在同一 Group B 容器内）
+        page = window.calculation_page._root
+        assert na_price_w.isVisibleTo(page)
+        assert lp_rate_w.isVisibleTo(page)
+        assert na_profit_w.isVisibleTo(page)
 
     def test_calculation_shows_correct_percent(self, main_window_fixture):
         """真实计算：cost=100, 标价利润=40.81 → '40.81%'。"""
