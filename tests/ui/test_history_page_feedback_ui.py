@@ -174,6 +174,13 @@ def _cell_label(page: HistoryPage, row: int, column: int) -> QLabel:
     return label
 
 
+def _cell_text(page: HistoryPage, row: int, column: int) -> str:
+    """key/value 单元格：按布局顺序拼接所有 QLabel 文本（键和值交替）。"""
+    widget = page.table.cellWidget(row, column)
+    labels = widget.findChildren(QLabel) if widget is not None else []
+    return "\n".join(label.text() for label in labels)
+
+
 # ---------------------------------------------------------------- 18. 8 列
 
 
@@ -276,11 +283,11 @@ def test_cost_column_reads_saved_snapshot(qapp, context):
     record_id = _create_v2(context)
     page = HistoryPage(context)
     row = _row_for(page, record_id)
-    text = _cell_label(page, row, 3).text()
-    assert "总成本    ¥237.26" in text
-    assert "国内成本  ¥66.80 + ¥28.00" in text
-    assert "头程      深圳货代  ¥92.48 + ¥10.00" in text
-    assert "尾程      $5.55 / ¥39.98" in text
+    text = _cell_text(page, row, 3)
+    assert "总成本" in text and "¥237.26" in text
+    assert "国内成本" in text and "¥94.80" in text  # 66.80 + 28.00
+    assert "总头程（深圳）" in text and "¥102.48" in text  # 92.48 + 10.00
+    assert "尾程" in text and "¥39.98 / $5.55" in text
 
 
 def test_price_and_profit_columns_read_saved_snapshot(qapp, context):
@@ -291,17 +298,17 @@ def test_price_and_profit_columns_read_saved_snapshot(qapp, context):
     assert "核价      $30.00" in price
     assert "标价      $30.00" in price
     assert "活动后    $27.00" in price
-    profit = _cell_label(page, row, 5).text()
-    assert "普通      ¥78.74 / 50.00%" in profit
-    assert "活动      ¥55.12 / 35.00%" in profit
+    profit = _cell_text(page, row, 5)
+    assert "标价" in profit and "¥78.74 / 50.00%" in profit
+    assert "活动后" in profit and "¥55.12 / 35.00%" in profit
 
 
 def test_legacy_record_profit_falls_back_safely(qapp, context):
     legacy_id = _create_legacy(context)
     page = HistoryPage(context)
     row = _row_for(page, legacy_id)
-    profit = _cell_label(page, row, 5).text()
-    assert "普通      ¥8.00 / 20.00%" in profit
+    profit = _cell_text(page, row, 5)
+    assert "标价" in profit and "¥8.00 / 20.00%" in profit
 
 
 def test_packaging_column_shows_bare_ai_current(qapp, context):
