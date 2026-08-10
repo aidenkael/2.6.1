@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDoubleSpinBox,
-    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -639,15 +638,16 @@ class CalculationPage(QWidget):
         # 标签与金额对齐由静态 main_window.ui 排版完成，旧的重量/计费重/物流总价行已删除
 
     def _apply_round3_ui_polish(self) -> None:
-        """利润区规则状态放字段标题上方（尾程输入已在 main_window.ui 静态独立卡内）。
+        """利润区恢复历史单排布局：一整排字段 + RMB/USD 上下排列 + 纵向对齐。
 
-        只移动既有控件，不改任何计算逻辑与算法。
+        规则状态（绿色已触发提示）放字段标题上方；仅比原版略微增加横向间距，
+        不使用分组框与竖向分隔线。只移动既有控件，不改任何计算逻辑与算法。
         """
         f = self._root.findChild
         # 利润区规则状态放字段标题上方；字号用 QFont（binder 用 setStyleSheet 只覆盖颜色）
         profit_grid = f(QGridLayout, "profitFieldsGrid")
         if profit_grid is not None:
-            profit_grid.setHorizontalSpacing(12)
+            profit_grid.setHorizontalSpacing(16)
             profit_grid.setVerticalSpacing(6)
             for layout_name in ("layoutNoActivityProfitTitle", "layoutActivityProfitTitle"):
                 hbox = f(QHBoxLayout, layout_name)
@@ -675,158 +675,23 @@ class CalculationPage(QWidget):
                     stack.addWidget(title_widget)
                 profit_grid.addLayout(stack, row, col, row_span, col_span)
 
-            # ---- 利润区三个业务组重排 ----
-            # 从 profitFieldsGrid 中取出所有控件，按业务组重排到三个浅边框容器。
-            # 不再使用竖向分隔线，组本身的浅边框提供视觉分隔。
-            grid_items = []
-            for idx in range(profit_grid.count()):
-                item = profit_grid.itemAt(idx)
-                grid_items.append(item)
-            for item in grid_items:
-                profit_grid.removeItem(item)
-
-            # profitFieldsHost 改为自适应宽度（取消固定 1190px）
+            # 统一标题和值的视觉中心（与历史单排版本一致，保持整排阅读自然）
+            for label_name in (
+                "lblSheinPrice", "lblProfitCost", "lblProfitRate",
+                "lblNoActivityPrice", "lblListPriceProfitRateTitle",
+                "lblPromotionReserve", "lblActivityPrice",
+            ):
+                label = f(QLabel, label_name)
+                if label is not None:
+                    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            # 利润区横向铺满可用宽度（取消固定 1190px），让单排字段在 1920 下更舒展
             profit_host = f(QWidget, "profitFieldsHost")
             if profit_host is not None:
                 profit_host.setMinimumWidth(0)
                 profit_host.setMaximumWidth(16777215)
                 from PySide6.QtWidgets import QSizePolicy as _QSP
                 profit_host.setSizePolicy(_QSP(_QSP.Policy.Preferred, _QSP.Policy.Preferred))
-
-            def _build_field_block(title_name, row1_names, row2_names=None, *, is_percent=False):
-                """构建统一的小 Field Block：标题 → RMB行 → USD行。"""
-                block = QVBoxLayout()
-                block.setContentsMargins(0, 0, 0, 0)
-                block.setSpacing(4)
-                title_lbl = f(QLabel, title_name)
-                if title_lbl is not None:
-                    title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    block.addWidget(title_lbl, alignment=Qt.AlignmentFlag.AlignHCenter)
-                for w_name in (row1_names or []):
-                    w = f(QDoubleSpinBox, w_name) if w_name.startswith(("txt", "spin")) else f(QLabel, w_name)
-                    if w is not None:
-                        if hasattr(w, "setFixedWidth"):
-                            w.setFixedWidth(96)
-                        block.addWidget(w, alignment=Qt.AlignmentFlag.AlignHCenter)
-                if row2_names:
-                    for w_name in row2_names:
-                        w = f(QDoubleSpinBox, w_name) if w_name.startswith(("txt", "spin")) else f(QLabel, w_name)
-                        if w is not None:
-                            if hasattr(w, "setFixedWidth"):
-                                w.setFixedWidth(96)
-                            block.addWidget(w, alignment=Qt.AlignmentFlag.AlignHCenter)
-                elif is_percent:
-                    spacer_h = QWidget()
-                    spacer_h.setFixedHeight(28)
-                    block.addWidget(spacer_h)
-                return block
-
-            def _build_block_with_status(title_name, status_name, row1_names, row2_names=None, *, is_percent=False):
-                """构建带规则状态标签的 Field Block。"""
-                block = QVBoxLayout()
-                block.setContentsMargins(0, 0, 0, 0)
-                block.setSpacing(4)
-                status_lbl = f(QLabel, status_name)
-                title_lbl = f(QLabel, title_name)
-                if status_lbl is not None:
-                    sfont = status_lbl.font()
-                    if sfont.pointSize() > 8:
-                        sfont.setPointSize(sfont.pointSize() - 1)
-                    status_lbl.setFont(sfont)
-                header = QVBoxLayout()
-                header.setContentsMargins(0, 0, 0, 0)
-                header.setSpacing(1)
-                if status_lbl is not None:
-                    header.addWidget(status_lbl, alignment=Qt.AlignmentFlag.AlignHCenter)
-                if title_lbl is not None:
-                    title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    header.addWidget(title_lbl, alignment=Qt.AlignmentFlag.AlignHCenter)
-                block.addLayout(header)
-                for w_name in (row1_names or []):
-                    w = f(QDoubleSpinBox, w_name) if w_name.startswith(("txt", "spin")) else f(QLabel, w_name)
-                    if w is not None:
-                        if hasattr(w, "setFixedWidth"):
-                            w.setFixedWidth(96)
-                        block.addWidget(w, alignment=Qt.AlignmentFlag.AlignHCenter)
-                if row2_names:
-                    for w_name in row2_names:
-                        w = f(QDoubleSpinBox, w_name) if w_name.startswith(("txt", "spin")) else f(QLabel, w_name)
-                        if w is not None:
-                            if hasattr(w, "setFixedWidth"):
-                                w.setFixedWidth(96)
-                            block.addWidget(w, alignment=Qt.AlignmentFlag.AlignHCenter)
-                elif is_percent:
-                    spacer_h = QWidget()
-                    spacer_h.setFixedHeight(28)
-                    block.addWidget(spacer_h)
-                return block
-
-            def _build_group(title_text, field_blocks, stretch_val):
-                """构建一个浅边框业务组。"""
-                group = QFrame()
-                group.setStyleSheet(
-                    "QFrame{border:1px solid #E1E7EF;border-radius:6px;background:transparent;}"
-                )
-                outer = QVBoxLayout(group)
-                outer.setContentsMargins(10, 7, 10, 8)
-                outer.setSpacing(5)
-                title = QLabel(title_text)
-                title.setStyleSheet("font-weight:600;color:#33445d;border:none;")
-                outer.addWidget(title)
-                row = QHBoxLayout()
-                row.setSpacing(10)
-                for fb in field_blocks:
-                    row.addLayout(fb, 1)
-                outer.addLayout(row)
-                outer.addStretch(1)
-                return group, stretch_val
-
-            # Group A: 基础数据 (SHEIN核价 / 计算总成本)
-            blk_shein = _build_field_block(
-                "lblSheinPrice", ["txtSheinPriceRmb"], ["txtSheinPriceUsd"])
-            blk_cost = _build_field_block(
-                "lblCalculatedCost", ["txtCalculatedCostRmb"], ["txtCalculatedCostUsd"])
-            group_a, str_a = _build_group("\u57fa\u7840\u6570\u636e", [blk_shein, blk_cost], 20)
-
-            # Group B: 标价与利润目标
-            blk_rate = _build_field_block(
-                "lblProfitRate", ["spinProfitRate"], is_percent=True)
-            blk_na_price = _build_field_block(
-                "lblNoActivityPrice", ["txtNoActivityPriceRmb"], ["txtNoActivityPriceUsd"])
-            blk_na_profit = _build_block_with_status(
-                "lblNoActivityProfit", "lblNoActivitySubsidyStatus",
-                ["txtNoActivityProfitRmb"], ["txtNoActivityProfitUsd"])
-            blk_list_rate = _build_field_block(
-                "lblListPriceProfitRateTitle", ["txtListPriceProfitRate"], is_percent=True)
-            group_b, str_b = _build_group(
-                "\u6807\u4ef7\u4e0e\u5229\u6da6\u76ee\u6807",
-                [blk_rate, blk_na_price, blk_na_profit, blk_list_rate], 44)
-
-            # Group C: 活动测算
-            blk_reserve = _build_field_block(
-                "lblPromotionReserve", ["spinPromotionReserve"], is_percent=True)
-            blk_act_price = _build_field_block(
-                "lblActivityPrice", ["txtActivityPriceRmb"], ["txtActivityPriceUsd"])
-            blk_act_profit = _build_block_with_status(
-                "lblActivityProfit", "lblActivitySubsidyStatus",
-                ["txtActivityProfitRmb"], ["txtActivityProfitUsd"])
-            group_c, str_c = _build_group(
-                "\u6d3b\u52a8\u6d4b\u7b97",
-                [blk_reserve, blk_act_price, blk_act_profit], 36)
-
-            # 将三个组添加到 profitFieldsHostLayout
-            profit_host_layout = f(QVBoxLayout, "profitFieldsHostLayout")
-            if profit_host_layout is not None:
-                # 清空现有内容
-                while profit_host_layout.count():
-                    profit_host_layout.takeAt(0)
-                groups_row = QHBoxLayout()
-                groups_row.setSpacing(10)
-                groups_row.setContentsMargins(0, 0, 0, 0)
-                groups_row.addWidget(group_a, str_a)
-                groups_row.addWidget(group_b, str_b)
-                groups_row.addWidget(group_c, str_c)
-                profit_host_layout.addLayout(groups_row)
         # 此结论仅重复利润区标题提示，且在紧凑窗口中占用无效的独立行。
         # 计算与字段布局完全不依赖它，因此隐藏该显示冗余项。
         profit_conclusion = f(QLabel, "lblProfitConclusion")

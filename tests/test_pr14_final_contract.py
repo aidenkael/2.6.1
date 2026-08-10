@@ -270,7 +270,7 @@ def test_profit_snapshot_restores_last_reserve_and_rate(binder, qapp):
     assert restored.is_in_snapshot_mode()
 
 
-def test_profit_ui_object_names_and_three_groups_exist(qapp, app_context):
+def test_profit_ui_object_names_unique_and_no_separators(qapp, app_context):
     page = CalculationPage(app_context)
     try:
         for name in (
