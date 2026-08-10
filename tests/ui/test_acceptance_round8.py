@@ -16,7 +16,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QPushButton, QDoubleSpinBox, QGridLayout, QMessageBox, QWidget
+from PySide6.QtWidgets import (
+    QAbstractSpinBox,
+    QLabel,
+    QPushButton,
+    QDoubleSpinBox,
+    QGridLayout,
+    QMessageBox,
+    QWidget,
+)
 
 from profit_accounting_26.application import AppContext, SettingsService
 from profit_accounting_26.domain.rules import (
@@ -265,14 +273,16 @@ class TestTailFeeUsdLiveLink:
 # ── 问题 3：标价利率正式写入 main_window.ui ──────────────────────
 
 class TestListPriceRateInUi:
-    """标价利率 可见性 / 几何位置 / 计算 / 不可编辑。"""
+    """标价利率 可见性 / 几何位置 / 计算 / 可编辑。"""
 
     def test_find_children_and_visible(self, main_window_fixture):
         window = main_window_fixture
         title = window.findChild(QLabel, "lblListPriceProfitRateTitle")
-        value = window.findChild(QLabel, "txtListPriceProfitRate")
+        value = window.findChild(QDoubleSpinBox, "txtListPriceProfitRate")
+        unit = window.findChild(QLabel, "unit_txtListPriceProfitRate")
         assert title is not None, "lblListPriceProfitRateTitle 未找到"
         assert value is not None, "txtListPriceProfitRate 未找到"
+        assert unit is not None and unit.text() == "%", "标价利率 % 单位标签缺失"
 
         page = window.calculation_page._root
         assert title.isVisibleTo(page), "title 不可见"
@@ -283,45 +293,55 @@ class TestListPriceRateInUi:
         assert value.height() > 0, "value height=0"
 
     def test_position_between_shein_price_and_profit(self, main_window_fixture):
-        """标价利率与 SHEIN标价 / 标价利润同属 Group B，全部存在且可见。"""
+        """标价利率与 SHEIN标价 / 标价利润同属标价区，水平顺序正确。"""
         window = main_window_fixture
         na_price_w = window.findChild(QDoubleSpinBox, "txtNoActivityPriceRmb")
-        lp_rate_w = window.findChild(QLabel, "txtListPriceProfitRate")
+        lp_rate_w = window.findChild(QDoubleSpinBox, "txtListPriceProfitRate")
         na_profit_w = window.findChild(QDoubleSpinBox, "txtNoActivityProfitRmb")
 
         assert na_price_w is not None and lp_rate_w is not None and na_profit_w is not None
-        # 三个控件均可见（在同一 Group B 容器内）
+        # 三个控件均可见且水平顺序：SHEIN标价 < 标价利率 < 标价利润
         page = window.calculation_page._root
         assert na_price_w.isVisibleTo(page)
         assert lp_rate_w.isVisibleTo(page)
         assert na_profit_w.isVisibleTo(page)
+        xs = [
+            na_price_w.mapTo(page, na_price_w.rect().center()).x(),
+            lp_rate_w.mapTo(page, lp_rate_w.rect().center()).x(),
+            na_profit_w.mapTo(page, na_profit_w.rect().center()).x(),
+        ]
+        assert xs[0] < xs[1] < xs[2], f"标价区水平顺序错误: {xs}"
 
     def test_calculation_shows_correct_percent(self, main_window_fixture):
         """真实计算：cost=100, 标价利润=40.81 → '40.81%'。"""
         window = main_window_fixture
         binder = window.calculation_page.profit_binder
-        rate_label = window.findChild(QLabel, "txtListPriceProfitRate")
+        rate_spin = window.findChild(QDoubleSpinBox, "txtListPriceProfitRate")
 
         binder.set_calculation_cost(100.0)
         # 直接设置无活动利润 = 40.81 触发 driver 反推
         binder._profit_driver = DRIVER_NO_ACTIVITY_PROFIT
         binder.txt_na_profit_rmb.setValue(40.81)
-        assert rate_label.text() == "40.81%", f"标价利率应为 '40.81%'，实际 '{rate_label.text()}'"
+        assert rate_spin.value() == pytest.approx(40.81, abs=0.01), \
+            f"标价利率应为 40.81%，实际 {rate_spin.value()}"
 
-    def test_cost_zero_shows_dash(self, main_window_fixture):
-        """成本为 0 时显示 '--'。"""
+    def test_cost_zero_shows_zero(self, main_window_fixture):
+        """成本为 0 时安全显示 0，不异常。"""
         window = main_window_fixture
         binder = window.calculation_page.profit_binder
-        rate_label = window.findChild(QLabel, "txtListPriceProfitRate")
+        rate_spin = window.findChild(QDoubleSpinBox, "txtListPriceProfitRate")
 
         binder.set_calculation_cost(0.0)
         binder.txt_na_price_usd.setValue(20.0)
-        assert rate_label.text() == "--", f"成本=0 应显示 '--'，实际 '{rate_label.text()}'"
+        assert rate_spin.value() == 0.0, f"成本=0 应显示 0，实际 {rate_spin.value()}"
 
-    def test_user_cannot_edit(self, main_window_fixture):
-        """标价利率控件不可编辑、不获得焦点。"""
+    def test_user_can_edit(self, main_window_fixture):
+        """标价利率是可编辑百分比输入框：无上下箭头、2 位小数、可输入负值。"""
         window = main_window_fixture
-        value = window.findChild(QLabel, "txtListPriceProfitRate")
-        # QLabel 天然不可编辑
-        assert isinstance(value, QLabel)
-        assert value.focusPolicy() == Qt.FocusPolicy.NoFocus
+        value = window.findChild(QDoubleSpinBox, "txtListPriceProfitRate")
+        assert isinstance(value, QDoubleSpinBox)
+        assert not value.isReadOnly()
+        assert value.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
+        assert value.decimals() == 2
+        value.setValue(-5.0)
+        assert value.value() == -5.0
