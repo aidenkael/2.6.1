@@ -104,6 +104,7 @@ def test_switch_data_dir_migrates_all_user_config(tmp_path: Path):
 
     assert summary.copied_files == ["settings.json", "api_profiles.json", "api_keys.local.json"]
     assert summary.calibration_registry_migrated is True
+    assert summary.copied_package_files > 0
 
     # 设置：汇率 / 货代 / 默认+自定义利润规则
     migrated = SettingsService(target / "settings.json").load()
@@ -128,6 +129,8 @@ def test_switch_data_dir_migrates_all_user_config(tmp_path: Path):
     assert active["version"] == "custom-v2"
     assert Path(active["path"]).is_file()
     assert str(Path(active["path"]).resolve()).startswith(str(target.resolve()))
+    assert (target / "calibration_packages").is_dir()
+    assert any(item.is_file() for item in (target / "calibration_packages").rglob("*"))
 
 
 def test_switch_does_not_copy_history_or_images(tmp_path: Path):
@@ -165,8 +168,53 @@ def test_switch_does_not_merge_into_existing_target_database(tmp_path: Path):
     )
 
     assert summary.calibration_registry_skipped_reason is not None
+    assert summary.copied_package_files == 0
     assert len(target_store.list_calibration_packages()) == 0
     assert len(target_store.list_records(limit=10)) == 1
+    assert not (target / "calibration_packages").exists(), "目标库有历史时不得复制校准包文件"
+
+
+def test_switch_skips_calibration_when_target_has_registry(tmp_path: Path):
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    ctx = _populate_source(source)
+    target_store = SQLiteStore(target / "profit_accounting_26.sqlite3")
+    target_store.initialize()
+
+    # 目标库先有自己的校准注册表（版本 own-v1）
+    own = target / "own_pkg.json"
+    own.write_text(
+        json.dumps({"version": "own-v1", "samples": _samples("OWN")}),
+        encoding="utf-8",
+    )
+    manager = CalibrationManager(target_store, _make_paths(target))
+    manager.import_package(own)
+    before_files = {
+        str(item.relative_to(target))
+        for item in (target / "calibration_packages").rglob("*")
+        if item.is_file()
+    }
+
+    summary = sync_user_config(
+        ctx["paths"].data_dir,
+        target,
+        source_store=ctx["store"],
+        target_store=target_store,
+    )
+
+    assert summary.calibration_registry_skipped_reason is not None
+    assert "已有校准注册表" in summary.calibration_registry_skipped_reason
+    assert summary.copied_package_files == 0
+    # 目标注册表保持原样：只有 own-v1，没有被源包污染
+    assert {item["version"] for item in target_store.list_calibration_packages()} == {"own-v1"}
+    assert target_store.get_active_calibration()["version"] == "own-v1"
+    # 目标校准包文件没有被覆盖或新增
+    after_files = {
+        str(item.relative_to(target))
+        for item in (target / "calibration_packages").rglob("*")
+        if item.is_file()
+    }
+    assert after_files == before_files
 
 
 def test_new_context_after_switch_reads_only_new_data_dir(tmp_path: Path, monkeypatch):

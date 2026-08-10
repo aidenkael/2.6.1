@@ -218,14 +218,27 @@ class MainWindowBinder:
         from profit_accounting_26.shared import ApplicationPaths
         from profit_accounting_26.storage import SQLiteStore
 
-        target = ApplicationPaths.save_data_dir(selected)
+        # 1) 先解析并创建目标目录；此时不写 location.json。
+        target = Path(selected).expanduser().resolve()
+        target.mkdir(parents=True, exist_ok=True)
         target_store = SQLiteStore(target / self.context.paths.database_path.name)
-        summary = sync_user_config(
-            self.context.paths.data_dir,
-            target,
-            source_store=self.context.store,
-            target_store=target_store,
-        )
+        try:
+            summary = sync_user_config(
+                self.context.paths.data_dir,
+                target,
+                source_store=self.context.store,
+                target_store=target_store,
+            )
+        except Exception as exc:
+            # 2) 同步失败：location.json 保持原 data_dir，明确提示，不进入半迁移目录。
+            QMessageBox.critical(
+                self.window,
+                "数据目录切换失败",
+                f"配置同步失败，已保持原数据目录：\n{self.context.paths.data_dir}\n\n原因：{exc}",
+            )
+            return
+        # 3) 同步全部成功后才提交 location.json。
+        ApplicationPaths.save_data_dir(target)
         synced = "、".join(summary.copied_files) or "（无配置文件）"
         notes = []
         if summary.copied_package_files:
@@ -242,7 +255,7 @@ class MainWindowBinder:
             f"{'；'.join(notes)}\n"
             "历史记录与图片不会迁移；软件重启后数据目录生效。",
         )
-        if self.lbl_data_dir:
+        if getattr(self, "lbl_data_dir", None):
             self.lbl_data_dir.setText(str(self.context.paths.data_dir))
 
     # ------------------------------------------------------------------
