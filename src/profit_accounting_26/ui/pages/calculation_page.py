@@ -412,13 +412,33 @@ class CalculationPage(QWidget):
         self.lbl_bare_weight_source.setObjectName("lblBareWeightSource")
         self.lbl_bare_weight_source.setFont(_src_font)
         self.lbl_bare_weight_source.setStyleSheet("color:#607089;")
-        # 把来源标签插入现有布局尾部
-        _bare_height_layout = f(QHBoxLayout, "layout_spinBareHeightCm")
-        if _bare_height_layout is not None:
-            _bare_height_layout.addWidget(self.lbl_bare_dim_source)
+        def _insert_source_after_title(layout, title_name: str, source_label: QLabel) -> bool:
+            """把来源标签插到对应标题右侧（控件不换，只换布局位置）。"""
+            if layout is None:
+                return False
+            title_widget = f(QLabel, title_name)
+            if title_widget is None:
+                return False
+            index = layout.indexOf(title_widget)
+            if index < 0:
+                return False
+            layout.insertWidget(index + 1, source_label)
+            return True
+
+        # 把来源标签插到各自标题右侧；标题行容器缺失时退回原输入行尾部，避免来源标签丢失
+        _dim_title_layout = f(QHBoxLayout, "layout_bareDimensionsTitle")
+        if not _insert_source_after_title(
+            _dim_title_layout, "lblBareDimensionsTitle", self.lbl_bare_dim_source
+        ):
+            _bare_height_layout = f(QHBoxLayout, "layout_spinBareHeightCm")
+            if _bare_height_layout is not None:
+                _bare_height_layout.addWidget(self.lbl_bare_dim_source)
         _bare_weight_layout = f(QHBoxLayout, "layout_spinBareWeightG")
-        if _bare_weight_layout is not None:
-            _bare_weight_layout.addWidget(self.lbl_bare_weight_source)
+        if not _insert_source_after_title(
+            _bare_weight_layout, "lblBareWeight", self.lbl_bare_weight_source
+        ):
+            if _bare_weight_layout is not None:
+                _bare_weight_layout.addWidget(self.lbl_bare_weight_source)
         # AI估算（原正常档位置）：第一次 AI 结果，全部只读，不参与正式计算
         self.normal_fields: dict[str, Any] = {
             "name": "AI估算",
