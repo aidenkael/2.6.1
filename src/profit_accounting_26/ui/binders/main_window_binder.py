@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from profit_accounting_26.application import AppContext, SettingsService
+from profit_accounting_26.application import AppContext
 from profit_accounting_26.ui.greeting_header import GreetingHeaderController
 from profit_accounting_26.ui.ui_loader import load_settings_page
 
@@ -214,17 +214,33 @@ class MainWindowBinder:
         )
         if not selected:
             return
+        from profit_accounting_26.application.settings_migration import sync_user_config
         from profit_accounting_26.shared import ApplicationPaths
+        from profit_accounting_26.storage import SQLiteStore
 
         target = ApplicationPaths.save_data_dir(selected)
-        SettingsService.save_copy(
-            self.context.settings_service.load(),
-            target / "settings.json",
+        target_store = SQLiteStore(target / self.context.paths.database_path.name)
+        summary = sync_user_config(
+            self.context.paths.data_dir,
+            target,
+            source_store=self.context.store,
+            target_store=target_store,
         )
+        synced = "、".join(summary.copied_files) or "（无配置文件）"
+        notes = []
+        if summary.copied_package_files:
+            notes.append(f"校准包文件 {summary.copied_package_files} 个")
+        if summary.calibration_registry_migrated:
+            notes.append("校准版本注册表已同步")
+        elif summary.calibration_registry_skipped_reason:
+            notes.append(f"校准版本注册表未同步：{summary.calibration_registry_skipped_reason}")
         QMessageBox.information(
             self.window,
             "数据目录已设置",
-            f"新数据目录：{target}\n当前设置已同步；软件重启后数据目录生效。",
+            f"新数据目录：{target}\n"
+            f"已同步配置：{synced}\n"
+            f"{'；'.join(notes)}\n"
+            "历史记录与图片不会迁移；软件重启后数据目录生效。",
         )
         if self.lbl_data_dir:
             self.lbl_data_dir.setText(str(self.context.paths.data_dir))
