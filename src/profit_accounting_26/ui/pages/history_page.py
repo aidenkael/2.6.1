@@ -269,9 +269,10 @@ class HistoryPage(QWidget):
         self.table.setColumnWidth(3, 250)
         self.table.setColumnWidth(4, 150)
         self.table.setColumnWidth(5, 170)
-        # 包装数据列缩窄（裸品/AI首次/当前 三行稳定显示），释放宽度给校准内容
-        self.table.setColumnWidth(6, 150)
-        self.table.setColumnWidth(7, 340)
+        # 包装数据列：足够一行显示"17×32×17 / 720g"类标准数据，不挤不换行
+        self.table.setColumnWidth(6, 200)
+        # 校准内容列继续承担主要剩余伸展宽度（Stretch）
+        self.table.setColumnWidth(7, 290)
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(_ROW_HEIGHT)
         self.table.setAlternatingRowColors(True)
@@ -343,7 +344,7 @@ class HistoryPage(QWidget):
         self.table.setCellWidget(row, 3, self._with_column_border(self._kv_cell(self._cost_rows(payload))))
         self.table.setCellWidget(row, 4, self._with_column_border(self._kv_cell(self._price_rows(payload))))
         self.table.setCellWidget(row, 5, self._with_column_border(self._kv_cell(self._profit_rows(payload))))
-        self.table.setCellWidget(row, 6, self._with_column_border(self._multiline_cell(self._packaging_text(payload))))
+        self.table.setCellWidget(row, 6, self._with_column_border(self._kv_cell(self._packaging_rows(payload))))
         self.table.setCellWidget(row, 7, self._calibration_cell(payload))
 
     @staticmethod
@@ -534,7 +535,12 @@ class HistoryPage(QWidget):
             activity_value = "—"
         return [("标价利润", list_price_value), ("活动利润", activity_value)]
 
-    def _packaging_text(self, payload: dict[str, Any]) -> str:
+    def _packaging_rows(self, payload: dict[str, Any]) -> list[tuple]:
+        """包装数据列 key/value 行：裸品 / AI首次 / 当前，左侧标题、右侧尺寸重量。
+
+        采用 _kv_cell 局部布局，三行标题左对齐、三行数据右对齐，
+        不依赖空格模拟对齐，正常尺寸重量在列宽内不换行。
+        """
         layers = payload.get("layers") if isinstance(payload.get("layers"), dict) else {}
         adopted = layers.get("adopted") if isinstance(layers.get("adopted"), dict) else {}
         bare = _dims_text(adopted.get("bare"))
@@ -547,7 +553,12 @@ class HistoryPage(QWidget):
             if isinstance(adopted_packaging, dict):
                 ai_text = _dims_text(adopted_packaging.get("normal"))
         current = _dims_text(v2.current_estimate)
-        return f"裸品 {bare}\nAI {ai_text}\n当前 {current}"
+        return [("裸品", bare), ("AI", ai_text), ("当前", current)]
+
+    def _packaging_text(self, payload: dict[str, Any]) -> str:
+        """保留：供 tooltip 或外部文本引用；单元格渲染改用 _packaging_rows + _kv_cell。"""
+        rows = self._packaging_rows(payload)
+        return "\n".join(f"{key} {value}" for key, value in rows)
 
     def _calibration_text(self, payload: dict[str, Any]) -> str:
         """用户层面只有两态：未反馈 / 已反馈 + dims + note + 真实头程。

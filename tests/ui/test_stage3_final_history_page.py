@@ -274,7 +274,7 @@ class TestHistoryPageFinalUi:
             page.deleteLater()
 
     def test_packaging_narrower_calibration_wider(self, qapp, context):
-        """7+8：包装数据列比原 195px 更窄；校准内容列获得更多宽度。"""
+        """7+8：包装数据列足够一行显示标准数据；校准内容列获得更多宽度。"""
         _create(context, "睡帽")
         page = HistoryPage(context)
         try:
@@ -282,7 +282,8 @@ class TestHistoryPageFinalUi:
             qapp.processEvents()
             packaging = page.table.columnWidth(6)
             calibration = page.table.columnWidth(7)
-            assert packaging == 150 < 195
+            # 包装列从阶段3的150px放宽到200px，保证"17×32×17 / 720g"不换行
+            assert packaging == 200
             assert calibration > packaging
             assert calibration > 170  # 原校准列固定 170px
         finally:
