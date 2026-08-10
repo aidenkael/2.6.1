@@ -282,10 +282,10 @@ class TestHistoryPageFinalUi:
             qapp.processEvents()
             packaging = page.table.columnWidth(6)
             calibration = page.table.columnWidth(7)
-            # 包装列从阶段3的150px放宽到200px，保证"17×32×17 / 720g"不换行
-            assert packaging == 200
+            # Stage 4 验收：包装列从 200px 调整为 185px，保证不换行且让出宽度给利润列
+            assert packaging == 185
             assert calibration > packaging
-            assert calibration > 170  # 原校准列固定 170px
+            assert calibration > 170
         finally:
             page.deleteLater()
 
