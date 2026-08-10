@@ -35,7 +35,7 @@ def samples(sample_id: str) -> list[dict]:
     ]
 
 
-def test_import_json_activates_runtime_service_and_rollback_restores_builtin(tmp_path: Path):
+def test_import_json_activates_runtime_service_and_activate_restores_builtin(tmp_path: Path):
     paths = make_paths(tmp_path / "data")
     paths.ensure()
     store = SQLiteStore(paths.database_path)
@@ -57,7 +57,8 @@ def test_import_json_activates_runtime_service_and_rollback_restores_builtin(tmp
     assert service.calibration_version == "custom-v2"
     assert service.samples[0]["sample_id"] == "CUSTOM"
 
-    restored = manager.rollback()
+    # Stage 4：rollback 已删除，改用任意版本启用切回 builtin
+    restored = manager.activate(active["id"])
     assert restored is not None
     assert restored["version"] == "builtin-v1"
     assert service.calibration_version == "builtin-v1"

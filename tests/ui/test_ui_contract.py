@@ -75,12 +75,10 @@ class TestUIFileContract:
         names = {w.get("name") for w in main_window_tree.iter("widget") if w.get("name")}
         names |= {l.get("name") for l in main_window_tree.iter("layout") if l.get("name")}
         required = [
-            # 导航
-            "btnNavImageSearch", "btnNavCalculation", "btnNavHistory",
-            "btnNavImportExport", "btnNavCalibration", "btnNavSettings",
-            # 页面
-            "pageImageSearch", "pageCalculation", "pageHistory",
-            "pageImportExport", "pageCalibration", "pageSettingsHost",
+            # 导航（Stage 4：精简为 3 项）
+            "btnNavCalculation", "btnNavHistory", "btnNavSettings",
+            # 页面（Stage 4：以图搜图/数据导入导出/模型校准反馈已删除）
+            "pageCalculation", "pageHistory", "pageSettingsHost",
             "mainStack",
             # 问候
             "btnRefreshGreeting", "lblGreetingTitle", "lblGreetingSubtitle",
@@ -129,6 +127,10 @@ class TestUIFileContract:
             "tableForwarders", "btnAddFreightForwarder", "btnSaveForwarders",
             "listProfitRules", "btnAddProfitRule", "btnSaveProfitRule",
             "btnDisableProfitRule", "btnArchiveProfitRule", "btnDeleteProfitRule",
+            # 物流校准规则（Stage 4：校准包版本管理迁入 Settings）
+            "calibrationSection", "tableCalibrationPackages",
+            "btnImportCalibrationPackage", "btnActivateCalibrationPackage",
+            "btnDeleteCalibrationPackage", "lblCalibrationActiveStatus",
         ]
         missing = [n for n in required if n not in names]
         assert not missing, f"settings_page.ui 缺少 objectName: {missing}"
@@ -136,8 +138,9 @@ class TestUIFileContract:
     def test_ui_sha256_matches_contract(self):
         """.ui SHA 与输入文件一致。"""
         expected = {
-            "main_window.ui": "b52f336b44f579716bab1f8097320760c67098412c93c1182c2fcb483c21a0f4",
-            "settings_page.ui": "88a1422fa758e9eed835b2f422b9fcd070c2d69bb1eac025cbafb8aa0cb579ae",
+            # Stage 4：导航精简 + 校准管理迁入 Settings 后的新契约 SHA
+            "main_window.ui": "cbd5759187214770bc40df03d6f85a54839b13bddc8bf42175b31f0d4431aba8",
+            "settings_page.ui": "97c57f1980586cd65f1333aee449188930d35db11b7f983d66f3f08566101a63",
         }
         for name, sha in expected.items():
             data = (FORMS_DIR / name).read_bytes()
@@ -168,11 +171,11 @@ class TestRuntimeLoading:
         from PySide6.QtWidgets import QMainWindow
         assert isinstance(main_window_ui, QMainWindow)
 
-    def test_main_stack_has_six_pages(self, main_window_ui):
+    def test_main_stack_has_three_pages(self, main_window_ui):
         from PySide6.QtWidgets import QStackedWidget
         stack = main_window_ui.findChild(QStackedWidget, "mainStack")
         assert stack is not None
-        assert stack.count() == 6
+        assert stack.count() == 3
 
     def test_profit_fields_accessible(self, main_window_ui):
         from PySide6.QtWidgets import QDoubleSpinBox

@@ -14,7 +14,7 @@ from profit_accounting_26.storage import SQLiteStore
 
 
 class CalibrationManager:
-    """Import, activate and roll back data-only packaging calibration packages."""
+    """Import, activate and safely delete data-only packaging calibration packages."""
 
     MAX_JSON_BYTES = 20 * 1024 * 1024
 
@@ -283,9 +283,3 @@ class CalibrationManager:
         except ValueError:
             return
         shutil.rmtree(package_dir, ignore_errors=True)
-
-    def rollback(self) -> dict[str, Any] | None:
-        target = self.store.activate_previous_calibration()
-        if target is not None:
-            self._activate_service(target)
-        return target
