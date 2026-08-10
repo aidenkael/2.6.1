@@ -93,8 +93,8 @@ class TestThreeWeightRowsUnified:
             assert card.geometry().right() - unit.geometry().right() >= 8, f"{card_name} 内 g 被推到最右"
 
     def test_title_to_spin_gap_is_small(self, shown_page, qapp):
+        # AI估算/当前采用 两行结构不变：标题 → 输入框，间距 6-18px
         pairs = (
-            ("lblBareWeight", "spinBareWeightG"),
             ("lblNormalWeight", "spinNormalWeightG"),
             ("lblConservativeWeight", "spinConservativeWeightG"),
         )
@@ -103,6 +103,14 @@ class TestThreeWeightRowsUnified:
             spin = _find(shown_page, QDoubleSpinBox, spin_name)
             gap = spin.geometry().left() - label.geometry().right()
             assert 6 <= gap <= 18, f"{label_name} 到输入框间距异常: {gap}"
+        # 裸重行：标题 → 来源标签 → 输入框，两侧间距均小而自然
+        title = _find(shown_page, QLabel, "lblBareWeight")
+        source = _find(shown_page, QLabel, "lblBareWeightSource")
+        spin = _find(shown_page, QDoubleSpinBox, "spinBareWeightG")
+        title_to_source = source.geometry().left() - title.geometry().right()
+        source_to_spin = spin.geometry().left() - source.geometry().right()
+        assert 3 <= title_to_source <= 12, f"裸重标题到来源间距异常: {title_to_source}"
+        assert 3 <= source_to_spin <= 12, f"裸重来源到输入框间距异常: {source_to_spin}"
 
     def test_9999_9_fits_inside_spin(self, shown_page, qapp):
         for spin_name in ("spinBareWeightG", "spinNormalWeightG", "spinConservativeWeightG"):
