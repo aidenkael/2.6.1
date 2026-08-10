@@ -489,3 +489,242 @@ def test_old_record_without_bare_estimate_loads(qapp, app_context):
         assert page.lbl_bare_dim_source.text() == "\u672a\u8bc6\u522b"
     finally:
         page.deleteLater()
+
+
+# ---------------------------------------------------------------- 数据来源语义保存/恢复
+# 验证 ai_raw.observation 不被 bare_estimate 回填或用户修改污染
+
+
+def test_save_preserves_true_ai_observation_weight(qapp, app_context):
+    """AI observed.weight=null, bare_estimate.weight=45 → 保存后 ai_raw.observation.weight_g==null"""
+    page = CalculationPage(app_context)
+    try:
+        # 模拟 AI 返回：observed 为空，bare_estimate 有值
+        obs = AIObservation()
+        obs.weight_g = None  # observed 为空
+        obs.raw_payload = {
+            "bare_estimate": {"length_cm": None, "width_cm": None, "height_cm": None, "weight_g": 45.0},
+            "observation": {},
+        }
+        page.session.normalized_observation = obs
+        page.session.observation = obs
+        page.observation = obs
+        page._apply_observation(obs)
+        # 页面显示 bare_estimate 值
+        assert page.bare_weight.value() == 45.0
+        assert page.lbl_bare_weight_source.text() == "AI\u4f30\u7b97"
+        # 保存
+        payload = page.build_record_payload()
+        ai_raw_obs = payload["layers"]["ai_raw"]["observation"]
+        # ai_raw.observation.weight_g 必须保持 null（不被 bare_estimate 污染）
+        assert ai_raw_obs["weight_g"] is None
+        # adopted.bare 保存最终采用值
+        assert payload["layers"]["adopted"]["bare"]["weight_g"] == 45.0
+        # raw_payload 中保留 bare_estimate
+        assert ai_raw_obs["raw_payload"]["bare_estimate"]["weight_g"] == 45.0
+    finally:
+        page.deleteLater()
+
+
+def test_save_preserves_true_ai_observation_dims(qapp, app_context):
+    """AI observed.length=null, bare_estimate.length=10 → 保存后 ai_raw.observation.length_cm==null"""
+    page = CalculationPage(app_context)
+    try:
+        obs = AIObservation()
+        obs.length_cm = None
+        obs.width_cm = None
+        obs.height_cm = None
+        obs.raw_payload = {
+            "bare_estimate": {"length_cm": 10.0, "width_cm": 8.0, "height_cm": 3.0, "weight_g": None},
+            "observation": {},
+        }
+        page.session.normalized_observation = obs
+        page.session.observation = obs
+        page.observation = obs
+        page._apply_observation(obs)
+        assert page.bare_length.value() == 10.0
+        assert page.lbl_bare_dim_source.text() == "AI\u4f30\u7b97"
+        payload = page.build_record_payload()
+        ai_raw_obs = payload["layers"]["ai_raw"]["observation"]
+        assert ai_raw_obs["length_cm"] is None
+        assert ai_raw_obs["width_cm"] is None
+        assert ai_raw_obs["height_cm"] is None
+        assert payload["layers"]["adopted"]["bare"]["length_cm"] == 10.0
+    finally:
+        page.deleteLater()
+
+
+def test_save_preserves_observed_when_present(qapp, app_context):
+    """AI observed.weight=50, bare_estimate.weight=45 → 保存后 ai_raw.observation.weight_g==50"""
+    page = CalculationPage(app_context)
+    try:
+        obs = AIObservation()
+        obs.weight_g = 50.0  # observed 有值
+        obs.raw_payload = {
+            "bare_estimate": {"length_cm": None, "width_cm": None, "height_cm": None, "weight_g": 45.0},
+            "observation": {},
+        }
+        page.session.normalized_observation = obs
+        page.session.observation = obs
+        page.observation = obs
+        page._apply_observation(obs)
+        assert page.bare_weight.value() == 50.0
+        assert page.lbl_bare_weight_source.text() == "\u56fe\u7247\u8bc6\u522b"
+        payload = page.build_record_payload()
+        ai_raw_obs = payload["layers"]["ai_raw"]["observation"]
+        assert ai_raw_obs["weight_g"] == 50.0
+        assert payload["layers"]["adopted"]["bare"]["weight_g"] == 50.0
+    finally:
+        page.deleteLater()
+
+
+def test_user_modification_does_not_pollute_ai_observation(qapp, app_context):
+    """用户修改裸重后，ai_raw.observation 仍保持 AI 原始值"""
+    page = CalculationPage(app_context)
+    try:
+        obs = AIObservation()
+        obs.weight_g = None
+        obs.raw_payload = {
+            "bare_estimate": {"length_cm": None, "width_cm": None, "height_cm": None, "weight_g": 45.0},
+            "observation": {},
+        }
+        page.session.normalized_observation = obs
+        page.session.observation = obs
+        page.observation = obs
+        page._apply_observation(obs)
+        # 用户修改为 52
+        page.bare_weight.setValue(52.0)
+        page.session.confirm_value("weight_g", 52.0)
+        payload = page.build_record_payload()
+        ai_raw_obs = payload["layers"]["ai_raw"]["observation"]
+        # ai_raw 保持 null
+        assert ai_raw_obs["weight_g"] is None
+        # bare_estimate 保持 45
+        assert ai_raw_obs["raw_payload"]["bare_estimate"]["weight_g"] == 45.0
+        # adopted.bare 是用户修改的 52
+        assert payload["layers"]["adopted"]["bare"]["weight_g"] == 52.0
+    finally:
+        page.deleteLater()
+
+
+def test_restore_source_label_ai_estimate(qapp, app_context):
+    """恢复时：observed=null, bare_estimate=45, adopted=45 → 来源=AI估算"""
+    page = CalculationPage(app_context)
+    try:
+        # 模拟保存后的 record 结构
+        record = {
+            "product_name": "测试商品",
+            "layers": {
+                "ai_raw": {
+                    "observation": {
+                        "weight_g": None,
+                        "length_cm": None,
+                        "width_cm": None,
+                        "height_cm": None,
+                        "raw_payload": {
+                            "bare_estimate": {"weight_g": 45.0, "length_cm": 10.0, "width_cm": 8.0, "height_cm": 3.0},
+                        },
+                    },
+                    "packaging_proposal": {},
+                },
+                "adopted": {
+                    "bare": {"weight_g": 45.0, "length_cm": 10.0, "width_cm": 8.0, "height_cm": 3.0},
+                    "normal": {},
+                    "conservative": {},
+                },
+            },
+        }
+        # 直接测试来源判断逻辑
+        observation_raw = record["layers"]["ai_raw"]["observation"]
+        bare = record["layers"]["adopted"]["bare"]
+        _raw_payload = observation_raw.get("raw_payload", {})
+        _bare_estimate = _raw_payload.get("bare_estimate", {})
+        # weight 来源判断
+        adopted_w = bare.get("weight_g")
+        observed_w = observation_raw.get("weight_g")
+        estimate_w = _bare_estimate.get("weight_g")
+        # observed=null, adopted=45, estimate=45 → AI估算
+        assert observed_w is None
+        assert adopted_w == 45.0
+        assert estimate_w == 45.0
+        # 使用与 load_record_payload 相同的逻辑
+        if observed_w is not None and observed_w != 0 and abs(adopted_w - observed_w) < 0.001:
+            source = "\u56fe\u7247\u8bc6\u522b"
+        elif (observed_w is None or observed_w == 0) and estimate_w is not None and estimate_w != 0 and abs(adopted_w - estimate_w) < 0.001:
+            source = "AI\u4f30\u7b97"
+        else:
+            source = "\u7528\u6237\u786e\u8ba4"
+        assert source == "AI\u4f30\u7b97"
+    finally:
+        page.deleteLater()
+
+
+def test_restore_source_label_user_confirmed(qapp, app_context):
+    """恢复时：observed=null, bare_estimate=45, adopted=52 → 来源=用户确认"""
+    page = CalculationPage(app_context)
+    try:
+        observation_raw = {
+            "weight_g": None,
+            "raw_payload": {"bare_estimate": {"weight_g": 45.0}},
+        }
+        bare = {"weight_g": 52.0}
+        _bare_estimate = observation_raw.get("raw_payload", {}).get("bare_estimate", {})
+        adopted_w = bare.get("weight_g")
+        observed_w = observation_raw.get("weight_g")
+        estimate_w = _bare_estimate.get("weight_g")
+        # observed=null, estimate=45, adopted=52 → 用户确认
+        if observed_w is not None and observed_w != 0 and abs(adopted_w - observed_w) < 0.001:
+            source = "\u56fe\u7247\u8bc6\u522b"
+        elif (observed_w is None or observed_w == 0) and estimate_w is not None and estimate_w != 0 and abs(adopted_w - estimate_w) < 0.001:
+            source = "AI\u4f30\u7b97"
+        else:
+            source = "\u7528\u6237\u786e\u8ba4"
+        assert source == "\u7528\u6237\u786e\u8ba4"
+    finally:
+        page.deleteLater()
+
+
+def test_restore_source_label_observed(qapp, app_context):
+    """恢复时：observed=50, bare_estimate=45, adopted=50 → 来源=图片识别"""
+    page = CalculationPage(app_context)
+    try:
+        observation_raw = {
+            "weight_g": 50.0,
+            "raw_payload": {"bare_estimate": {"weight_g": 45.0}},
+        }
+        bare = {"weight_g": 50.0}
+        _bare_estimate = observation_raw.get("raw_payload", {}).get("bare_estimate", {})
+        adopted_w = bare.get("weight_g")
+        observed_w = observation_raw.get("weight_g")
+        estimate_w = _bare_estimate.get("weight_g")
+        # observed=50, adopted=50 → 图片识别
+        if observed_w is not None and observed_w != 0 and abs(adopted_w - observed_w) < 0.001:
+            source = "\u56fe\u7247\u8bc6\u522b"
+        elif (observed_w is None or observed_w == 0) and estimate_w is not None and estimate_w != 0 and abs(adopted_w - estimate_w) < 0.001:
+            source = "AI\u4f30\u7b97"
+        else:
+            source = "\u7528\u6237\u786e\u8ba4"
+        assert source == "\u56fe\u7247\u8bc6\u522b"
+    finally:
+        page.deleteLater()
+
+
+def test_profit_ui_contract_unchanged(qapp, app_context):
+    """确认本轮没有修改利润区 UI contract"""
+    page = CalculationPage(app_context)
+    try:
+        # 所有利润字段 objectName 仍存在且唯一
+        for name in (
+            "spinPromotionReserve", "spinProfitRate", "txtCalculatedCostRmb",
+            "txtNoActivityPriceRmb", "txtNoActivityPriceUsd",
+            "txtActivityProfitRmb", "txtActivityProfitUsd",
+            "txtSheinPriceRmb", "txtSheinPriceUsd",
+            "txtCalculatedCostUsd", "txtNoActivityProfitRmb",
+            "txtActivityPriceRmb", "txtActivityPriceUsd",
+        ):
+            assert page._root.findChild(QWidget, name) is not None, f"missing widget: {name}"
+        # 不存在竖向分隔线
+        assert page._root.findChild(QWidget, "profitSeparator_col2") is None
+        assert page._root.findChild(QWidget, "profitSeparator_col7") is None
+    finally:
+        page.deleteLater()

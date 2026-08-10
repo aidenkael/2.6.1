@@ -1871,13 +1871,44 @@ class CalculationPage(QWidget):
             exchange_rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
             system_cost_for_record = self.current_system_cost
             adopted_cost = self.profit_binder._calculation_total_cost_rmb
+        # ai_raw.observation 必须保存真正的 AI observation，不能被 bare_estimate 回填或用户修改污染。
+        # 使用 session.normalized_observation（AI 标准化结果）作为基础，
+        # 但裸品字段（length/width/height/weight）必须从 normalized_observation 读取，
+        # 而不是从页面控件读取（collect_observation 会从页面读取，可能已被污染）。
+        ai_observation = self.session.normalized_observation
+        if ai_observation is None or not any(
+            getattr(ai_observation, f) is not None
+            for f in ("length_cm", "width_cm", "height_cm", "weight_g", "product_name")
+        ):
+            # 兼容：没有 normalized_observation 时回退到 collect_observation
+            ai_observation = self.collect_observation()
+        else:
+            # 使用 normalized_observation 的完整副本，但补充页面收集的非裸品字段
+            ai_observation = AIObservation.from_dict(ai_observation.to_dict())
+            collected = self.collect_observation()
+            # 非裸品字段从页面收集（这些不会被 bare_estimate 污染）
+            ai_observation.product_name = collected.product_name
+            ai_observation.display_product_summary = collected.display_product_summary
+            ai_observation.display_packaging_summary = collected.display_packaging_summary
+            ai_observation.material = collected.material
+            ai_observation.rigidity = collected.rigidity
+            ai_observation.foldability = collected.foldability
+            ai_observation.compressibility = collected.compressibility
+            for key in (
+                "has_hard_bottom", "has_hard_backboard", "has_frame",
+                "has_rigid_insert", "has_rigid_parts",
+                "requires_shape_retention", "retail_box_visible", "hard_card_visible",
+            ):
+                setattr(ai_observation, key, getattr(collected, key))
+            ai_observation.product_cost_rmb = collected.product_cost_rmb
+            ai_observation.domestic_shipping_rmb = collected.domestic_shipping_rmb
         return {
             "product_name": self.product_summary.text().strip(),
             "product_link": self.product_link.text().strip() if self.product_link else "",
             "status": "active",
             "layers": {
                 "ai_raw": {
-                    "observation": self.collect_observation().to_dict(),
+                    "observation": ai_observation.to_dict(),
                     "packaging_proposal": (
                         self.session.ai_packaging_proposal.to_dict()
                         if self.session.ai_packaging_proposal else (
@@ -2241,26 +2272,53 @@ class CalculationPage(QWidget):
         self.bare_width.setValue(float(bare.get("width_cm") or 0))
         self.bare_height.setValue(float(bare.get("height_cm") or 0))
         self.bare_weight.setValue(float(bare.get("weight_g") or 0))
-        # 恢复裸尺寸/裸重来源标签：如果 adopted.bare 有值，说明是用户确认或最终采用值
-        _has_bare_dim = any(bare.get(k) for k in ("length_cm", "width_cm", "height_cm"))
-        _has_bare_weight = bool(bare.get("weight_g"))
+        # 恢复裸尺寸/裸重来源标签：根据 adopted.bare、observed、bare_estimate 三层判断来源
+        # 读取 bare_estimate（从 observation_raw.raw_payload 中）
+        _raw_payload = observation_raw.get("raw_payload") if isinstance(observation_raw, dict) else {}
+        if not isinstance(_raw_payload, dict):
+            _raw_payload = {}
+        _bare_estimate = _raw_payload.get("bare_estimate") if isinstance(_raw_payload.get("bare_estimate"), dict) else {}
+        if not isinstance(_bare_estimate, dict):
+            _bare_estimate = {}
+
+        def _source_for_field(adopted_val, observed_val, estimate_val):
+            """判断单个字段的来源：图片识别 / AI估算 / 用户确认 / 未识别"""
+            if adopted_val is None or adopted_val == 0:
+                return "\u672a\u8bc6\u522b"
+            # 情况2：observed 有值且 adopted == observed → 图片识别
+            if observed_val is not None and observed_val != 0:
+                if abs(float(adopted_val) - float(observed_val)) < 0.001:
+                    return "\u56fe\u7247\u8bc6\u522b"
+            # 情况3：observed 为空，adopted == bare_estimate → AI估算
+            if (observed_val is None or observed_val == 0) and estimate_val is not None and estimate_val != 0:
+                if abs(float(adopted_val) - float(estimate_val)) < 0.001:
+                    return "AI\u4f30\u7b97"
+            # 情况4：adopted 与 observed / bare_estimate 均不同 → 用户确认
+            # 或者 observed 有值但 adopted != observed → 用户确认
+            return "\u7528\u6237\u786e\u8ba4"
+
+        _adopted_dims = [bare.get(k) for k in ("length_cm", "width_cm", "height_cm")]
+        _observed_dims = [observation_raw.get(k) for k in ("length_cm", "width_cm", "height_cm")] if isinstance(observation_raw, dict) else [None, None, None]
+        _estimate_dims = [_bare_estimate.get(k) for k in ("length_cm", "width_cm", "height_cm")]
+        _adopted_weight = bare.get("weight_g")
+        _observed_weight = observation_raw.get("weight_g") if isinstance(observation_raw, dict) else None
+        _estimate_weight = _bare_estimate.get("weight_g")
+
         if hasattr(self, "lbl_bare_dim_source"):
-            if _has_bare_dim and observation_raw and any(
-                (observation_raw.get(k) is not None and observation_raw.get(k) != 0)
-                for k in ("length_cm", "width_cm", "height_cm")
-            ):
-                self.lbl_bare_dim_source.setText("\u56fe\u7247\u8bc6\u522b")
-            elif _has_bare_dim:
-                self.lbl_bare_dim_source.setText("AI\u4f30\u7b97")
-            else:
+            _has_bare_dim = any(v is not None and v != 0 for v in _adopted_dims)
+            if not _has_bare_dim:
                 self.lbl_bare_dim_source.setText("\u672a\u8bc6\u522b")
-        if hasattr(self, "lbl_bare_weight_source"):
-            if _has_bare_weight and observation_raw.get("weight_g") is not None and observation_raw.get("weight_g") != 0:
-                self.lbl_bare_weight_source.setText("\u56fe\u7247\u8bc6\u522b")
-            elif _has_bare_weight:
-                self.lbl_bare_weight_source.setText("AI\u4f30\u7b97")
             else:
-                self.lbl_bare_weight_source.setText("\u672a\u8bc6\u522b")
+                # 逐字段判断，取第一个非空字段的来源（通常三个维度来源一致）
+                _dim_source = "\u672a\u8bc6\u522b"
+                for a, o, e in zip(_adopted_dims, _observed_dims, _estimate_dims):
+                    if a is not None and a != 0:
+                        _dim_source = _source_for_field(a, o, e)
+                        break
+                self.lbl_bare_dim_source.setText(_dim_source)
+
+        if hasattr(self, "lbl_bare_weight_source"):
+            self.lbl_bare_weight_source.setText(_source_for_field(_adopted_weight, _observed_weight, _estimate_weight))
         # AI估算（左卡）：优先第一次 AI 结果（_v2.ai_initial），旧记录回退 adopted.normal
         v2 = record.get("_v2") if isinstance(record.get("_v2"), dict) else {}
         ai_initial = v2.get("ai_initial") if isinstance(v2.get("ai_initial"), dict) else {}
