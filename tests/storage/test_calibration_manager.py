@@ -209,3 +209,106 @@ def test_import_zip_selects_valid_calibration_json(tmp_path: Path):
     assert result["version"] == "zip-v3"
     assert result["metadata"]["source_member"] == "data/calibration_v3.json"
     assert service.samples[0]["sample_id"] == "ZIP"
+
+
+# ---------------------------------------------------------------------------
+# DB/runtime 一致性补偿测试
+# ---------------------------------------------------------------------------
+
+
+def test_activate_runtime_failure_restores_previous_state(tmp_path: Path):
+    """普通 activate：DB 切换成功后 runtime 激活失败，DB 和 runtime 均恢复到切换前状态。"""
+    manager, service, _ = setup_manager(tmp_path)
+    builtin = next(item for item in manager.list_packages() if item["metadata"].get("builtin"))
+    custom = manager.import_package(
+        make_package_file(tmp_path, "custom.json", "custom-v2", "CUSTOM")
+    )
+    # 当前 active = custom，切回 builtin 使 builtin 成为 previous_active
+    manager.activate(builtin["id"])
+    assert manager.active_package()["id"] == builtin["id"]
+    assert service.calibration_version == "builtin-v1"
+
+    # 模拟 runtime 在激活 custom 时失败（DB 切换已发生后的阶段）
+    real_activate = service.activate
+
+    def failing_activate(cal_path, *, version):
+        if version == "custom-v2":
+            raise ValueError("simulated runtime activation failure")
+        return real_activate(cal_path, version=version)
+
+    service.activate = failing_activate
+
+    with pytest.raises(RuntimeError, match="运行时激活失败"):
+        manager.activate(custom["id"])
+
+    # DB active 仍为 builtin
+    assert manager.active_package()["id"] == builtin["id"]
+    # runtime 仍为 builtin
+    assert service.calibration_version == "builtin-v1"
+    # custom 仍然存在
+    assert any(item["id"] == custom["id"] for item in manager.list_packages())
+    # DB 与 runtime version 一致
+    assert manager.active_package()["version"] == service.calibration_version
+
+
+def test_delete_active_builtin_runtime_fallback_failure_restores_custom(tmp_path: Path):
+    """删除 active 时 builtin fallback：DB 切 builtin 后 runtime 失败，DB 和 runtime 均恢复到 custom。"""
+    manager, service, _ = setup_manager(tmp_path)
+    custom = manager.import_package(
+        make_package_file(tmp_path, "custom.json", "custom-v2", "CUSTOM")
+    )
+    assert manager.active_package()["id"] == custom["id"]
+    custom_path = custom["path"]
+
+    # 模拟 runtime 在切 builtin 时失败（_prepare_builtin_fallback 能成功，DB 切换也成功）
+    real_activate = service.activate
+
+    def failing_activate(cal_path, *, version):
+        if version == "builtin-v1":
+            raise ValueError("simulated builtin runtime failure")
+        return real_activate(cal_path, version=version)
+
+    service.activate = failing_activate
+
+    with pytest.raises(RuntimeError, match="已保留原启用版本"):
+        manager.delete_package(custom["id"])
+
+    # custom DB 记录仍存在
+    assert any(item["id"] == custom["id"] for item in manager.list_packages())
+    # custom 文件仍存在
+    assert Path(custom_path).is_file()
+    # DB active 仍为 custom
+    assert manager.active_package()["id"] == custom["id"]
+    # runtime 仍为 custom
+    assert service.calibration_version == "custom-v2"
+    # DB 与 runtime version 一致
+    assert manager.active_package()["version"] == service.calibration_version
+
+
+def test_import_package_runtime_failure_restores_previous_state(tmp_path: Path):
+    """import_package：DB 注册并激活新包后 runtime 激活失败，DB 恢复到 previous active。"""
+    manager, service, _ = setup_manager(tmp_path)
+    builtin = next(item for item in manager.list_packages() if item["metadata"].get("builtin"))
+    assert manager.active_package()["id"] == builtin["id"]
+    assert service.calibration_version == "builtin-v1"
+
+    # 模拟 runtime 在激活新包时失败
+    real_activate = service.activate
+
+    def failing_activate(cal_path, *, version):
+        if version == "bad-v1":
+            raise ValueError("simulated import runtime failure")
+        return real_activate(cal_path, version=version)
+
+    service.activate = failing_activate
+
+    bad_file = make_package_file(tmp_path, "bad.json", "bad-v1", "BAD")
+    with pytest.raises(RuntimeError, match="运行时激活失败"):
+        manager.import_package(bad_file)
+
+    # DB active 恢复为 builtin
+    assert manager.active_package()["id"] == builtin["id"]
+    # runtime 仍为 builtin
+    assert service.calibration_version == "builtin-v1"
+    # DB 与 runtime version 一致
+    assert manager.active_package()["version"] == service.calibration_version

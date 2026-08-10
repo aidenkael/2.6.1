@@ -92,6 +92,28 @@ class CalibrationManager:
         if self._service is not None:
             self._service.activate(package["path"], version=str(package["version"]))
 
+    def _safe_runtime_activate(
+        self,
+        new_package: dict[str, Any],
+        previous_active: dict[str, Any] | None,
+    ) -> None:
+        """激活运行时服务，失败时补偿恢复 DB 和 runtime 到切换前状态。"""
+        try:
+            self._activate_service(new_package)
+        except Exception as exc:
+            if previous_active is not None:
+                try:
+                    self.store.activate_calibration(previous_active["id"])
+                except Exception:
+                    pass
+                try:
+                    self._activate_service(previous_active)
+                except Exception:
+                    pass
+            raise RuntimeError(
+                f"运行时激活失败，已恢复到切换前状态：{exc}"
+            ) from exc
+
     def ensure_builtin(self, source: str | Path, *, version: str) -> dict[str, Any]:
         source_path = Path(source)
         samples, _ = self._read_json_payload(source_path)
@@ -186,6 +208,7 @@ class CalibrationManager:
             "imported_at": datetime.now(UTC).isoformat(),
             "declared_version": declared_version,
         }
+        previous_active = self.active_package()
         package_id = self.store.register_calibration_package(
             version=version,
             path=str(runtime_path),
@@ -197,7 +220,7 @@ class CalibrationManager:
             for item in self.store.list_calibration_packages()
             if item["id"] == package_id
         )
-        self._activate_service(active)
+        self._safe_runtime_activate(active, previous_active)
         return active
 
     def list_packages(self) -> list[dict[str, Any]]:
@@ -209,11 +232,12 @@ class CalibrationManager:
     def activate(self, package_id: str) -> dict[str, Any]:
         """启用任意已注册版本，并同步切换运行时包装估算服务。
 
-        不存在的 package 由 store 抛 KeyError；运行时数据无效时由
-        PackagingEstimationService.activate 抛 ValueError，均不静默成功。
+        不存在的 package 由 store 抛 KeyError；运行时激活失败时
+        DB 和 runtime 均恢复到切换前状态，保证一致性。
         """
+        previous_active = self.active_package()
         active = self.store.activate_calibration(package_id)
-        self._activate_service(active)
+        self._safe_runtime_activate(active, previous_active)
         return active
 
     def delete_package(self, package_id: str) -> dict[str, Any]:
@@ -233,12 +257,15 @@ class CalibrationManager:
         if target.get("metadata", {}).get("builtin"):
             raise ValueError("内置校准版本不允许删除")
         if target["active"]:
+            previous_active = target
             fallback = self._prepare_builtin_fallback()
             active = self.store.activate_calibration(fallback["id"])
             try:
-                self._activate_service(active)
-            except Exception as exc:
-                raise RuntimeError(f"切换到内置校准版本失败，已保留原启用版本：{exc}") from exc
+                self._safe_runtime_activate(active, previous_active)
+            except RuntimeError as exc:
+                raise RuntimeError(
+                    f"切换到内置校准版本失败，已保留原启用版本：{exc}"
+                ) from exc
         self.store.delete_calibration_package(package_id)
         self._remove_package_files(target)
         current = self.store.get_active_calibration()
