@@ -1444,6 +1444,139 @@ QListWidget::item:selected { background: #edf4ff; border-color: #4b8cff; color: 
         </widget>
        </item>
        <item>
+        <widget class="QFrame" name="calibrationSection">
+         <property name="card" stdset="0">
+          <bool>true</bool>
+         </property>
+         <layout class="QVBoxLayout" name="calibrationSectionLayout">
+          <property name="leftMargin">
+           <number>14</number>
+          </property>
+          <property name="topMargin">
+           <number>12</number>
+          </property>
+          <property name="rightMargin">
+           <number>14</number>
+          </property>
+          <property name="bottomMargin">
+           <number>12</number>
+          </property>
+          <property name="spacing">
+           <number>9</number>
+          </property>
+          <item>
+           <layout class="QHBoxLayout" name="calibrationHeaderLayout">
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>0</number>
+            </property>
+            <property name="spacing">
+             <number>8</number>
+            </property>
+            <item>
+             <widget class="QLabel" name="lblCalibrationTitle">
+              <property name="text">
+               <string>物流校准规则</string>
+              </property>
+              <property name="sectionTitle" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="lblCalibrationHint">
+              <property name="text">
+               <string>当前功能：校准包版本管理；启用版本立即影响物流包装估算。</string></property>
+              <property name="hint" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="calibrationHeaderSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>20</width>
+                <height>20</height>
+               </size>
+              </property>
+              <property name="sizeType">
+               <enum>QSizePolicy::Expanding</enum>
+              </property>
+             </spacer>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btnImportCalibrationPackage">
+              <property name="text">
+               <string>导入校准包</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>120</width>
+                <height>34</height>
+               </size>
+              </property>
+              <property name="primary" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btnActivateCalibrationPackage">
+              <property name="text">
+               <string>启用所选版本</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>130</width>
+                <height>34</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btnDeleteCalibrationPackage">
+              <property name="text">
+               <string>删除所选版本</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>130</width>
+                <height>34</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QTableWidget" name="tableCalibrationPackages"><property name="columnCount"><number>4</number></property><property name="rowCount"><number>0</number></property><property name="minimumHeight"><number>170</number></property><property name="alternatingRowColors"><bool>true</bool></property><column><property name="text"><string>版本</string></property></column><column><property name="text"><string>状态</string></property></column><column><property name="text"><string>导入时间</string></property></column><column><property name="text"><string>文件名</string></property></column></widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="lblCalibrationActiveStatus">
+            <property name="text">
+             <string>当前没有启用的校准版本</string>
+            </property>
+            <property name="hint" stdset="0">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <widget class="QFrame" name="settingsActionsSection">
          <property name="card" stdset="0">
           <bool>true</bool>

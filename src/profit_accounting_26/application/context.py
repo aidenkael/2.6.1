@@ -8,7 +8,6 @@ from profit_accounting_26.application.calibration_export_service import Calibrat
 from profit_accounting_26.application.diagnostic_logger import DiagnosticLogger
 from profit_accounting_26.application.api_profile_store import ApiProfileStore
 from profit_accounting_26.application.history_record_service import HistoryRecordV2Service
-from profit_accounting_26.application.import_export_service import ImportExportService
 from profit_accounting_26.application.local_reestimate_service import LocalReestimateService
 from profit_accounting_26.application.packaging_estimation_service import PackagingEstimationService
 from profit_accounting_26.application.recognition_service import RecognitionService
@@ -26,7 +25,6 @@ class AppContext:
     settings_service: SettingsService
     packaging_service: PackagingEstimationService
     record_service: RecordService
-    import_export_service: ImportExportService
     calibration_manager: CalibrationManager
     recognition_service: RecognitionService
     api_profile_store: ApiProfileStore
@@ -83,7 +81,6 @@ class AppContext:
                 history_service=history_record_v2_service,
                 feedback_service=calibration_feedback_service,
             ),
-            import_export_service=ImportExportService(store),
             calibration_manager=calibration_manager,
             recognition_service=RecognitionService(settings_service, api_profile_store),
             api_profile_store=api_profile_store,

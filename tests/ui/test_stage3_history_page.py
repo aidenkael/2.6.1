@@ -155,7 +155,8 @@ def test_cost_column_wider_than_packaging(qapp, context):
     page = HistoryPage(context)
     try:
         assert page.table.columnWidth(3) > page.table.columnWidth(6)
-        assert page.table.columnWidth(3) >= 240
+        # Stage 4 验收：成本列从 250px 调整为 235px
+        assert page.table.columnWidth(3) == 235
     finally:
         page.deleteLater()
 

@@ -256,22 +256,6 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
         </spacer>
        </item>
        <item>
-        <widget class="QPushButton" name="btnNavImageSearch">
-         <property name="minimumSize">
-          <size>
-           <width>0</width>
-           <height>42</height>
-          </size>
-         </property>
-         <property name="text">
-          <string>⌕  以图搜图</string>
-         </property>
-         <property name="navItem" stdset="0">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item>
         <widget class="QPushButton" name="btnNavCalculation">
          <property name="minimumSize">
           <size>
@@ -300,38 +284,6 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
          </property>
          <property name="text">
           <string>记  历史记录管理</string>
-         </property>
-         <property name="navItem" stdset="0">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="btnNavImportExport">
-         <property name="minimumSize">
-          <size>
-           <width>0</width>
-           <height>42</height>
-          </size>
-         </property>
-         <property name="text">
-          <string>⇄  数据导入导出</string>
-         </property>
-         <property name="navItem" stdset="0">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="btnNavCalibration">
-         <property name="minimumSize">
-          <size>
-           <width>0</width>
-           <height>42</height>
-          </size>
-         </property>
-         <property name="text">
-          <string>校  模型校准反馈</string>
          </property>
          <property name="navItem" stdset="0">
           <bool>true</bool>
@@ -678,37 +630,8 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
        <item>
         <widget class="QStackedWidget" name="mainStack">
          <property name="currentIndex">
-          <number>1</number>
+          <number>0</number>
          </property>
-         <widget class="QWidget" name="pageImageSearch">
-          <layout class="QVBoxLayout" name="pageImageSearchLayout">
-           <property name="spacing">
-            <number>0</number>
-           </property>
-           <property name="leftMargin">
-            <number>24</number>
-           </property>
-           <property name="topMargin">
-            <number>24</number>
-           </property>
-           <property name="rightMargin">
-            <number>24</number>
-           </property>
-           <property name="bottomMargin">
-            <number>24</number>
-           </property>
-           <item>
-            <widget class="QLabel" name="pageImageSearchLabel">
-             <property name="text">
-              <string>运行时挂载现有“以图搜图”页面（功能保持当前版本）</string>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignmentFlag::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-          </layout>
-         </widget>
          <widget class="QWidget" name="pageCalculation">
           <layout class="QVBoxLayout" name="calculationPageLayout">
            <property name="spacing">
@@ -6676,64 +6599,6 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
             <widget class="QLabel" name="pageHistoryLabel">
              <property name="text">
               <string>运行时挂载现有“历史记录管理”页面（功能保持当前版本）</string>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignmentFlag::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-          </layout>
-         </widget>
-         <widget class="QWidget" name="pageImportExport">
-          <layout class="QVBoxLayout" name="pageImportExportLayout">
-           <property name="spacing">
-            <number>0</number>
-           </property>
-           <property name="leftMargin">
-            <number>24</number>
-           </property>
-           <property name="topMargin">
-            <number>24</number>
-           </property>
-           <property name="rightMargin">
-            <number>24</number>
-           </property>
-           <property name="bottomMargin">
-            <number>24</number>
-           </property>
-           <item>
-            <widget class="QLabel" name="pageImportExportLabel">
-             <property name="text">
-              <string>运行时挂载现有“数据导入导出”页面（功能保持当前版本）</string>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignmentFlag::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-          </layout>
-         </widget>
-         <widget class="QWidget" name="pageCalibration">
-          <layout class="QVBoxLayout" name="pageCalibrationLayout">
-           <property name="spacing">
-            <number>0</number>
-           </property>
-           <property name="leftMargin">
-            <number>24</number>
-           </property>
-           <property name="topMargin">
-            <number>24</number>
-           </property>
-           <property name="rightMargin">
-            <number>24</number>
-           </property>
-           <property name="bottomMargin">
-            <number>24</number>
-           </property>
-           <item>
-            <widget class="QLabel" name="pageCalibrationLabel">
-             <property name="text">
-              <string>运行时挂载现有“模型校准反馈”页面（功能保持当前版本）</string>
              </property>
              <property name="alignment">
               <set>Qt::AlignmentFlag::AlignCenter</set>

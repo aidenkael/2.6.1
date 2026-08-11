@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QWidget
 
@@ -10,29 +8,20 @@ from profit_accounting_26.shared import resource_path
 from profit_accounting_26.ui.binders.main_window_binder import MainWindowBinder
 from profit_accounting_26.ui.pages import (
     CalculationPage,
-    CalibrationPage,
     HistoryPage,
-    ImageSearchPage,
-    ImportExportPage,
     SettingsPage,
 )
 from profit_accounting_26.ui.theme import APP_STYLE
 # 保留 NAV_ITEMS 供 app.py 和测试导入
 NAV_ITEMS = [
-    "以图搜图",
     "新商品测算",
     "历史记录管理",
-    "数据导入导出",
-    "模型校准反馈",
     "设置",
 ]
 SUBTITLES = {
-    "以图搜图": "导入图片并复用已登录的Edge与1688插件",
     "新商品测算": "图片识别、物流估算与利润测算在同一页面完成",
     "历史记录管理": "打开记录、查看快照并补充实际反馈",
-    "数据导入导出": "受控导入、导出记录和校准反馈",
-    "模型校准反馈": "管理校准包、版本与回滚",
-    "设置": "货代、利润规则与AI识图配置",
+    "设置": "货代、利润规则、AI识图与物流校准配置",
 }
 
 
@@ -42,7 +31,7 @@ class MainWindow(QMainWindow):
     架构变更（2.6.1-dual-profit）：
     - .ui 决定布局（侧边栏、导航、顶部问候、汇率、数据目录）；
     - MainWindowBinder 按 objectName 绑定信号与状态同步；
-    - 六个页面挂载到 .ui 的 mainStack 页面占位中；
+    - 三个页面挂载到 .ui 的 mainStack 页面占位中（Stage 4：导航精简）；
     - 利润双场景由 CalculationBinder 负责（在 CalculationPage 重写后启用）。
     """
 
@@ -78,22 +67,16 @@ class MainWindow(QMainWindow):
             )
         )
 
-        # 创建六个页面（保留现有程序化页面，确保功能不丢失）
-        self.image_search_page = ImageSearchPage(context)
+        # 创建三个页面（Stage 4：以图搜图/数据导入导出/模型校准反馈已删除）
         self.calculation_page = CalculationPage(context)
         self.history_page = HistoryPage(context)
-        self.import_export_page = ImportExportPage(context)
-        self.calibration_page = CalibrationPage(context)
         self.settings_page = SettingsPage(context)
 
         # 使用 Binder 绑定 .ui 控件
         self.binder = MainWindowBinder(self, context)
         self.binder.calculation_page = self.calculation_page
         self.binder.settings_page = self.settings_page
-        self.binder.image_search_page = self.image_search_page
         self.binder.history_page = self.history_page
-        self.binder.import_export_page = self.import_export_page
-        self.binder.calibration_page = self.calibration_page
         self.binder.bind()
 
         # 跨页面信号（保留现有行为）
@@ -103,7 +86,6 @@ class MainWindow(QMainWindow):
         self.settings_page.forwardersSaved.connect(self.calculation_page.refresh_settings)
         self.calculation_page.saved.connect(lambda _record_id: self.history_page.refresh())
         self.history_page.recordRequested.connect(self.open_record)
-        self.image_search_page.sendToCalculation.connect(self.send_image_to_calculation)
 
     def switch_page(self, index: int) -> None:
         """委托给 binder。"""
@@ -114,13 +96,4 @@ class MainWindow(QMainWindow):
 
     def open_record(self, record_id: str) -> None:
         self.calculation_page.load_record_payload(record_id)
-        self.switch_page(1)
-
-    def send_image_to_calculation(self, path: str, link: str) -> None:
-        target = next(
-            (slot for slot in self.calculation_page.image_slots if slot.path is None),
-            self.calculation_page.image_slots[0],
-        )
-        target.load_path(Path(path))
-        self.calculation_page.set_product_link(link)
-        self.switch_page(1)
+        self.switch_page(0)

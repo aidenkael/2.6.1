@@ -266,11 +266,11 @@ class HistoryPage(QWidget):
         self.table.setColumnWidth(0, 50)
         self.table.setColumnWidth(1, _THUMB_SIZE * 2 + 16)
         self.table.setColumnWidth(2, 290)
-        self.table.setColumnWidth(3, 250)
+        self.table.setColumnWidth(3, 235)
         self.table.setColumnWidth(4, 150)
-        self.table.setColumnWidth(5, 170)
+        self.table.setColumnWidth(5, 200)
         # 包装数据列：足够一行显示"17×32×17 / 720g"类标准数据，不挤不换行
-        self.table.setColumnWidth(6, 200)
+        self.table.setColumnWidth(6, 185)
         # 校准内容列继续承担主要剩余伸展宽度（Stretch）
         self.table.setColumnWidth(7, 290)
         self.table.verticalHeader().setVisible(False)
@@ -507,8 +507,8 @@ class HistoryPage(QWidget):
         no_activity = scenarios.get("no_activity") or {}
         activity = scenarios.get("activity") or {}
         return [
-            ("SHEIN标价", _fmt_usd(no_activity.get("sale_price_usd"))),
-            ("活动售价", _fmt_usd(activity.get("sale_price_usd"))),
+            ("SHEIN标价", _fmt_usd(no_activity.get("sale_price_usd")), True),
+            ("活动售价", _fmt_usd(activity.get("sale_price_usd")), True),
             ("SHEIN核价", _fmt_usd(payload.get("shein_quote_usd"))),
         ]
 
@@ -520,7 +520,15 @@ class HistoryPage(QWidget):
         activity = scenarios.get("activity") or {}
         layers = payload.get("layers") if isinstance(payload.get("layers"), dict) else {}
         calculated = layers.get("calculated") if isinstance(layers.get("calculated"), dict) else {}
+        # 标价利率：优先用保存的 profit_rate_on_cost；新双场景记录若缺失则用
+        # profit_rmb / calculation_total_cost_rmb 计算（小数形式，如 0.40 表示 40%）；
+        # 旧 legacy 记录 fallback 到 layers.calculated.profit_rate_percent
         normal_rate = no_activity.get("profit_rate_on_cost")
+        if normal_rate is None and not legacy:
+            total_cost = float(scenarios.get("calculation_total_cost_rmb") or 0)
+            normal_profit = float(no_activity.get("profit_rmb") or 0)
+            if total_cost > 0:
+                normal_rate = normal_profit / total_cost  # 小数形式
         if normal_rate is None:
             normal_rate_text = _fmt_percent(calculated.get("profit_rate_percent"), legacy_percent=True)
         else:
@@ -533,7 +541,10 @@ class HistoryPage(QWidget):
             )
         else:
             activity_value = "—"
-        return [("标价利润", list_price_value), ("活动利润", activity_value)]
+        return [
+            ("标价利润", list_price_value, True),
+            ("活动利润", activity_value, True),
+        ]
 
     def _packaging_rows(self, payload: dict[str, Any]) -> list[tuple]:
         """包装数据列 key/value 行：裸品 / AI首次 / 当前，左侧标题、右侧尺寸重量。

@@ -122,7 +122,7 @@ class TestMainPageLayout:
         try:
             window.resize(1920, 1080)
             window.show()
-            window.switch_page(1)
+            window.switch_page(0)
             qapp.processEvents()
             page = window.calculation_page
             root = page._root

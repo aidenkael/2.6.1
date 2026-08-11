@@ -35,8 +35,8 @@ def main():
     window.show()
     app.processEvents()
 
-    # 切换到设置页（索引 5 = 设置）
-    window.binder.switch_page(5)
+    # 切换到设置页（Stage 4 导航精简后索引 2 = 设置）
+    window.binder.switch_page(2)
     app.processEvents()
 
     # 记录客户区尺寸

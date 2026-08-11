@@ -2,7 +2,7 @@
 
 在 ``MainWindow`` 加载 ``main_window.ui`` 后，按 ``objectName`` 绑定：
 - 顶部问候（btnRefreshGreeting / lblGreetingTitle / lblGreetingSubtitle）
-- 左侧六导航（btnNav*）与 mainStack 页面切换
+- 左侧三导航（btnNav*）与 mainStack 页面切换（Stage 4：导航精简）
 - 数据目录（lblDataDirectoryPath / btnChangeDataDirectory）
 - 汇率（spinExchangeRate / btnRefreshExchangeRate / lblExchangeRateUpdated）
 - 保存状态（lblSaveStatus）
@@ -10,8 +10,7 @@
 页面挂载策略：
 - pageCalculation：使用 .ui 自带的计算页布局（由 CalculationBinder 绑定）；
 - pageSettingsHost：将 settings_page.ui 挂载进 pageSettingsHostLayout；
-- pageImageSearch / pageHistory / pageImportExport / pageCalibration：
-  清除 Designer 占位提示后挂载现有页面 QWidget。
+- pageHistory：清除 Designer 占位提示后挂载现有页面 QWidget。
 """
 
 from __future__ import annotations
@@ -38,11 +37,8 @@ from profit_accounting_26.ui.ui_loader import load_settings_page
 
 # 导航按钮 objectName 与页面 objectName 的映射（顺序固定）
 NAV_BINDINGS: list[tuple[str, str, str]] = [
-    ("btnNavImageSearch", "pageImageSearch", "以图搜图"),
     ("btnNavCalculation", "pageCalculation", "新商品测算"),
     ("btnNavHistory", "pageHistory", "历史记录管理"),
-    ("btnNavImportExport", "pageImportExport", "数据导入导出"),
-    ("btnNavCalibration", "pageCalibration", "模型校准反馈"),
     ("btnNavSettings", "pageSettingsHost", "设置"),
 ]
 
@@ -63,10 +59,7 @@ class MainWindowBinder:
         # 外部设置：由 MainWindow 注入实际页面 widget
         self.calculation_page = None
         self.settings_page = None
-        self.image_search_page = None
         self.history_page = None
-        self.import_export_page = None
-        self.calibration_page = None
 
     # ------------------------------------------------------------------
     # 绑定入口
@@ -80,8 +73,8 @@ class MainWindowBinder:
         self._bind_exchange_rate()
         self._bind_save_status()
         self._mount_pages()
-        # 默认切换到测算页
-        self.switch_page(1)
+        # 默认切换到测算页（Stage 4：新导航顺序下为 index 0）
+        self.switch_page(0)
 
     # ------------------------------------------------------------------
     # 顶部问候
@@ -130,8 +123,6 @@ class MainWindowBinder:
         _btn_name, _page_name, label = NAV_BINDINGS[index]
         if label == "历史记录管理" and self.history_page:
             self.history_page.refresh()
-        elif label == "模型校准反馈" and self.calibration_page:
-            self.calibration_page.refresh()
         elif label == "设置" and self.settings_page and not getattr(self.settings_page, "dirty", False):
             if hasattr(self.settings_page, "load_settings"):
                 self.settings_page.load_settings()
@@ -139,11 +130,8 @@ class MainWindowBinder:
     def _mount_pages(self) -> None:
         """将现有页面 widget 挂载到 .ui 的页面占位中。"""
         page_map = {
-            "pageImageSearch": self.image_search_page,
             "pageCalculation": self.calculation_page,
             "pageHistory": self.history_page,
-            "pageImportExport": self.import_export_page,
-            "pageCalibration": self.calibration_page,
             "pageSettingsHost": self.settings_page,
         }
         stack = self.window.findChild(QStackedWidget, "mainStack")

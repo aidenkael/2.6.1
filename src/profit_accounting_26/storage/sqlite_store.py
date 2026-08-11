@@ -98,17 +98,6 @@ class SQLiteStore:
                 (str(uuid4()), record_id, snapshot_kind, serialized, now),
             )
 
-    def upsert_imported_record(self, payload: dict[str, Any], *, overwrite: bool = False) -> str:
-        record_id = str(payload.get("id") or uuid4())
-        try:
-            self.load_record(record_id)
-        except KeyError:
-            return self.save_new_record({**payload, "id": record_id})
-        if not overwrite:
-            raise FileExistsError(record_id)
-        self.update_record(record_id, payload, snapshot_kind="import")
-        return record_id
-
     def load_record(self, record_id: str) -> dict[str, Any]:
         with self.connect() as connection:
             row = connection.execute(
@@ -254,13 +243,11 @@ class SQLiteStore:
             raise RuntimeError("校准包激活失败")
         return active
 
-    def activate_previous_calibration(self) -> dict[str, Any] | None:
-        packages = self.list_calibration_packages()
-        if len(packages) < 2:
-            return None
-        current_index = next((index for index, item in enumerate(packages) if item["active"]), 0)
-        target_index = current_index + 1
-        if target_index >= len(packages):
-            return None
-        target = packages[target_index]
-        return self.activate_calibration(target["id"])
+    def delete_calibration_package(self, package_id: str) -> None:
+        """删除校准包注册记录（不删除文件，文件由 Manager 层在切换成功后清理）。"""
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM calibration_packages WHERE id = ?", (package_id,)
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(package_id)
