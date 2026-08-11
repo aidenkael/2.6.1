@@ -1,0 +1,37 @@
+{
+  "schema_version": "agent-calibration-rule-package-v1",
+  "package_id": "cal-20260811-001",
+  "calibration_version": "agent-v1-r001",
+  "created_at": "2026-08-11T00:00:00Z",
+  "generator": "offline-agent",
+  "source_export_batch_ids": ["batch-example-001"],
+  "base_engine_version": "packaging-estimation-v2-candidate-arbitration",
+  "base_calibration_version": "local-calibration-v3-77-samples-rules-v1",
+  "status": "candidate",
+  "rules": [
+    {
+      "rule_id": "AGR-SOFT-TEXTILE-001",
+      "enabled": true,
+      "priority": 50,
+      "description": "软质可折叠纺织品的最短轴包装余量修正",
+      "match": {
+        "any_terms": ["scarf", "shawl"],
+        "materials": ["cotton", "polyester"],
+        "rigidity": ["soft"],
+        "foldability": ["good"],
+        "forbid_hard_structure": true
+      },
+      "action": {
+        "type": "smallest_axis_add",
+        "normal_cm": 2.0,
+        "conservative_cm": 3.0
+      },
+      "evidence": {
+        "source_record_ids": ["record-001", "record-003"],
+        "sample_count": 2,
+        "rationale": "两条真实反馈均显示最短轴低估"
+      }
+    }
+  ],
+  "validation": null
+}
