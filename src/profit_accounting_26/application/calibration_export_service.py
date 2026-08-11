@@ -1,4 +1,4 @@
-"""校准反馈导出 V1（阶段 3）。
+"""校准反馈导出 V2（阶段 3 升级）。
 
 输出普通目录（不是 ZIP）：
 
@@ -11,7 +11,8 @@
   真实头程是什么”，禁止经济字段与 current_estimate；
 - Sheet1 ``图片`` 列直接嵌入每条记录第一张主图的缩略图（不嵌高清原图）；
 - ``manifest.json`` 供 Agent 直接读取结构化校准数据，字段语义与 Sheet1 7 列一致，
-  UTF-8 / ensure_ascii=False，图片全部相对路径，不含任何经济字段；
+  每条 record 新增 ``machine_facts``（ai_initial / user_feedback 两层机器可读事实），
+  UTF-8 / ensure_ascii=False，图片全部相对路径，不含任何经济字段与 current_estimate；
 - Sheet2 ``导出信息`` 只放技术元数据（record_id / batch / exported_at /
   image_relative_paths / contract_version）；
 - 导出状态按 ``record_id`` 保存在 ``data_dir/calibration/export_state.json``，
@@ -33,7 +34,7 @@ from uuid import uuid4
 
 from profit_accounting_26.application.calibration_feedback_service import CalibrationFeedbackService
 
-CONTRACT_VERSION = "Calibration Feedback Export V1"
+CONTRACT_VERSION = "Calibration Feedback Export V2"
 EXPORT_STATE_FILE = "export_state.json"
 MANIFEST_FILE = "manifest.json"
 SHEET1_COLUMNS = (
@@ -53,6 +54,113 @@ SHEET2_COLUMNS = (
     "contract_version",
 )
 MODES = ("all", "range", "pending")
+
+# ---- V2 machine_facts 白名单：包装分析真正需要的字段，其余默认不进 manifest ----
+_OBSERVATION_FIELDS = frozenset({
+    "product_name",
+    "product_type",
+    "product_family",
+    "product_type_raw",
+    "product_type_code",
+    "product_family_code",
+    "material",
+    "material_family",
+    "material_family_code",
+    "packaging_state_hint",
+    "display_product_summary",
+    "display_packaging_summary",
+    "overall_form",
+    "packing_actions",
+    "packing_constraints",
+    "rigidity",
+    "foldability",
+    "compressibility",
+    "requires_shape_retention",
+    "has_hard_bottom",
+    "has_hard_backboard",
+    "has_frame",
+    "has_rigid_insert",
+    "has_rigid_parts",
+    "retail_box_visible",
+    "hard_card_visible",
+    "protrusion_flattenable",
+    "length_cm",
+    "width_cm",
+    "height_cm",
+    "weight_g",
+    "dimension_value_source",
+    "weight_value_source",
+    "dimension_scope",
+    "weight_scope",
+    "quantity",
+    "quantity_source",
+    "source",
+    "model",
+    "prompt_version",
+    "confidence",
+})
+
+_EVIDENCE_FIELDS = frozenset({
+    "product_type",
+    "product_family",
+    "material",
+    "rigidity",
+    "foldability",
+    "compressibility",
+    "requires_shape_retention",
+    "has_hard_bottom",
+    "has_hard_backboard",
+    "has_frame",
+    "has_rigid_insert",
+    "has_rigid_parts",
+    "retail_box_visible",
+    "hard_card_visible",
+    "protrusion_flattenable",
+    "length_cm",
+    "width_cm",
+    "height_cm",
+    "weight_g",
+    "dimension_scope",
+    "weight_scope",
+    "overall_form",
+    "packing_actions",
+    "packing_constraints",
+    "quantity",
+})
+
+_SHIPMENT_FIELDS = frozenset({
+    "length_cm", "width_cm", "height_cm", "weight_g", "state", "packaging_method",
+})
+
+_PACKAGING_SCENARIO_FIELDS = frozenset({
+    "packaging_state",
+    "packaging_method",
+    "length_cm",
+    "width_cm",
+    "height_cm",
+    "weight_g",
+    "reasoning_summary",
+    "confidence",
+    "needs_review",
+    "default_fields_used",
+})
+
+# 递归防护：manifest 任何层级的键名命中以下子串即整体剔除（含嵌套 raw evidence）
+_FORBIDDEN_KEY_PARTS = (
+    "current_estimate",
+    "calculation_snapshot",
+    "profit_scenarios",
+    "product_cost",
+    "domestic_shipping",
+    "system_cost",
+    "exchange_rate",
+    "sale_price",
+    "profit",
+    "subsidy",
+    "tail_fee",
+    "shein_quote",
+)
+
 # Excel 嵌入主图缩略图：只嵌第一张，尺寸限制在 100～140px 保持清晰
 _EXCEL_MAIN_IMAGE_MAX_PX = 112
 _EXCEL_ROW_HEIGHT_PT = 88
@@ -145,6 +253,130 @@ def _ai_initial_block(payload: dict[str, Any]) -> dict[str, Any]:
     v2 = payload.get("_v2") if isinstance(payload.get("_v2"), dict) else {}
     initial = v2.get("ai_initial")
     return initial if isinstance(initial, dict) else {}
+
+
+def _pick_fields(source: dict[str, Any], allowed: frozenset[str]) -> dict[str, Any]:
+    return {key: value for key, value in source.items() if key in allowed}
+
+
+def _is_forbidden_key(key: str) -> bool:
+    lowered = str(key).lower()
+    return any(part in lowered for part in _FORBIDDEN_KEY_PARTS)
+
+
+def _strip_forbidden_keys(value: Any) -> Any:
+    """递归剔除键名命中经济字段子串的条目（manifest 最终防线）。"""
+    if isinstance(value, dict):
+        return {
+            key: _strip_forbidden_keys(item)
+            for key, item in value.items()
+            if not _is_forbidden_key(key)
+        }
+    if isinstance(value, list):
+        return [_strip_forbidden_keys(item) for item in value]
+    return value
+
+
+def _evidence_block(observation: dict[str, Any]) -> dict[str, Any]:
+    """raw_payload → 过滤后的 evidence：只保留与包装有关的原始证据。
+
+    不允许整体导出 raw_payload；field_evidence / confirmed_facts 走包装白名单，
+    shipment 只保留 6 个字段；经济字段即使嵌套也由递归剔除兜底。
+    """
+    raw_payload = observation.get("raw_payload")
+    raw_payload = raw_payload if isinstance(raw_payload, dict) else {}
+    evidence: dict[str, Any] = {}
+    for key in ("field_evidence", "confirmed_facts"):
+        source = raw_payload.get(key)
+        if isinstance(source, dict):
+            evidence[key] = _pick_fields(source, _EVIDENCE_FIELDS)
+    issue = raw_payload.get("dimension_semantic_issue")
+    if isinstance(issue, str) and issue.strip():
+        evidence["dimension_semantic_issue"] = issue
+    shipment = raw_payload.get("shipment")
+    if isinstance(shipment, dict):
+        evidence["shipment"] = _pick_fields(shipment, _SHIPMENT_FIELDS)
+    return _strip_forbidden_keys(evidence)
+
+
+def _packaging_scenario_block(scenario: dict[str, Any]) -> dict[str, Any]:
+    return {key: scenario.get(key) for key in _PACKAGING_SCENARIO_FIELDS}
+
+
+def _packaging_proposal_block(initial: dict[str, Any]) -> dict[str, Any] | None:
+    """AI 首次包装方案：优先 external_ai_packaging_proposal，回退 adopted_packaging。"""
+    source_kind = "external_ai_packaging_proposal"
+    proposal = initial.get("external_ai_packaging_proposal")
+    if not isinstance(proposal, dict):
+        adopted = initial.get("adopted_packaging")
+        if isinstance(adopted, dict):
+            proposal = adopted
+            source_kind = "ai_initial.adopted_packaging"
+    if not isinstance(proposal, dict):
+        return None
+    normal = proposal.get("normal")
+    conservative = proposal.get("conservative")
+    return {
+        "source_kind": source_kind,
+        "normal": _packaging_scenario_block(normal) if isinstance(normal, dict) else None,
+        "conservative": (
+            _packaging_scenario_block(conservative) if isinstance(conservative, dict) else None
+        ),
+        "engine_version": proposal.get("engine_version") or initial.get("engine_version"),
+        "calibration_version": proposal.get("calibration_version") or initial.get("calibration_version"),
+    }
+
+
+def _machine_ai_initial(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """machine_facts.ai_initial：只从真正首次 AI 快照（_v2.ai_initial）取包装事实。
+
+    旧记录（无 _v2.ai_initial 或只有 legacy_layers_ai_raw）返回 None，不伪造精确事实。
+    """
+    initial = _ai_initial_block(payload)
+    if not initial or "legacy_layers_ai_raw" in initial:
+        return None
+    block: dict[str, Any] = {}
+    for key in ("provider", "model", "prompt_version", "engine_version", "calibration_version"):
+        value = initial.get(key)
+        if value not in (None, ""):
+            block[key] = value
+    observation = initial.get("observation")
+    if isinstance(observation, dict):
+        filtered = _strip_forbidden_keys(_pick_fields(observation, _OBSERVATION_FIELDS))
+        if filtered:
+            block["observation"] = filtered
+        evidence = _evidence_block(observation)
+        if evidence:
+            block["evidence"] = evidence
+    proposal = _packaging_proposal_block(initial)
+    if proposal is not None:
+        block["packaging_proposal"] = proposal
+    return block or None
+
+
+def _machine_user_feedback(feedback) -> dict[str, Any] | None:
+    """machine_facts.user_feedback：直接读取 linked feedback 的精确字段。
+
+    只导出规则分析事实，不含 calibration_exported_at / export_batch_id 等
+    软件内部导出状态；实际费用与真实包装尺寸保持各自原值，不互相推导。
+    """
+    if feedback is None:
+        return None
+    return {
+        "feedback_id": feedback.feedback_id,
+        "feedback_schema_version": feedback.feedback_schema_version,
+        "source": feedback.source,
+        "created_at": feedback.created_at,
+        "updated_at": feedback.updated_at,
+        "structure": feedback.structure.to_dict(),
+        "suggested_package": (
+            feedback.suggested_package.to_dict() if feedback.suggested_package else None
+        ),
+        "actual_logistics": (
+            feedback.actual_logistics.to_dict() if feedback.actual_logistics else None
+        ),
+        "user_note": feedback.user_note,
+    }
 
 
 def first_ai_short_name(payload: dict[str, Any]) -> str:
@@ -243,7 +475,7 @@ def parse_seq_range(text: str, record_count: int) -> tuple[int, int]:
 
 
 class CalibrationFeedbackExporter:
-    """校准反馈导出 V1 执行器：模式选择 → preflight → 复制图片 → 写 Excel → 标记状态。"""
+    """校准反馈导出 V2 执行器：模式选择 → preflight → 复制图片 → 写 Excel → 标记状态。"""
 
     def __init__(
         self,
@@ -513,8 +745,9 @@ class CalibrationFeedbackExporter:
     ) -> None:
         """manifest.json：供 Agent 直接读取的结构化校准数据。
 
-        字段语义与 Sheet1 7 列一致；不含 current_estimate、采购成本、总成本、
-        标价、利润、补贴、尾程、汇率等经济字段；图片全部相对路径。
+        字段语义与 Sheet1 7 列一致；每条 record 新增 machine_facts
+        （ai_initial / user_feedback 两层机器可读事实）；不含 current_estimate、
+        采购成本、总成本、标价、利润、补贴、尾程、汇率等经济字段；图片全部相对路径。
         """
         manifest_records: list[dict[str, Any]] = []
         for index, payload in enumerate(records):
@@ -531,14 +764,18 @@ class CalibrationFeedbackExporter:
                     "ai_initial_shipment": first_ai_shipment_text(payload),
                     "user_calibration": user_calibration_text(feedback) if feedback is not None else "",
                     "actual_first_mile": actual_first_mile_text(feedback) if feedback is not None else "",
+                    "machine_facts": {
+                        "ai_initial": _machine_ai_initial(payload),
+                        "user_feedback": _machine_user_feedback(feedback),
+                    },
                 }
             )
-        manifest = {
+        manifest = _strip_forbidden_keys({
             "contract_version": CONTRACT_VERSION,
             "export_batch_id": batch_id,
             "exported_at": exported_at,
             "records": manifest_records,
-        }
+        })
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_text(
