@@ -221,6 +221,13 @@ def validate_formal_bundle_zip(zip_path: str | Path) -> ValidatedFormalBundle:
     if coverage.get("uncovered_rule_ids") != []:
         raise FormalBundleValidationError("receipt uncovered_rule_ids must be empty")
 
+    # ── promotion_version 严格检查 ──
+    if receipt.get("promotion_version") != PROMOTION_VERSION:
+        raise FormalBundleValidationError(
+            f"promotion_receipt promotion_version must be {PROMOTION_VERSION!r}, "
+            f"got {receipt.get('promotion_version')!r}"
+        )
+
     # ── runtime calibration ──
     if not isinstance(runtime_cal, list) or not runtime_cal:
         raise FormalBundleValidationError("runtime_calibration must be a non-empty list")

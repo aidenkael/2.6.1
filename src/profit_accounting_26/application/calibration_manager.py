@@ -155,8 +155,10 @@ class CalibrationManager:
                 f"registry_path mismatch: "
                 f"{self._service.rule_registry_path} != {expected_registry}"
             )
-        # 确认 registry 内容确实对应预期 registry 文件
-        if expected_registry.is_file():
+        # 确认 registry 文件存在且内容对应预期
+        if not expected_registry.is_file():
+            errors.append(f"expected registry file missing: {expected_registry}")
+        else:
             expected_data = self._service._load_registry(expected_registry)
             if self._service.registry != expected_data:
                 errors.append("registry content does not match expected registry file")
@@ -281,7 +283,16 @@ class CalibrationManager:
         if active is not None:
             try:
                 self._read_json_payload(Path(active["path"]))
-                active_valid = True
+                # Formal Bundle 额外验证完整性（防篡改）
+                if active.get("metadata", {}).get("formal_bundle"):
+                    try:
+                        self._verify_formal_bundle_integrity(active)
+                    except RuntimeError:
+                        active_valid = False
+                    else:
+                        active_valid = True
+                else:
+                    active_valid = True
             except (OSError, ValueError):
                 active_valid = False
         if not active_valid:

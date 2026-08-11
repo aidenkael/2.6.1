@@ -28,6 +28,7 @@ from profit_accounting_26.application.formal_bundle_importer import (
     is_formal_bundle_zip,
     validate_formal_bundle_zip,
 )
+from profit_accounting_26.application.calibration_rule_promotion import PROMOTION_VERSION
 from profit_accounting_26.application.calibration_manager import _CAL77_REGISTRY_PATH
 from profit_accounting_26.shared.paths import ApplicationPaths
 from profit_accounting_26.storage import SQLiteStore
@@ -1268,3 +1269,202 @@ class TestAppContextRestart:
         ctx2 = AppContext.create_default()
         assert ctx2.packaging_service.rule_registry_path == _CAL77_REGISTRY_PATH
         assert ctx2.packaging_service.calibration_version == "legacy-v2"
+
+
+# ===========================================================================
+# Tests 60-69: Registry missing / restart integrity / promotion_version
+# ===========================================================================
+
+
+class TestRegistryMissingFailure:
+    """Registry file missing must always be a runtime failure."""
+
+    def test_60_rollback_formal_previous_registry_missing_severe(self, tmp_path):
+        """Rollback 到 previous Formal，previous registry 缺失 → recovery 失败 RuntimeError。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        # Import and activate formal A
+        formal_a = manager.import_package(write_bundle_zip(
+            tmp_path, name="bundle_a.zip",
+            validated_package=_make_validated_package(
+                package_id="pkg-A", calibration_version="cal-A"
+            ),
+            registry=_make_registry(version="cal-A"),
+        ))
+        manager.activate(formal_a["id"])
+        # Import formal B
+        formal_b = manager.import_package(write_bundle_zip(
+            tmp_path, name="bundle_b.zip",
+            validated_package=_make_validated_package(
+                package_id="pkg-B", calibration_version="cal-B"
+            ),
+            registry=_make_registry(version="cal-B"),
+        ))
+        # Delete formal A's registry to simulate missing
+        formal_a_registry = Path(formal_a["path"]).with_name("packaging_rule_registry_v1.json")
+        formal_a_registry.unlink()
+        # Activate B with sabotaged verification → will try rollback to A → A registry missing
+        original_activate = service.activate
+        call_count = [0]
+
+        def sabotaged(cal_path, *, version):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First call: activate B, sabotage calibration_path to trigger post-verify failure
+                original_activate(cal_path, version=version)
+                service.calibration_path = Path("/fake/path")
+            else:
+                # Second call: restore A, just call original
+                original_activate(cal_path, version=version)
+
+        service.activate = sabotaged
+        with pytest.raises(RuntimeError, match="补偿恢复也失败"):
+            manager.activate(formal_b["id"])
+
+    def test_61_rollback_builtin_cal77_registry_missing_severe(self, tmp_path):
+        """Rollback 到 builtin，CAL77 registry 缺失 → recovery 失败 RuntimeError。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        formal = manager.import_package(write_bundle_zip(tmp_path))
+        # Temporarily rename CAL77 registry to simulate missing
+        import shutil
+        backup = _CAL77_REGISTRY_PATH.with_suffix(".json.bak")
+        shutil.move(str(_CAL77_REGISTRY_PATH), str(backup))
+        try:
+            # Sabotage activate to fail post-verification → tries rollback to builtin → CAL77 missing
+            original_activate = service.activate
+            call_count = [0]
+
+            def sabotaged(cal_path, *, version):
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    original_activate(cal_path, version=version)
+                    service.calibration_path = Path("/fake/path")
+                else:
+                    original_activate(cal_path, version=version)
+
+            service.activate = sabotaged
+            with pytest.raises(RuntimeError, match="补偿恢复也失败"):
+                manager.activate(formal["id"])
+        finally:
+            shutil.move(str(backup), str(_CAL77_REGISTRY_PATH))
+
+
+class TestRestartFormalIntegrity:
+    """Software restart must re-verify active Formal Bundle integrity."""
+
+    def test_62_restart_normal_formal_stays_formal(self, tmp_path, monkeypatch):
+        """Formal active 正常 → restart 后仍 Formal active + Formal registry。"""
+        pytest.importorskip("PySide6")
+        monkeypatch.setenv("PROFIT_ACCOUNTING_DATA_DIR", str(tmp_path))
+        from profit_accounting_26.application import AppContext
+        ctx1 = AppContext.create_default()
+        bundle_path = write_bundle_zip(tmp_path)
+        result = ctx1.calibration_manager.import_package(bundle_path)
+        ctx1.calibration_manager.activate(result["id"])
+        formal_registry = Path(result["path"]).with_name("packaging_rule_registry_v1.json")
+        assert ctx1.packaging_service.rule_registry_path == formal_registry
+        # Restart
+        ctx2 = AppContext.create_default()
+        assert ctx2.calibration_manager.active_package()["id"] == result["id"]
+        assert ctx2.packaging_service.rule_registry_path == formal_registry
+
+    def test_63_restart_tampered_calibration_fallback_builtin(self, tmp_path, monkeypatch):
+        """Formal active 后篡改 runtime calibration → restart fallback builtin。"""
+        pytest.importorskip("PySide6")
+        monkeypatch.setenv("PROFIT_ACCOUNTING_DATA_DIR", str(tmp_path))
+        from profit_accounting_26.application import AppContext
+        ctx1 = AppContext.create_default()
+        bundle_path = write_bundle_zip(tmp_path)
+        result = ctx1.calibration_manager.import_package(bundle_path)
+        ctx1.calibration_manager.activate(result["id"])
+        # Tamper runtime calibration
+        Path(result["path"]).write_text(
+            json.dumps([{"sample_id": "TAMPERED"}]), encoding="utf-8"
+        )
+        # Restart → should fallback to builtin
+        ctx2 = AppContext.create_default()
+        assert ctx2.calibration_manager.active_package().get("metadata", {}).get("builtin") is True
+        assert ctx2.packaging_service.rule_registry_path == _CAL77_REGISTRY_PATH
+
+    def test_64_restart_tampered_registry_fallback_builtin(self, tmp_path, monkeypatch):
+        """Formal active 后篡改 registry → restart fallback builtin。"""
+        pytest.importorskip("PySide6")
+        monkeypatch.setenv("PROFIT_ACCOUNTING_DATA_DIR", str(tmp_path))
+        from profit_accounting_26.application import AppContext
+        ctx1 = AppContext.create_default()
+        bundle_path = write_bundle_zip(tmp_path)
+        result = ctx1.calibration_manager.import_package(bundle_path)
+        ctx1.calibration_manager.activate(result["id"])
+        # Tamper registry
+        reg_path = Path(result["path"]).with_name("packaging_rule_registry_v1.json")
+        reg_path.write_text(
+            json.dumps({"aggregate_rules": [], "sample_rules": []}), encoding="utf-8"
+        )
+        # Restart → should fallback to builtin
+        ctx2 = AppContext.create_default()
+        assert ctx2.calibration_manager.active_package().get("metadata", {}).get("builtin") is True
+        assert ctx2.packaging_service.rule_registry_path == _CAL77_REGISTRY_PATH
+
+    def test_65_restart_missing_registry_fallback_builtin(self, tmp_path, monkeypatch):
+        """Formal active 后删除 registry → restart fallback builtin。"""
+        pytest.importorskip("PySide6")
+        monkeypatch.setenv("PROFIT_ACCOUNTING_DATA_DIR", str(tmp_path))
+        from profit_accounting_26.application import AppContext
+        ctx1 = AppContext.create_default()
+        bundle_path = write_bundle_zip(tmp_path)
+        result = ctx1.calibration_manager.import_package(bundle_path)
+        ctx1.calibration_manager.activate(result["id"])
+        # Delete registry
+        reg_path = Path(result["path"]).with_name("packaging_rule_registry_v1.json")
+        reg_path.unlink()
+        # Restart → should fallback to builtin
+        ctx2 = AppContext.create_default()
+        assert ctx2.calibration_manager.active_package().get("metadata", {}).get("builtin") is True
+        assert ctx2.packaging_service.rule_registry_path == _CAL77_REGISTRY_PATH
+
+    def test_66_fallback_uses_cal77_canonical_registry(self, tmp_path, monkeypatch):
+        """Fallback 后 service 使用 CAL77 canonical registry。"""
+        pytest.importorskip("PySide6")
+        monkeypatch.setenv("PROFIT_ACCOUNTING_DATA_DIR", str(tmp_path))
+        from profit_accounting_26.application import AppContext
+        ctx1 = AppContext.create_default()
+        bundle_path = write_bundle_zip(tmp_path)
+        result = ctx1.calibration_manager.import_package(bundle_path)
+        ctx1.calibration_manager.activate(result["id"])
+        # Tamper to force fallback
+        Path(result["path"]).write_text(
+            json.dumps([{"sample_id": "TAMPERED"}]), encoding="utf-8"
+        )
+        ctx2 = AppContext.create_default()
+        # Must use CAL77 registry, not the formal sibling
+        assert ctx2.packaging_service.rule_registry_path == _CAL77_REGISTRY_PATH
+        # And builtin calibration
+        assert ctx2.calibration_manager.active_package().get("metadata", {}).get("builtin") is True
+
+
+class TestPromotionVersionStrict:
+    """Strict promotion_version check in validate_formal_bundle_zip."""
+
+    def test_67_correct_promotion_version_passes(self, tmp_path):
+        """正确 promotion_version → 通过。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        bundle_path = write_bundle_zip(tmp_path)
+        result = manager.import_package(bundle_path)
+        assert result is not None
+
+    def test_68_wrong_promotion_version_rejected(self, tmp_path):
+        """错误 promotion_version → 拒绝（即使 hashes 内部一致）。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        receipt = _make_promotion_receipt()
+        receipt["promotion_version"] = "wrong-version-v2"
+        bundle_path = write_bundle_zip(tmp_path, receipt=receipt)
+        with pytest.raises(FormalBundleValidationError, match="promotion_version"):
+            manager.import_package(bundle_path)
+
+    def test_69_missing_promotion_version_rejected(self, tmp_path):
+        """promotion_version 缺失 → 拒绝。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        receipt = _make_promotion_receipt()
+        del receipt["promotion_version"]
+        bundle_path = write_bundle_zip(tmp_path, receipt=receipt)
+        with pytest.raises(FormalBundleValidationError, match="promotion_version"):
+            manager.import_package(bundle_path)
