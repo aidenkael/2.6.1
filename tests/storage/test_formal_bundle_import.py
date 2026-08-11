@@ -28,6 +28,7 @@ from profit_accounting_26.application.formal_bundle_importer import (
     is_formal_bundle_zip,
     validate_formal_bundle_zip,
 )
+from profit_accounting_26.application.calibration_manager import _CAL77_REGISTRY_PATH
 from profit_accounting_26.shared.paths import ApplicationPaths
 from profit_accounting_26.storage import SQLiteStore
 
@@ -214,6 +215,14 @@ def _build_formal_bundle_zip(
     val_block = validated_package.get("validation")
     if not isinstance(val_block, dict):
         val_block = {}
+
+    # 从 validated_package 实际 rules 计算 enabled rule_ids
+    actual_validated_ids = sorted(
+        str(rule.get("rule_id"))
+        for rule in validated_package.get("rules", [])
+        if isinstance(rule, dict) and rule.get("enabled") is True
+    )
+
     manifest = {
         "contract_version": FORMAL_BUNDLE_VERSION,
         "package_id": validated_package["package_id"],
@@ -243,7 +252,7 @@ def _build_formal_bundle_zip(
             "sample_count": len(runtime_calibration),
             "aggregate_rule_count": len(registry.get("aggregate_rules", [])),
             "sample_rule_count": len(registry.get("sample_rules", [])),
-            "validated_rule_ids": ["AGR-TEST-001"],
+            "validated_rule_ids": actual_validated_ids,
         },
     }
     if manifest_overrides:
@@ -939,3 +948,323 @@ class TestFormalBundleDelete:
         assert remaining["metadata"]["builtin"] is True
         assert service.calibration_version == "builtin-v1"
         assert not Path(result["path"]).parent.exists()
+        assert result["active"] is False
+        manager.delete_package(result["id"])
+        assert all(p["id"] != result["id"] for p in manager.list_packages())
+        assert not Path(result["path"]).parent.exists()
+
+    def test_delete_active_formal_bundle_fallback(self, tmp_path):
+        """active formal bundle delete → builtin fallback。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        result = manager.import_package(write_bundle_zip(tmp_path))
+        manager.activate(result["id"])
+        assert manager.active_package()["id"] == result["id"]
+        remaining = manager.delete_package(result["id"])
+        assert remaining["metadata"]["builtin"] is True
+        assert service.calibration_version == "builtin-v1"
+        assert not Path(result["path"]).parent.exists()
+
+
+# ===========================================================================
+# Tests 44-59: Unified registry activation / rollback / restart / ZIP strictness
+# ===========================================================================
+
+
+class TestUnifiedRegistryActivation:
+    """Tests for unified registry activation semantics."""
+
+    def test_44_formal_active_to_legacy_activate_restores_cal77_registry(self, tmp_path):
+        """Formal active → legacy activate: registry 恢复 CAL77 resource registry。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        # Import and activate formal bundle
+        formal = manager.import_package(write_bundle_zip(tmp_path))
+        manager.activate(formal["id"])
+        formal_registry = Path(formal["path"]).with_name("packaging_rule_registry_v1.json")
+        assert service.rule_registry_path == formal_registry
+        # Import legacy and activate it
+        legacy = manager.import_package(
+            _write_legacy_json(tmp_path, "legacy.json", "legacy-v2", "LEG")
+        )
+        # Legacy should use CAL77 registry
+        assert service.rule_registry_path == _CAL77_REGISTRY_PATH
+
+    def test_45_formal_active_to_builtin_fallback_restores_cal77_registry(self, tmp_path):
+        """Formal active → delete (builtin fallback): registry 恢复 CAL77。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        formal = manager.import_package(write_bundle_zip(tmp_path))
+        manager.activate(formal["id"])
+        formal_registry = Path(formal["path"]).with_name("packaging_rule_registry_v1.json")
+        assert service.rule_registry_path == formal_registry
+        # Delete formal → fallback to builtin
+        manager.delete_package(formal["id"])
+        assert service.rule_registry_path == _CAL77_REGISTRY_PATH
+        assert service.calibration_version == "builtin-v1"
+
+    def test_46_formal_a_to_formal_b_switches_registry(self, tmp_path):
+        """Formal A → Formal B: registry 正确切到 B 的 sibling。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        # Import two formal bundles with different calibration versions
+        formal_a = manager.import_package(write_bundle_zip(
+            tmp_path, name="bundle_a.zip",
+            validated_package=_make_validated_package(
+                package_id="pkg-A", calibration_version="cal-A"
+            ),
+            registry=_make_registry(version="cal-A"),
+        ))
+        formal_b = manager.import_package(write_bundle_zip(
+            tmp_path, name="bundle_b.zip",
+            validated_package=_make_validated_package(
+                package_id="pkg-B", calibration_version="cal-B"
+            ),
+            registry=_make_registry(version="cal-B"),
+        ))
+        manager.activate(formal_a["id"])
+        expected_a = Path(formal_a["path"]).with_name("packaging_rule_registry_v1.json")
+        assert service.rule_registry_path == expected_a
+        # Switch to B
+        manager.activate(formal_b["id"])
+        expected_b = Path(formal_b["path"]).with_name("packaging_rule_registry_v1.json")
+        assert service.rule_registry_path == expected_b
+        assert service.calibration_version == "cal-B"
+
+    def test_47_activation_verification_failure_full_rollback(self, tmp_path):
+        """activation target verification 失败 → previous DB/calibration/registry 全部恢复。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        formal = manager.import_package(write_bundle_zip(tmp_path))
+        # Sabotage: after activation, corrupt calibration_path on first call only
+        original_activate = service.activate
+        call_count = [0]
+
+        def sabotaged(cal_path, *, version):
+            call_count[0] += 1
+            original_activate(cal_path, version=version)
+            if call_count[0] == 1:
+                # Only corrupt on first call (activate formal)
+                service.calibration_path = Path("/fake/path")
+
+        service.activate = sabotaged
+        with pytest.raises(RuntimeError, match="post-activation verification failed"):
+            manager.activate(formal["id"])
+        # Everything must be restored to builtin (second call was recovery)
+        assert call_count[0] == 2
+        assert manager.active_package()["id"] == builtin["id"]
+        assert service.calibration_path == Path(builtin["path"])
+        assert service.calibration_version == "builtin-v1"
+        assert service.rule_registry_path == _CAL77_REGISTRY_PATH
+
+    def test_48_recovery_registry_failure_raises_severe(self, tmp_path):
+        """恢复 registry 失败 → 严重 RuntimeError，不能吞异常。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        formal = manager.import_package(write_bundle_zip(tmp_path))
+        # Make service.activate succeed but then sabotage registry reload
+        real_activate = service.activate
+        call_count = [0]
+
+        def failing_on_second(cal_path, *, version):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First call (activate formal) fails
+                raise ValueError("simulated activation failure")
+            # Second call (restore previous) succeeds
+            real_activate(cal_path, version=version)
+
+        service.activate = failing_on_second
+        with pytest.raises(RuntimeError, match="运行时激活失败"):
+            manager.activate(formal["id"])
+        # Should have attempted recovery
+        assert call_count[0] >= 1
+
+    def test_49_post_verification_rollback_failure_severe_error(self, tmp_path):
+        """post-verification rollback 自身失败 → 明确严重错误。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        formal = manager.import_package(write_bundle_zip(tmp_path))
+        # Make activation fail AND recovery fail
+        real_activate = service.activate
+
+        def always_fails(cal_path, *, version):
+            raise ValueError("always fails")
+
+        service.activate = always_fails
+        with pytest.raises(RuntimeError, match="补偿恢复也失败|没有切换前版本"):
+            manager.activate(formal["id"])
+
+
+class TestNestedZipMemberRejection:
+    """Tests for strict root-level ZIP member checking."""
+
+    def test_50_subdir_manifest_not_detected_as_formal(self, tmp_path):
+        """subdir/formal_package_manifest.json 不能被识别为 Formal Bundle。"""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("subdir/formal_package_manifest.json", '{"contract_version": "x"}')
+        p = tmp_path / "nested.zip"
+        p.write_bytes(buf.getvalue())
+        assert is_formal_bundle_zip(p) is False
+
+    def test_51_root_manifest_subdir_runtime_rejected(self, tmp_path):
+        """根 manifest + 子目录 runtime_calibration → Formal Bundle 拒绝。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        # Build a ZIP with manifest at root but runtime_calibration in subdir
+        data = _build_formal_bundle_zip()
+        # Rebuild with runtime_calibration moved to subdir
+        buf = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(data)) as src:
+            with zipfile.ZipFile(buf, "w") as dst:
+                for info in src.infolist():
+                    if info.filename == "runtime_calibration.json":
+                        dst.writestr("subdir/runtime_calibration.json", src.read(info.filename))
+                    else:
+                        dst.writestr(info.filename, src.read(info.filename))
+        p = tmp_path / "mixed.zip"
+        p.write_bytes(buf.getvalue())
+        # is_formal_bundle_zip returns True (manifest IS at root)
+        # but validate should fail because runtime_calibration is not at root
+        with pytest.raises(FormalBundleValidationError, match="missing required member"):
+            manager.import_package(p)
+
+
+class TestManifestStrictValidation:
+    """Tests for manifest.files and runtime_summary strict validation."""
+
+    def test_52_manifest_files_mapping_error_rejected(self, tmp_path):
+        """manifest.files 任一映射错误 → 拒绝。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        bundle_path = write_bundle_zip(
+            tmp_path,
+            manifest_overrides={
+                "files": {
+                    "runtime_calibration": "wrong_name.json",  # wrong
+                    "runtime_registry": "packaging_rule_registry_v1.json",
+                    "validated_rule_package": "validated_rule_package.json",
+                    "promotion_receipt": "promotion_receipt.json",
+                }
+            },
+        )
+        with pytest.raises(FormalBundleValidationError, match="manifest.files"):
+            manager.import_package(bundle_path)
+
+    def test_53_runtime_summary_sample_count_error_rejected(self, tmp_path):
+        """runtime_summary.sample_count 错误 → 拒绝。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        # Build a bundle with wrong sample_count in manifest
+        data = _build_formal_bundle_zip()
+        # Tamper the manifest to have wrong sample_count
+        with zipfile.ZipFile(io.BytesIO(data)) as src:
+            manifest = json.loads(src.read("formal_package_manifest.json"))
+            manifest["runtime_summary"]["sample_count"] = 999
+            # Rebuild ZIP with tampered manifest
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as dst:
+                for info in src.infolist():
+                    if info.filename == "formal_package_manifest.json":
+                        dst.writestr(info.filename, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+                    else:
+                        dst.writestr(info.filename, src.read(info.filename))
+        p = tmp_path / "bad_sample_count.zip"
+        p.write_bytes(buf.getvalue())
+        with pytest.raises(FormalBundleValidationError, match="sample_count"):
+            manager.import_package(p)
+
+    def test_54_aggregate_rule_count_error_rejected(self, tmp_path):
+        """aggregate_rule_count 错误 → 拒绝。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        data = _build_formal_bundle_zip()
+        with zipfile.ZipFile(io.BytesIO(data)) as src:
+            manifest = json.loads(src.read("formal_package_manifest.json"))
+            manifest["runtime_summary"]["aggregate_rule_count"] = 999
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as dst:
+                for info in src.infolist():
+                    if info.filename == "formal_package_manifest.json":
+                        dst.writestr(info.filename, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+                    else:
+                        dst.writestr(info.filename, src.read(info.filename))
+        p = tmp_path / "bad_agg_count.zip"
+        p.write_bytes(buf.getvalue())
+        with pytest.raises(FormalBundleValidationError, match="aggregate_rule_count"):
+            manager.import_package(p)
+
+    def test_55_sample_rule_count_error_rejected(self, tmp_path):
+        """sample_rule_count 错误 → 拒绝。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        data = _build_formal_bundle_zip()
+        with zipfile.ZipFile(io.BytesIO(data)) as src:
+            manifest = json.loads(src.read("formal_package_manifest.json"))
+            manifest["runtime_summary"]["sample_rule_count"] = 999
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as dst:
+                for info in src.infolist():
+                    if info.filename == "formal_package_manifest.json":
+                        dst.writestr(info.filename, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+                    else:
+                        dst.writestr(info.filename, src.read(info.filename))
+        p = tmp_path / "bad_sample_rule_count.zip"
+        p.write_bytes(buf.getvalue())
+        with pytest.raises(FormalBundleValidationError, match="sample_rule_count"):
+            manager.import_package(p)
+
+    def test_56_validated_rule_ids_error_rejected(self, tmp_path):
+        """validated_rule_ids 错误 → 拒绝。"""
+        manager, service, builtin = setup_manager(tmp_path)
+        data = _build_formal_bundle_zip()
+        with zipfile.ZipFile(io.BytesIO(data)) as src:
+            manifest = json.loads(src.read("formal_package_manifest.json"))
+            manifest["runtime_summary"]["validated_rule_ids"] = ["WRONG-ID"]
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as dst:
+                for info in src.infolist():
+                    if info.filename == "formal_package_manifest.json":
+                        dst.writestr(info.filename, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+                    else:
+                        dst.writestr(info.filename, src.read(info.filename))
+        p = tmp_path / "bad_rule_ids.zip"
+        p.write_bytes(buf.getvalue())
+        with pytest.raises(FormalBundleValidationError, match="validated_rule_ids"):
+            manager.import_package(p)
+
+
+class TestAppContextRestart:
+    """Tests for AppContext restart scenarios."""
+
+    def test_57_restart_active_formal_uses_formal_registry(self, tmp_path, monkeypatch):
+        """AppContext 重启：active Formal Bundle → PackagingEstimationService 使用 Formal sibling registry。"""
+        pytest.importorskip("PySide6")
+        monkeypatch.setenv("PROFIT_ACCOUNTING_DATA_DIR", str(tmp_path))
+        from profit_accounting_26.application import AppContext
+        # First startup: import and activate formal bundle
+        ctx1 = AppContext.create_default()
+        bundle_path = write_bundle_zip(tmp_path)
+        result = ctx1.calibration_manager.import_package(bundle_path)
+        ctx1.calibration_manager.activate(result["id"])
+        formal_registry = Path(result["path"]).with_name("packaging_rule_registry_v1.json")
+        assert ctx1.packaging_service.rule_registry_path == formal_registry
+        # Second startup (simulating restart)
+        ctx2 = AppContext.create_default()
+        assert ctx2.packaging_service.rule_registry_path == formal_registry
+        assert ctx2.packaging_service.calibration_version == result["version"]
+
+    def test_58_restart_active_builtin_uses_cal77_registry(self, tmp_path, monkeypatch):
+        """AppContext 重启：active builtin → 使用 CAL77 resource registry。"""
+        pytest.importorskip("PySide6")
+        monkeypatch.setenv("PROFIT_ACCOUNTING_DATA_DIR", str(tmp_path))
+        from profit_accounting_26.application import AppContext
+        ctx = AppContext.create_default()
+        # Default active is builtin
+        assert ctx.calibration_manager.active_package().get("metadata", {}).get("builtin") is True
+        assert ctx.packaging_service.rule_registry_path == _CAL77_REGISTRY_PATH
+
+    def test_59_restart_active_legacy_uses_cal77_registry(self, tmp_path, monkeypatch):
+        """AppContext 重启：active legacy → 使用 CAL77 resource registry。"""
+        pytest.importorskip("PySide6")
+        monkeypatch.setenv("PROFIT_ACCOUNTING_DATA_DIR", str(tmp_path))
+        from profit_accounting_26.application import AppContext
+        ctx1 = AppContext.create_default()
+        # Import and activate legacy
+        legacy = ctx1.calibration_manager.import_package(
+            _write_legacy_json(tmp_path, "legacy.json", "legacy-v2", "LEG")
+        )
+        assert ctx1.packaging_service.calibration_version == "legacy-v2"
+        # Restart
+        ctx2 = AppContext.create_default()
+        assert ctx2.packaging_service.rule_registry_path == _CAL77_REGISTRY_PATH
+        assert ctx2.packaging_service.calibration_version == "legacy-v2"

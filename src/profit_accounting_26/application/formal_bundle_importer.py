@@ -30,6 +30,14 @@ _REQUIRED_MEMBERS = (
     "promotion_receipt.json",
 )
 
+# manifest.files 必须严格映射到这些文件名
+_EXPECTED_FILES_MAP = {
+    "runtime_calibration": "runtime_calibration.json",
+    "runtime_registry": "packaging_rule_registry_v1.json",
+    "validated_rule_package": "validated_rule_package.json",
+    "promotion_receipt": "promotion_receipt.json",
+}
+
 MAX_JSON_BYTES = 20 * 1024 * 1024
 
 
@@ -61,6 +69,15 @@ def _read_json(raw: bytes, label: str) -> Any:
         raise FormalBundleValidationError(f"{label}: cannot parse JSON: {exc}") from exc
 
 
+def _is_root_level_member(name: str) -> bool:
+    """检查 ZIP 成员是否在根目录（不含路径分隔符）。"""
+    if name.endswith("/"):
+        return False
+    pure = PurePosixPath(name)
+    # 根目录成员：PurePosixPath 只有 name，没有 parent parts
+    return len(pure.parts) == 1
+
+
 def validate_formal_bundle_zip(zip_path: str | Path) -> ValidatedFormalBundle:
     """Open a ZIP, detect formal bundle, validate all members and return artefacts.
 
@@ -85,30 +102,24 @@ def validate_formal_bundle_zip(zip_path: str | Path) -> ValidatedFormalBundle:
                 raise FormalBundleValidationError(f"unsafe path in ZIP: {name}")
             if name.endswith("/"):
                 continue
-            base = pure.name
-            if base in names_seen:
-                raise FormalBundleValidationError(f"duplicate ZIP member: {base}")
-            names_seen.add(base)
+            if name in names_seen:
+                raise FormalBundleValidationError(f"duplicate ZIP member: {name}")
+            names_seen.add(name)
 
-        # ── detect formal bundle ──
-        root_names = {PurePosixPath(info.filename).name for info in archive.infolist() if not info.filename.endswith("/")}
-        if "formal_package_manifest.json" not in root_names:
-            raise FormalBundleValidationError("not a formal bundle (missing formal_package_manifest.json)")
+        # ── detect formal bundle: manifest must be at ROOT level ──
+        root_members = {name for name in names_seen if _is_root_level_member(name)}
+        if "formal_package_manifest.json" not in root_members:
+            raise FormalBundleValidationError("not a formal bundle (missing formal_package_manifest.json at root)")
 
-        # ── require all fixed members ──
+        # ── require all fixed members at ROOT level ──
         for member in _REQUIRED_MEMBERS:
-            if member not in root_names:
-                raise FormalBundleValidationError(f"missing required member: {member}")
+            if member not in root_members:
+                raise FormalBundleValidationError(f"missing required member at root: {member}")
 
-        # ── read raw bytes ──
+        # ── read raw bytes (exact root-level names only) ──
         member_bytes: dict[str, bytes] = {}
         for member in _REQUIRED_MEMBERS:
-            # Find the actual filename in the archive (may have prefix path)
-            actual = next(
-                info.filename for info in archive.infolist()
-                if not info.filename.endswith("/") and PurePosixPath(info.filename).name == member
-            )
-            raw = archive.read(actual)
+            raw = archive.read(member)
             if len(raw) > MAX_JSON_BYTES:
                 raise FormalBundleValidationError(f"{member}: exceeds {MAX_JSON_BYTES} bytes")
             member_bytes[member] = raw
@@ -137,6 +148,15 @@ def validate_formal_bundle_zip(zip_path: str | Path) -> ValidatedFormalBundle:
     for key in ("files", "source_fingerprints", "runtime_fingerprints", "runtime_summary"):
         if not isinstance(manifest.get(key), dict):
             raise FormalBundleValidationError(f"manifest.{key} must be an object")
+
+    # ── manifest.files 严格映射验证 ──
+    files_map = manifest["files"]
+    for logical_name, expected_filename in _EXPECTED_FILES_MAP.items():
+        actual = files_map.get(logical_name)
+        if actual != expected_filename:
+            raise FormalBundleValidationError(
+                f"manifest.files.{logical_name} must be {expected_filename!r}, got {actual!r}"
+            )
 
     # ── SHA-256 verification ──
     rt_fp = manifest["runtime_fingerprints"]
@@ -222,6 +242,35 @@ def validate_formal_bundle_zip(zip_path: str | Path) -> ValidatedFormalBundle:
             f"registry.version {reg_version!r} != manifest calibration_version {manifest['calibration_version']!r}"
         )
 
+    # ── runtime_summary 与真实数据交叉验证 ──
+    summary = manifest["runtime_summary"]
+    actual_sample_count = len(runtime_cal)
+    if summary.get("sample_count") != actual_sample_count:
+        raise FormalBundleValidationError(
+            f"runtime_summary.sample_count {summary.get('sample_count')} != actual {actual_sample_count}"
+        )
+    actual_aggregate_count = len(runtime_reg.get("aggregate_rules", []))
+    if summary.get("aggregate_rule_count") != actual_aggregate_count:
+        raise FormalBundleValidationError(
+            f"runtime_summary.aggregate_rule_count {summary.get('aggregate_rule_count')} != actual {actual_aggregate_count}"
+        )
+    actual_sample_rule_count = len(runtime_reg.get("sample_rules", []))
+    if summary.get("sample_rule_count") != actual_sample_rule_count:
+        raise FormalBundleValidationError(
+            f"runtime_summary.sample_rule_count {summary.get('sample_rule_count')} != actual {actual_sample_rule_count}"
+        )
+    # validated_rule_ids: 必须等于 validated package 中 enabled=true 的 rule_id 列表
+    actual_validated_ids = sorted(
+        str(rule.get("rule_id"))
+        for rule in validated_pkg.get("rules", [])
+        if isinstance(rule, dict) and rule.get("enabled") is True
+    )
+    declared_ids = summary.get("validated_rule_ids", [])
+    if sorted(declared_ids) != actual_validated_ids:
+        raise FormalBundleValidationError(
+            f"runtime_summary.validated_rule_ids {declared_ids} != actual enabled rules {actual_validated_ids}"
+        )
+
     return ValidatedFormalBundle(
         manifest=manifest,
         runtime_calibration=runtime_cal,
@@ -234,14 +283,13 @@ def validate_formal_bundle_zip(zip_path: str | Path) -> ValidatedFormalBundle:
 
 
 def is_formal_bundle_zip(zip_path: str | Path) -> bool:
-    """Quick check: does this ZIP contain formal_package_manifest.json at root?"""
+    """Quick check: does this ZIP contain formal_package_manifest.json at ROOT level?"""
     try:
         with zipfile.ZipFile(zip_path) as archive:
-            root_names = {
-                PurePosixPath(info.filename).name
-                for info in archive.infolist()
-                if not info.filename.endswith("/")
+            root_members = {
+                name for name in (info.filename for info in archive.infolist())
+                if _is_root_level_member(name)
             }
-            return "formal_package_manifest.json" in root_names
+            return "formal_package_manifest.json" in root_members
     except (zipfile.BadZipFile, OSError):
         return False
