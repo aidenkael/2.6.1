@@ -75,10 +75,10 @@ class TestUIFileContract:
         names = {w.get("name") for w in main_window_tree.iter("widget") if w.get("name")}
         names |= {l.get("name") for l in main_window_tree.iter("layout") if l.get("name")}
         required = [
-            # 导航（Stage 4：精简为 3 项）
-            "btnNavCalculation", "btnNavHistory", "btnNavSettings",
-            # 页面（Stage 4：以图搜图/数据导入导出/模型校准反馈已删除）
-            "pageCalculation", "pageHistory", "pageSettingsHost",
+            # 导航
+            "btnNavCalculation", "btnNavProductCollection", "btnNavHistory", "btnNavSettings",
+            # 页面
+            "pageCalculation", "pageProductCollection", "pageHistory", "pageSettingsHost",
             "mainStack",
             # 问候
             "btnRefreshGreeting", "lblGreetingTitle", "lblGreetingSubtitle",
@@ -138,8 +138,8 @@ class TestUIFileContract:
     def test_ui_sha256_matches_contract(self):
         """.ui SHA 与输入文件一致。"""
         expected = {
-            # Stage 4：导航精简 + 校准管理迁入 Settings 后的新契约 SHA
-            "main_window.ui": "cbd5759187214770bc40df03d6f85a54839b13bddc8bf42175b31f0d4431aba8",
+            # 新增“商品采集”导航与页面后的新契约 SHA
+            "main_window.ui": "9e25b74526657974df4655a43c3804f197551080b7719fe200efb0ffde650efa",
             "settings_page.ui": "97c57f1980586cd65f1333aee449188930d35db11b7f983d66f3f08566101a63",
         }
         for name, sha in expected.items():
@@ -171,11 +171,11 @@ class TestRuntimeLoading:
         from PySide6.QtWidgets import QMainWindow
         assert isinstance(main_window_ui, QMainWindow)
 
-    def test_main_stack_has_three_pages(self, main_window_ui):
+    def test_main_stack_has_four_pages(self, main_window_ui):
         from PySide6.QtWidgets import QStackedWidget
         stack = main_window_ui.findChild(QStackedWidget, "mainStack")
         assert stack is not None
-        assert stack.count() == 3
+        assert stack.count() == 4
 
     def test_profit_fields_accessible(self, main_window_ui):
         from PySide6.QtWidgets import QDoubleSpinBox

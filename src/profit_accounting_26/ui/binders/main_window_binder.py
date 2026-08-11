@@ -2,7 +2,7 @@
 
 在 ``MainWindow`` 加载 ``main_window.ui`` 后，按 ``objectName`` 绑定：
 - 顶部问候（btnRefreshGreeting / lblGreetingTitle / lblGreetingSubtitle）
-- 左侧三导航（btnNav*）与 mainStack 页面切换（Stage 4：导航精简）
+- 左侧四导航（btnNav*）与 mainStack 页面切换
 - 数据目录（lblDataDirectoryPath / btnChangeDataDirectory）
 - 汇率（spinExchangeRate / btnRefreshExchangeRate / lblExchangeRateUpdated）
 - 保存状态（lblSaveStatus）
@@ -10,7 +10,7 @@
 页面挂载策略：
 - pageCalculation：使用 .ui 自带的计算页布局（由 CalculationBinder 绑定）；
 - pageSettingsHost：将 settings_page.ui 挂载进 pageSettingsHostLayout；
-- pageHistory：清除 Designer 占位提示后挂载现有页面 QWidget。
+- pageHistory / pageProductCollection：清除 Designer 占位提示后挂载现有页面 QWidget。
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ from profit_accounting_26.ui.ui_loader import load_settings_page
 # 导航按钮 objectName 与页面 objectName 的映射（顺序固定）
 NAV_BINDINGS: list[tuple[str, str, str]] = [
     ("btnNavCalculation", "pageCalculation", "新商品测算"),
+    ("btnNavProductCollection", "pageProductCollection", "商品采集"),
     ("btnNavHistory", "pageHistory", "历史记录管理"),
     ("btnNavSettings", "pageSettingsHost", "设置"),
 ]
@@ -58,6 +59,7 @@ class MainWindowBinder:
         self._page_widgets: dict[str, QWidget] = {}
         # 外部设置：由 MainWindow 注入实际页面 widget
         self.calculation_page = None
+        self.product_collection_page = None
         self.settings_page = None
         self.history_page = None
 
@@ -131,6 +133,7 @@ class MainWindowBinder:
         """将现有页面 widget 挂载到 .ui 的页面占位中。"""
         page_map = {
             "pageCalculation": self.calculation_page,
+            "pageProductCollection": self.product_collection_page,
             "pageHistory": self.history_page,
             "pageSettingsHost": self.settings_page,
         }

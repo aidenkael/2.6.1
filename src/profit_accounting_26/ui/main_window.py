@@ -9,17 +9,20 @@ from profit_accounting_26.ui.binders.main_window_binder import MainWindowBinder
 from profit_accounting_26.ui.pages import (
     CalculationPage,
     HistoryPage,
+    ProductCollectionPage,
     SettingsPage,
 )
 from profit_accounting_26.ui.theme import APP_STYLE
 # 保留 NAV_ITEMS 供 app.py 和测试导入
 NAV_ITEMS = [
     "新商品测算",
+    "商品采集",
     "历史记录管理",
     "设置",
 ]
 SUBTITLES = {
     "新商品测算": "图片识别、物流估算与利润测算在同一页面完成",
+    "商品采集": "AliExpress Business 搜索采集：卡片墙、移除/恢复与复制链接",
     "历史记录管理": "打开记录、查看快照并补充实际反馈",
     "设置": "货代、利润规则、AI识图与物流校准配置",
 }
@@ -31,7 +34,7 @@ class MainWindow(QMainWindow):
     架构变更（2.6.1-dual-profit）：
     - .ui 决定布局（侧边栏、导航、顶部问候、汇率、数据目录）；
     - MainWindowBinder 按 objectName 绑定信号与状态同步；
-    - 三个页面挂载到 .ui 的 mainStack 页面占位中（Stage 4：导航精简）；
+    - 四个页面挂载到 .ui 的 mainStack 页面占位中；
     - 利润双场景由 CalculationBinder 负责（在 CalculationPage 重写后启用）。
     """
 
@@ -67,14 +70,16 @@ class MainWindow(QMainWindow):
             )
         )
 
-        # 创建三个页面（Stage 4：以图搜图/数据导入导出/模型校准反馈已删除）
+        # 创建四个页面
         self.calculation_page = CalculationPage(context)
+        self.product_collection_page = ProductCollectionPage(context)
         self.history_page = HistoryPage(context)
         self.settings_page = SettingsPage(context)
 
         # 使用 Binder 绑定 .ui 控件
         self.binder = MainWindowBinder(self, context)
         self.binder.calculation_page = self.calculation_page
+        self.binder.product_collection_page = self.product_collection_page
         self.binder.settings_page = self.settings_page
         self.binder.history_page = self.history_page
         self.binder.bind()
