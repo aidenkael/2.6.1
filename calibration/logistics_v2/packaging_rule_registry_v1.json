@@ -1,12 +1,13 @@
 {
-  "version": "packaging-rules-v1-cal77-immediate",
+  "version": "packaging-rules-v2-cal77-conservative",
   "policy": {
-    "all_records_have_runtime_role": true,
-    "single_sample_enabled": true,
+    "all_records_have_runtime_role": false,
+    "single_sample_enabled": false,
     "single_sample_confidence": "low",
     "external_ai_packaging_is_reference_only": true,
     "user_confirmed_shipping_data_is_authoritative": true,
-    "conservative_must_not_be_lower_than_normal": true
+    "conservative_must_not_be_lower_than_normal": true,
+    "legacy_samples_archive_only": true
   },
   "aggregate_rules": [
     {
@@ -51,13 +52,13 @@
         "conservative": 0.9,
         "min_cm": 1.5
       },
-      "confidence": "medium",
+      "confidence": "low",
       "needs_review": true,
-      "reason": "8组薄款面料历史反馈表明原包装厚度普遍偏高；只缩小最薄轴，不等比例缩小全部长宽高。"
+      "reason": "8 个独立 legacy freight-inferred 样本方向一致，暂保留为低置信 builtin fallback；不视为新闭环 validated 规则，待真实 Feedback V2 包装尺寸/重量重新验证。"
     },
     {
       "rule_id": "AGR-PU-BAG-065",
-      "enabled": true,
+      "enabled": false,
       "priority": 82,
       "name": "柔软PU包厚度压缩规则",
       "source_cal_ids": [
@@ -85,11 +86,13 @@
       },
       "confidence": "low",
       "needs_review": true,
+      "migration_status": "legacy_reference_only",
+      "migration_reason": "单样本，诊断仅观察，退出 numeric runtime。",
       "reason": "单样本立即启用为低置信规则；只压缩厚度轴，保守档减少压缩。"
     },
     {
       "rule_id": "AGR-PVC-THIN-068",
-      "enabled": true,
+      "enabled": false,
       "priority": 88,
       "name": "薄款无底PVC包按参考模板比例缩放",
       "source_cal_ids": [
@@ -139,11 +142,13 @@
       },
       "confidence": "low",
       "needs_review": true,
+      "migration_status": "legacy_reference_only",
+      "migration_reason": "单样本且存在 CAL-075 反例，退出 numeric runtime。",
       "reason": "10×10×3cm仅是CAL-068参考样本，不是所有PVC包固定尺寸；按当前商品体积的立方根比例缩放。"
     },
     {
       "rule_id": "AGR-PVC-STRUCTURED-075",
-      "enabled": true,
+      "enabled": false,
       "priority": 92,
       "name": "较厚/有底PVC包禁止套用全折叠模板",
       "source_cal_ids": [
@@ -174,11 +179,13 @@
       },
       "confidence": "low",
       "needs_review": true,
+      "migration_status": "legacy_reference_only",
+      "migration_reason": "本质更接近边界/反例，不能作为数值压缩公式，退出 numeric runtime。",
       "reason": "CAL-075作为CAL-068边界：结构较厚、有底或折叠不明确时只采用中度压缩。"
     },
     {
       "rule_id": "AGR-OXFORD-BACKPACK-076",
-      "enabled": true,
+      "enabled": false,
       "priority": 84,
       "name": "牛津布/帆布书包厚度压缩规则",
       "source_cal_ids": [
@@ -207,11 +214,13 @@
       },
       "confidence": "low",
       "needs_review": true,
+      "migration_status": "legacy_reference_only",
+      "migration_reason": "单样本，退出 numeric runtime。",
       "reason": "单样本立即启用；压缩厚度轴，长宽保持当前商品尺度。"
     },
     {
       "rule_id": "AGR-LATEX-MASK-047",
-      "enabled": true,
+      "enabled": false,
       "priority": 90,
       "name": "乳胶头套/面具平放规则",
       "source_cal_ids": [
@@ -255,11 +264,13 @@
       },
       "confidence": "low",
       "needs_review": true,
+      "migration_status": "legacy_reference_only",
+      "migration_reason": "单样本，诊断已转观察，退出 numeric runtime。",
       "reason": "乳胶突出部可贴近主体平放；按当前整体尺度比例化，不能固定套用绝对尺寸。"
     },
     {
       "rule_id": "AGR-SEMI-RIGID-MASK-007",
-      "enabled": true,
+      "enabled": false,
       "priority": 86,
       "name": "半硬头套/面具平放规则",
       "source_cal_ids": [
@@ -299,11 +310,13 @@
       },
       "confidence": "low",
       "needs_review": true,
+      "migration_status": "legacy_reference_only",
+      "migration_reason": "单样本，最终诊断未列为可实施候选，退出 numeric runtime。",
       "reason": "展示高度不等于运输厚度；按当前商品尺度比例化，并保留更厚的保守档。"
     },
     {
       "rule_id": "AGR-HARD-PROTRUSION-001",
-      "enabled": true,
+      "enabled": false,
       "priority": 87,
       "name": "不可压硬质突出件保护余量",
       "source_cal_ids": [
@@ -333,11 +346,13 @@
       },
       "confidence": "low",
       "needs_review": true,
+      "migration_status": "legacy_reference_only",
+      "migration_reason": "证据含 after_actual CAL-054，干净独立证据不足，退出 numeric runtime。",
       "reason": "硬质突出件不可按软品压缩，包装最小外廓需增加保护余量。"
     },
     {
       "rule_id": "AGR-FLAT-CAP-001",
-      "enabled": true,
+      "enabled": false,
       "priority": 72,
       "name": "软/半硬帽类展示尺寸体积折算",
       "source_cal_ids": [
@@ -362,13 +377,15 @@
       },
       "confidence": "low",
       "needs_review": true,
+      "migration_status": "legacy_reference_only",
+      "migration_reason": "单样本 freight-inferred，不是新闭环 truth，退出 numeric runtime。",
       "reason": "展示尺寸可能包含帽檐或撑开空间；按体积比例修正，不固定长宽高。"
     }
   ],
   "sample_rules": [
     {
       "rule_id": "CAL-001",
-      "enabled": true,
+      "enabled": false,
       "role": "numeric_reference",
       "product_type": "flat_top_military_cap",
       "product_cn": "米色平顶军帽/船型帽 (RB刺绣)",
@@ -421,7 +438,7 @@
     },
     {
       "rule_id": "CAL-002",
-      "enabled": true,
+      "enabled": false,
       "role": "numeric_reference",
       "product_type": "evening_clutch_bag",
       "product_cn": "黑色晚宴包 (金色椭圆金属环+链条)",
@@ -468,7 +485,7 @@
     },
     {
       "rule_id": "CAL-003",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "angel_wing_brooch_pair",
       "product_cn": "白色天使翅膀胸针一对(2件)",
@@ -516,7 +533,7 @@
     },
     {
       "rule_id": "CAL-004",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "houndstooth_knee_high_socks_pair",
       "product_cn": "黑色千鸟格过膝袜一对(2只)",
@@ -564,7 +581,7 @@
     },
     {
       "rule_id": "CAL-005",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "window_glass_scraper",
       "product_cn": "玻璃刮刀/窗户刮水器 (18x13cm标注)",
@@ -613,7 +630,7 @@
     },
     {
       "rule_id": "CAL-006",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "apple_compact_mirror",
       "product_cn": "红色苹果造型便携化妆镜",
@@ -661,7 +678,7 @@
     },
     {
       "rule_id": "CAL-007",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "batman_cowl_mask",
       "product_cn": "蝙蝠侠头套/cosplay面罩",
@@ -714,7 +731,7 @@
     },
     {
       "rule_id": "CAL-008",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "dual_ended_nail_art_brush",
       "product_cn": "双头美甲笔(刷子+点珠针)单支",
@@ -761,7 +778,7 @@
     },
     {
       "rule_id": "CAL-009",
-      "enabled": true,
+      "enabled": false,
       "role": "guard_only",
       "product_type": "silicone_donut_door_stopper",
       "product_cn": "黄色硅胶甜甜圈门挡",
@@ -804,7 +821,7 @@
     },
     {
       "rule_id": "CAL-010",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "cotton_skull_cap_beanie",
       "product_cn": "白色棉质无边便帽(弹力骑行头巾)",
@@ -852,7 +869,7 @@
     },
     {
       "rule_id": "CAL-011",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "waterproof_phone_pouch",
       "product_cn": "紫色PVC防水手机袋(6.7寸)",
@@ -897,7 +914,7 @@
     },
     {
       "rule_id": "CAL-012",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "seamless_strapless_bandeau",
       "product_cn": "无痕一片式抹胸/裹胸/打底内衣",
@@ -946,7 +963,7 @@
     },
     {
       "rule_id": "CAL-013",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "football_keychain_set",
       "product_cn": "足球钥匙扣套装(腕带+球衣+足球挂件)",
@@ -995,7 +1012,7 @@
     },
     {
       "rule_id": "CAL-014",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "two_toe_socks_5pack",
       "product_cn": "二趾分趾袜/冰丝羊蹄袜 5双装",
@@ -1044,7 +1061,7 @@
     },
     {
       "rule_id": "CAL-015",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "blue_crew_socks_pair",
       "product_cn": "蓝色中筒棉袜一对",
@@ -1090,7 +1107,7 @@
     },
     {
       "rule_id": "CAL-016",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "white_mid_calf_two_toe_socks",
       "product_cn": "白色日系中筒分趾袜一对",
@@ -1135,7 +1152,7 @@
     },
     {
       "rule_id": "CAL-017",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "sheer_pantyhose_pair",
       "product_cn": "裸色丝袜/连裤袜一对(含零售纸卡)",
@@ -1179,7 +1196,7 @@
     },
     {
       "rule_id": "CAL-018",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "black_tabi_socks_pair",
       "product_cn": "黑色日系二趾袜(tabi/分趾袜)一对",
@@ -1224,7 +1241,7 @@
     },
     {
       "rule_id": "CAL-019",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "furniture_corner_protectors_8pack",
       "product_cn": "透明水滴形家具防撞角 8个装",
@@ -1273,7 +1290,7 @@
     },
     {
       "rule_id": "CAL-020",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "velvet_scrunchie_large",
       "product_cn": "大号韩国绒大肠发圈",
@@ -1322,7 +1339,7 @@
     },
     {
       "rule_id": "CAL-021",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "mini_bamboo_folding_fan",
       "product_cn": "中国风全竹镂空迷你折扇",
@@ -1365,7 +1382,7 @@
     },
     {
       "rule_id": "CAL-022",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "slow_rebound_squishy",
       "product_cn": "慢回弹麦芽糖解压球",
@@ -1408,7 +1425,7 @@
     },
     {
       "rule_id": "CAL-023",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "apple_smoothie_squishy",
       "product_cn": "苹果沙冰捏捏乐(椰子油款)",
@@ -1438,7 +1455,7 @@
     },
     {
       "rule_id": "CAL-024",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "cream_tabisocks_5pack",
       "product_cn": "米白色二趾分趾袜 5双装",
@@ -1481,7 +1498,7 @@
     },
     {
       "rule_id": "CAL-025",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "garlic_grinder_creative",
       "product_cn": "创意磨蒜器(13.5×4cm)",
@@ -1527,7 +1544,7 @@
     },
     {
       "rule_id": "CAL-026",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "thin_wallet_coin_purse",
       "product_cn": "女超薄小钱包/零钱包",
@@ -1571,7 +1588,7 @@
     },
     {
       "rule_id": "CAL-027",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "alloy_stone_brooch",
       "product_cn": "合金镶石胸针(单件, 起步价档)",
@@ -1622,7 +1639,7 @@
     },
     {
       "rule_id": "CAL-028",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "five_toe_socks_pair",
       "product_cn": "粉色五趾袜(瑜伽袜)一对",
@@ -1663,7 +1680,7 @@
     },
     {
       "rule_id": "CAL-029",
-      "enabled": true,
+      "enabled": false,
       "role": "guard_only",
       "product_type": "coach_style_bag",
       "product_cn": "COACH风格女包 (26×8×14cm 商家参数)",
@@ -1704,7 +1721,7 @@
     },
     {
       "rule_id": "CAL-030",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "shell_evening_clutch",
       "product_cn": "贝壳晚宴包/金属斜挎包",
@@ -1747,7 +1764,7 @@
     },
     {
       "rule_id": "CAL-031",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "gym_workout_gloves_pair",
       "product_cn": "运动健身手套(护腕一体)一对",
@@ -1794,7 +1811,7 @@
     },
     {
       "rule_id": "CAL-032",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "gothic_lace_arm_gloves_pair",
       "product_cn": "哥特蕾丝绑带长款手套一对",
@@ -1843,7 +1860,7 @@
     },
     {
       "rule_id": "CAL-033",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "brass_maneki_neko",
       "product_cn": "黄铜招财猫小摆件",
@@ -1885,7 +1902,7 @@
     },
     {
       "rule_id": "CAL-034",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "snowflake_hair_clip",
       "product_cn": "儿童冰雪奇缘艾莎发夹发箍",
@@ -1934,7 +1951,7 @@
     },
     {
       "rule_id": "CAL-035",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "smart_temp_stainless_coffee_cup",
       "product_cn": "智能显温304不锈钢咖啡杯 380ML",
@@ -1978,7 +1995,7 @@
     },
     {
       "rule_id": "CAL-036",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "mlp_purple_curly_wig",
       "product_cn": "小马宝莉紫色长款波浪cos假发",
@@ -2020,7 +2037,7 @@
     },
     {
       "rule_id": "CAL-037",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "bikini_swimsuit_set",
       "product_cn": "跨境女款比基尼泳衣套装(2件套)",
@@ -2065,7 +2082,7 @@
     },
     {
       "rule_id": "CAL-038",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "mini_strawberry_backpack",
       "product_cn": "迷你草莓耳机包/挂件小包",
@@ -2108,7 +2125,7 @@
     },
     {
       "rule_id": "CAL-039",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "pet_car_safety_belt",
       "product_cn": "宠物汽车安全带(弹力编织带+金属挂钩)",
@@ -2157,7 +2174,7 @@
     },
     {
       "rule_id": "CAL-040",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "satin_sleep_cap",
       "product_cn": "双层仿真丝护发睡帽",
@@ -2204,7 +2221,7 @@
     },
     {
       "rule_id": "CAL-041",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "pu_flower_bag_charm",
       "product_cn": "PU皮质金桂花朵包挂件",
@@ -2248,7 +2265,7 @@
     },
     {
       "rule_id": "CAL-042",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "kazoo_metal_instrument",
       "product_cn": "金属卡祖笛(含5张笛膜)",
@@ -2296,7 +2313,7 @@
     },
     {
       "rule_id": "CAL-043",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "silicone_bear_ice_mold",
       "product_cn": "硅胶小熊冰格模具(4格)",
@@ -2342,7 +2359,7 @@
     },
     {
       "rule_id": "CAL-044",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "long_wallet_phone_combo",
       "product_cn": "长款女士钱包(可装手机)",
@@ -2383,7 +2400,7 @@
     },
     {
       "rule_id": "CAL-045",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "pu_small_chain_shoulder_bag",
       "product_cn": "PU皮质轻潮链条斜挎小方包",
@@ -2426,7 +2443,7 @@
     },
     {
       "rule_id": "CAL-046",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "car_seatbelt_extender_pair",
       "product_cn": "汽车安全带锁扣延长扣一对(2只)",
@@ -2472,7 +2489,7 @@
     },
     {
       "rule_id": "CAL-047",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "latex_batman_cowl_mask",
       "product_cn": "乳胶蝙蝠侠头套(猫女同款)",
@@ -2519,7 +2536,7 @@
     },
     {
       "rule_id": "CAL-048",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "body_chain_no_pierce",
       "product_cn": "欧美免打孔体环胸链(锌锆合金)",
@@ -2568,7 +2585,7 @@
     },
     {
       "rule_id": "CAL-049",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "hanging_hand_towel",
       "product_cn": "米菲兔挂式擦手巾(珊瑚绒绣花)",
@@ -2615,7 +2632,7 @@
     },
     {
       "rule_id": "CAL-050",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "silicone_earplugs_pair",
       "product_cn": "硅胶隔音耳塞一对(零售纸卡装)",
@@ -2660,7 +2677,7 @@
     },
     {
       "rule_id": "CAL-051",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "mesh_cycling_skull_cap",
       "product_cn": "四季网眼骑行小帽",
@@ -2708,7 +2725,7 @@
     },
     {
       "rule_id": "CAL-052",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "metal_greca_belt_chain",
       "product_cn": "金色希腊回纹金属腰带/腰链",
@@ -2756,7 +2773,7 @@
     },
     {
       "rule_id": "CAL-053",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "dual_head_makeup_brush_set",
       "product_cn": "化妆刷一套两支(F4双头散粉刷+E6小双头细节刷)",
@@ -2806,7 +2823,7 @@
     },
     {
       "rule_id": "CAL-054",
-      "enabled": true,
+      "enabled": false,
       "role": "guard_only",
       "product_type": "car_ac_vent_aroma_diffuser_with_clip",
       "product_cn": "AIKESI车载香薰空调出风口(金属圆柱身+塑料夹一体)",
@@ -2854,7 +2871,7 @@
     },
     {
       "rule_id": "CAL-055",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "split_toe_mid_calf_socks",
       "product_cn": "26新品韩系分趾袜中筒袜(春夏薄款纯色)",
@@ -2903,7 +2920,7 @@
     },
     {
       "rule_id": "CAL-056",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "paint_spray_aid_handle",
       "product_cn": "喷漆助力手柄(汽车墙面手握手喷把手)",
@@ -2951,7 +2968,7 @@
     },
     {
       "rule_id": "CAL-057",
-      "enabled": true,
+      "enabled": false,
       "role": "guard_only",
       "product_type": "camera_wrist_strap_quick_release",
       "product_cn": "JN杰诺快拆相机腕带(编织绳+金属扣+塑料快拆扣)",
@@ -2999,7 +3016,7 @@
     },
     {
       "rule_id": "CAL-058",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "ganesha_resin_figurine",
       "product_cn": "印度象头神Ganesha树脂工艺摆件(小号, 象牙白/砂岩)",
@@ -3045,7 +3062,7 @@
     },
     {
       "rule_id": "CAL-059",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "uv_arm_sleeves_pair",
       "product_cn": "粉色长款冰袖/防晒袖套(一双装)",
@@ -3073,7 +3090,7 @@
     },
     {
       "rule_id": "CAL-060",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "folding_sunglasses_with_case",
       "product_cn": "网红折叠墨镜(含圆形收纳盒)",
@@ -3101,7 +3118,7 @@
     },
     {
       "rule_id": "CAL-061",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "seatbelt_extender_chrome_clip_2pc",
       "product_cn": "安全带延长器(1对2个)",
@@ -3129,7 +3146,7 @@
     },
     {
       "rule_id": "CAL-062",
-      "enabled": true,
+      "enabled": false,
       "role": "guard_only",
       "product_type": "anime_airpods_earphone_case",
       "product_cn": "动漫Airpods硬壳保护套(东京食尸鬼金木研, 含挂耳)",
@@ -3162,7 +3179,7 @@
     },
     {
       "rule_id": "CAL-063",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "pet_dematting_comb",
       "product_cn": "宠物开结梳双面清洁梳(头宽9cm/长17cm)",
@@ -3195,7 +3212,7 @@
     },
     {
       "rule_id": "CAL-064",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "woc_quilted_handbag",
       "product_cn": "女款woc鱼子酱纹信封包(单肩链条斜挎)",
@@ -3224,7 +3241,7 @@
     },
     {
       "rule_id": "CAL-065",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "vintage_handbag_single_big",
       "product_cn": "欧美复古单肩斜挎手提女包(单包/大包)",
@@ -3275,7 +3292,7 @@
     },
     {
       "rule_id": "CAL-066",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "disposable_cotton_swab_box",
       "product_cn": "一次性盒装棉签(双头木棒, 热缩膜/直径12cm/165g)",
@@ -3303,7 +3320,7 @@
     },
     {
       "rule_id": "CAL-067",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "pet_car_seatbelt",
       "product_cn": "宠物车载安全带(弹力绳+金属钩+反光条)",
@@ -3331,7 +3348,7 @@
     },
     {
       "rule_id": "CAL-068",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "transparent_kitty_cosmetic_bag",
       "product_cn": "Hello Kitty PVC透明手提化妆包(无吊牌, 22×11×18cm/100g)",
@@ -3376,7 +3393,7 @@
     },
     {
       "rule_id": "CAL-069",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "pony_tail_hair_extension",
       "product_cn": "外贸30inch发束(灰棕渐变, 100g, 卷绕装)",
@@ -3404,7 +3421,7 @@
     },
     {
       "rule_id": "CAL-070",
-      "enabled": true,
+      "enabled": false,
       "role": "guard_only",
       "product_type": "hair_weft_single_bundle",
       "product_cn": "化纤发帘1B一条装(18inch/80g按中段估, 实际尺寸已忘)",
@@ -3432,7 +3449,7 @@
     },
     {
       "rule_id": "CAL-071",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "acetate_hair_claw_clip",
       "product_cn": "花式醋酸发夹(发货#1)",
@@ -3460,7 +3477,7 @@
     },
     {
       "rule_id": "CAL-072",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "acetate_hair_claw_clip",
       "product_cn": "花式醋酸发夹(发货#2)",
@@ -3488,7 +3505,7 @@
     },
     {
       "rule_id": "CAL-073",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "acetate_hair_claw_clip",
       "product_cn": "花式醋酸发夹(发货#3)",
@@ -3516,7 +3533,7 @@
     },
     {
       "rule_id": "CAL-074",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "pet_water_bottle_portable",
       "product_cn": "宠物水壶550ml(户外便携, 208g/21×11.5×7.5cm)",
@@ -3544,7 +3561,7 @@
     },
     {
       "rule_id": "CAL-075",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "transparent_cosmetic_bag",
       "product_cn": "透明PVC化妆包(23×11×11cm/150g, 压缩而非全折叠)",
@@ -3572,7 +3589,7 @@
     },
     {
       "rule_id": "CAL-076",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "fabric_school_backpack",
       "product_cn": "日系牛津布书包(30×40×13cm/460g, 压缩后厚5.3cm)",
@@ -3617,7 +3634,7 @@
     },
     {
       "rule_id": "CAL-077",
-      "enabled": true,
+      "enabled": false,
       "role": "experience_reference",
       "product_type": "maltose_squishy_ball",
       "product_cn": "减压麦芽糖球(6cm/100g, 透明/肤/蓝/粉/草莓)",
