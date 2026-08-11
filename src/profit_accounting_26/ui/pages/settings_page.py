@@ -442,7 +442,15 @@ class SettingsPage(QWidget):
             QMessageBox.warning(self, "导入失败", str(exc))
             return
         self._refresh_calibration_packages()
-        QMessageBox.information(self, "导入成功", f"已导入并启用：{result['version']}")
+        if result.get("metadata", {}).get("formal_bundle"):
+            QMessageBox.information(
+                self, "导入成功",
+                f"校准包已导入，尚未启用。请在列表中选择后点击'启用'。\n\n"
+                f"版本：{result['version']}\n"
+                f"Package ID：{result['metadata'].get('package_id', 'N/A')}",
+            )
+        else:
+            QMessageBox.information(self, "导入成功", f"已导入并启用：{result['version']}")
 
     def _activate_selected_calibration(self) -> None:
         package = self._selected_calibration_package()

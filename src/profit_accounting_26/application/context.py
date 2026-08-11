@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from profit_accounting_26.application.calibration_manager import CalibrationManager
 from profit_accounting_26.application.calibration_feedback_service import CalibrationFeedbackService
@@ -52,10 +53,21 @@ class AppContext:
             resource_path("calibration/logistics_v2/calibration_all_cleaned_v3.json"),
             version=PackagingEstimationService.CALIBRATION_VERSION,
         )
+        # 根据 active calibration 类型决定 registry 路径：
+        # Formal Bundle → sibling packaging_rule_registry_v1.json
+        # Legacy / builtin → CAL77 resource registry
+        if active_calibration.get("metadata", {}).get("formal_bundle"):
+            _registry_path = Path(active_calibration["path"]).with_name(
+                "packaging_rule_registry_v1.json"
+            )
+        else:
+            _registry_path = resource_path(
+                "calibration/logistics_v2/packaging_rule_registry_v1.json"
+            )
         packaging_service = PackagingEstimationService(
             active_calibration["path"],
             calibration_version=str(active_calibration["version"]),
-            rule_registry_path=resource_path("calibration/logistics_v2/packaging_rule_registry_v1.json"),
+            rule_registry_path=_registry_path,
         )
         calibration_manager.bind_service(packaging_service)
         api_profile_store = ApiProfileStore(paths.data_dir)

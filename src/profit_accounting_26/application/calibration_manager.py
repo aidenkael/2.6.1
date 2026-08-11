@@ -8,9 +8,19 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from profit_accounting_26.application.formal_bundle_importer import (
+    FormalBundleValidationError,
+    ValidatedFormalBundle,
+    is_formal_bundle_zip,
+    validate_formal_bundle_zip,
+)
 from profit_accounting_26.application.packaging_estimation_service import PackagingEstimationService
+from profit_accounting_26.shared import resource_path
 from profit_accounting_26.shared.paths import ApplicationPaths
 from profit_accounting_26.storage import SQLiteStore
+
+# CAL77 软件默认启动 registry
+_CAL77_REGISTRY_PATH = resource_path("calibration/logistics_v2/packaging_rule_registry_v1.json")
 
 
 class CalibrationManager:
@@ -88,9 +98,71 @@ class CalibrationManager:
         except zipfile.BadZipFile as exc:
             raise ValueError("校准ZIP损坏") from exc
 
+    # ------------------------------------------------------------------
+    # Registry path helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _expected_registry_path(package: dict[str, Any]) -> Path:
+        """返回该 package 应使用的 registry 文件路径。
+
+        - Formal Bundle: sibling packaging_rule_registry_v1.json
+        - Legacy / builtin: CAL77 resource registry
+        """
+        if package.get("metadata", {}).get("formal_bundle"):
+            return Path(package["path"]).with_name("packaging_rule_registry_v1.json")
+        return _CAL77_REGISTRY_PATH
+
     def _activate_service(self, package: dict[str, Any]) -> None:
-        if self._service is not None:
-            self._service.activate(package["path"], version=str(package["version"]))
+        """激活运行时服务并设置正确的 registry。
+
+        1. service.activate(calibration_path, version)
+        2. 将 service.rule_registry_path 设置为该 package 的预期 registry
+        3. 从该 registry 重新加载 service.registry
+        """
+        if self._service is None:
+            return
+        self._service.activate(package["path"], version=str(package["version"]))
+        expected_registry = self._expected_registry_path(package)
+        self._service.rule_registry_path = expected_registry
+        self._service.registry = self._service._load_registry(expected_registry)
+
+    def _verify_runtime_package(self, package: dict[str, Any]) -> list[str]:
+        """核对运行时服务的最终状态是否与 package 一致。
+
+        返回错误列表；空列表表示核对通过。
+        适用于：成功 activation、失败恢复、删除 fallback 后的核对。
+        """
+        errors: list[str] = []
+        if self._service is None:
+            return errors
+        expected_cal_path = Path(package["path"])
+        expected_version = str(package["version"])
+        expected_registry = self._expected_registry_path(package)
+
+        if self._service.calibration_path != expected_cal_path:
+            errors.append(
+                f"calibration_path mismatch: "
+                f"{self._service.calibration_path} != {expected_cal_path}"
+            )
+        if str(self._service.calibration_version) != expected_version:
+            errors.append(
+                f"calibration_version mismatch: "
+                f"{self._service.calibration_version} != {expected_version}"
+            )
+        if self._service.rule_registry_path is None or Path(self._service.rule_registry_path) != expected_registry:
+            errors.append(
+                f"registry_path mismatch: "
+                f"{self._service.rule_registry_path} != {expected_registry}"
+            )
+        # 确认 registry 文件存在且内容对应预期
+        if not expected_registry.is_file():
+            errors.append(f"expected registry file missing: {expected_registry}")
+        else:
+            expected_data = self._service._load_registry(expected_registry)
+            if self._service.registry != expected_data:
+                errors.append("registry content does not match expected registry file")
+        return errors
 
     def _safe_runtime_activate(
         self,
@@ -99,42 +171,61 @@ class CalibrationManager:
     ) -> None:
         """激活运行时服务，失败时补偿恢复 DB 和 runtime 到切换前状态。
 
-        只有最终状态核对确认 DB 与 runtime 都已恢复时才报告“已恢复”；
+        事务流程：
+        1. DB 已切 target（调用前完成）
+        2. activate target（含 registry 设置）
+        3. verify target runtime
+        4. 任一失败 → restore previous DB/runtime → verify previous
+        5. 恢复成功 → 明确报"失败但已恢复"
+        6. 恢复失败 → 严重 RuntimeError，不吞异常
+
+        只有最终状态核对确认 DB 与 runtime 都已恢复时才报告"已恢复"；
         补偿恢复本身失败时抛严重错误，不吞异常、不声称已恢复。
         """
         original_error: Exception | None = None
         try:
             self._activate_service(new_package)
-            return
+            # Post-activation verification
+            post_errors = self._verify_runtime_package(new_package)
+            if not post_errors:
+                return
+            original_error = RuntimeError(
+                f"post-activation verification failed: {'; '.join(post_errors)}"
+            )
         except Exception as exc:
             original_error = exc
 
+        # ── 激活失败，开始恢复 ──
         if previous_active is None:
             raise RuntimeError(
                 f"运行时激活失败且没有切换前版本可恢复：{original_error}"
             ) from original_error
 
         recovery_errors: list[str] = []
+
+        # 1. DB 恢复
         try:
             self.store.activate_calibration(previous_active["id"])
         except Exception as restore_error:
             recovery_errors.append(f"DB 恢复失败: {restore_error}")
+
+        # 2. Runtime 恢复（含 registry）
         try:
             self._activate_service(previous_active)
         except Exception as restore_error:
             recovery_errors.append(f"运行时恢复失败: {restore_error}")
 
-        # 最终状态核对：只有实际核对通过才允许声称“已恢复”
+        # 3. 最终状态核对：DB active
         db_active = self.store.get_active_calibration()
         if db_active is None or db_active["id"] != previous_active["id"]:
             recovery_errors.append("最终核对：DB active 不是切换前版本")
-        if self._service is not None:
-            runtime_ok = (
-                str(self._service.calibration_version) == str(previous_active["version"])
-                and Path(self._service.calibration_path) == Path(previous_active["path"])
+
+        # 4. 最终状态核对：runtime（calibration + registry）
+        runtime_errors = self._verify_runtime_package(previous_active)
+        if runtime_errors:
+            recovery_errors.extend(
+                f"最终核对：{err}" for err in runtime_errors
             )
-            if not runtime_ok:
-                recovery_errors.append("最终核对：运行时服务不是切换前版本")
 
         if recovery_errors:
             raise RuntimeError(
@@ -192,12 +283,96 @@ class CalibrationManager:
         if active is not None:
             try:
                 self._read_json_payload(Path(active["path"]))
-                active_valid = True
+                # Formal Bundle 额外验证完整性（防篡改）
+                if active.get("metadata", {}).get("formal_bundle"):
+                    try:
+                        self._verify_formal_bundle_integrity(active)
+                    except RuntimeError:
+                        active_valid = False
+                    else:
+                        active_valid = True
+                else:
+                    active_valid = True
             except (OSError, ValueError):
                 active_valid = False
         if not active_valid:
             active = self.store.activate_calibration(existing["id"])
         return active
+
+    # ------------------------------------------------------------------
+    # Formal Bundle import
+    # ------------------------------------------------------------------
+
+    def _import_formal_bundle(
+        self, source: Path, package_dir: Path, digest: str
+    ) -> dict[str, Any]:
+        """Validate and store a Formal Calibration Runtime Bundle V1 (inactive).
+
+        The bundle is saved with all 6 files but NOT activated.
+        Raises on any validation failure; cleans up package_dir.
+        """
+        bundle: ValidatedFormalBundle = validate_formal_bundle_zip(source)
+        manifest = bundle.manifest
+
+        # Save extracted members to package_dir
+        original_target = package_dir / source.name  # already copied by caller
+        # Write the 5 JSON members
+        (package_dir / "formal_package_manifest.json").write_bytes(
+            bundle.member_bytes["formal_package_manifest.json"]
+        )
+        (package_dir / "runtime_calibration.json").write_bytes(
+            bundle.member_bytes["runtime_calibration.json"]
+        )
+        (package_dir / "packaging_rule_registry_v1.json").write_bytes(
+            bundle.member_bytes["packaging_rule_registry_v1.json"]
+        )
+        (package_dir / "validated_rule_package.json").write_bytes(
+            bundle.member_bytes["validated_rule_package.json"]
+        )
+        (package_dir / "promotion_receipt.json").write_bytes(
+            bundle.member_bytes["promotion_receipt.json"]
+        )
+
+        runtime_path = package_dir / "runtime_calibration.json"
+        registry_path = package_dir / "packaging_rule_registry_v1.json"
+
+        version = manifest["calibration_version"]
+
+        # 使用经过交叉验证的真实值，不信任 manifest 自报摘要
+        actual_validated_ids = sorted(
+            str(rule.get("rule_id"))
+            for rule in bundle.validated_package.get("rules", [])
+            if isinstance(rule, dict) and rule.get("enabled") is True
+        )
+        metadata = {
+            "formal_bundle": True,
+            "contract_version": manifest["contract_version"],
+            "package_id": manifest["package_id"],
+            "engine_version": manifest["engine_version"],
+            "baseline_calibration_version": manifest["baseline_calibration_version"],
+            "sha256": digest,
+            "runtime_sha256": hashlib.sha256(runtime_path.read_bytes()).hexdigest(),
+            "registry_sha256": hashlib.sha256(registry_path.read_bytes()).hexdigest(),
+            "validated_package_sha256": manifest["source_fingerprints"]["validated_rule_package_sha256"],
+            "promotion_receipt_sha256": manifest["source_fingerprints"]["promotion_receipt_sha256"],
+            "original_name": source.name,
+            "imported_at": datetime.now(UTC).isoformat(),
+            "sample_count": len(bundle.runtime_calibration),
+            "aggregate_rule_count": len(bundle.runtime_registry.get("aggregate_rules", [])),
+            "sample_rule_count": len(bundle.runtime_registry.get("sample_rules", [])),
+            "validated_rule_ids": actual_validated_ids,
+        }
+
+        # Register as INACTIVE
+        package_id = self.store.register_calibration_package(
+            version=version,
+            path=str(runtime_path),
+            metadata=metadata,
+            activate=False,
+        )
+        return next(
+            item for item in self.store.list_calibration_packages() if item["id"] == package_id
+        )
 
     def import_package(self, source: str | Path) -> dict[str, Any]:
         path = Path(source)
@@ -212,6 +387,12 @@ class CalibrationManager:
             original_target = package_dir / path.name
             shutil.copy2(path, original_target)
 
+            # ── Formal Bundle detection (ZIP only) ──
+            if path.suffix.lower() == ".zip" and is_formal_bundle_zip(path):
+                result = self._import_formal_bundle(path, package_dir, digest)
+                return result
+
+            # ── Legacy import ──
             if path.suffix.lower() == ".json":
                 if path.stat().st_size > self.MAX_JSON_BYTES:
                     raise ValueError("校准JSON超过20MB限制")
@@ -278,14 +459,73 @@ class CalibrationManager:
     def active_package(self) -> dict[str, Any] | None:
         return self.store.get_active_calibration()
 
+    # ------------------------------------------------------------------
+    # Activation with formal bundle tamper checks
+    # ------------------------------------------------------------------
+
+    def _verify_formal_bundle_integrity(self, package: dict[str, Any]) -> None:
+        """Re-verify formal bundle runtime files haven't been tampered with since import."""
+        metadata = package.get("metadata", {})
+        runtime_path = Path(package["path"])
+        registry_path = runtime_path.with_name("packaging_rule_registry_v1.json")
+
+        if not runtime_path.is_file():
+            raise RuntimeError("formal bundle runtime_calibration.json missing")
+        if not registry_path.is_file():
+            raise RuntimeError("formal bundle packaging_rule_registry_v1.json missing")
+
+        actual_runtime_sha = hashlib.sha256(runtime_path.read_bytes()).hexdigest()
+        if actual_runtime_sha != metadata.get("runtime_sha256"):
+            raise RuntimeError("formal bundle runtime_calibration.json has been tampered with (SHA-256 mismatch)")
+
+        actual_registry_sha = hashlib.sha256(registry_path.read_bytes()).hexdigest()
+        if actual_registry_sha != metadata.get("registry_sha256"):
+            raise RuntimeError("formal bundle registry has been tampered with (SHA-256 mismatch)")
+
+        # Re-validate runtime calibration is still a valid non-empty list
+        try:
+            runtime_data = json.loads(runtime_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"formal bundle runtime_calibration.json is corrupt: {exc}") from exc
+        if not isinstance(runtime_data, list) or not runtime_data:
+            raise RuntimeError("formal bundle runtime_calibration.json must be a non-empty list")
+        if not all(isinstance(item, dict) for item in runtime_data):
+            raise RuntimeError("formal bundle runtime_calibration.json members must all be objects")
+
+        # Re-validate registry is still valid
+        try:
+            registry_data = json.loads(registry_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"formal bundle registry is corrupt: {exc}") from exc
+        if not isinstance(registry_data, dict):
+            raise RuntimeError("formal bundle registry must be a JSON object")
+        for key in ("aggregate_rules", "sample_rules"):
+            val = registry_data.get(key)
+            if not isinstance(val, list) or not all(isinstance(item, dict) for item in val):
+                raise RuntimeError(f"formal bundle registry.{key} must be a list of objects")
+
     def activate(self, package_id: str) -> dict[str, Any]:
         """启用任意已注册版本，并同步切换运行时包装估算服务。
 
         不存在的 package 由 store 抛 KeyError；运行时激活失败时
         DB 和 runtime 均恢复到切换前状态，保证一致性。
+
+        Formal Bundle 启用前额外校验文件完整性（防篡改）。
         """
+        target = next(
+            (item for item in self.store.list_calibration_packages() if item["id"] == package_id),
+            None,
+        )
+        if target is None:
+            raise KeyError(package_id)
+
+        # Formal bundle: verify integrity before activation
+        if target.get("metadata", {}).get("formal_bundle"):
+            self._verify_formal_bundle_integrity(target)
+
         previous_active = self.active_package()
         active = self.store.activate_calibration(package_id)
+        # _safe_runtime_activate 统一处理：activate + post-verification + rollback
         self._safe_runtime_activate(active, previous_active)
         return active
 
