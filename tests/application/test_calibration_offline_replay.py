@@ -69,6 +69,7 @@ def _candidate_package(rule: dict | None = None) -> dict:
     package = json.loads(EXAMPLE_CANDIDATE.read_text(encoding="utf-8"))
     package["package_id"] = "cal-replay-test-001"
     package["rules"] = [rule] if rule is not None else [_candidate_rule("AGR-REPLAY-SCARF-001")]
+    package["source_export_batch_ids"] = ["batch-replay-001"]
     return package
 
 
@@ -285,7 +286,7 @@ class TestReplayExecution:
         original = PackagingEstimationService.estimate
 
         def wrapped(self, observation, *, external_proposal=None):
-            calls.append((self, observation))
+            calls.append((self, observation, external_proposal))
             return original(self, observation, external_proposal=external_proposal)
 
         monkeypatch.setattr(PackagingEstimationService, "estimate", wrapped)
@@ -302,8 +303,17 @@ class TestReplayExecution:
         assert isinstance(candidate_service, PackagingEstimationService)
         assert baseline_service.calibration_path == candidate_service.calibration_path
         assert baseline_service.rule_registry_path != candidate_service.rule_registry_path
+        # 同一 PackagingEstimationService 类、同一 calibration 输入、同一份事实值
+        # 但 baseline 与 candidate 收到独立对象（Python 身份不同）
         for index in range(0, 4, 2):
-            assert calls[index][1] is calls[index + 1][1]
+            baseline_obs, candidate_obs = calls[index][1], calls[index + 1][1]
+            assert baseline_obs is not candidate_obs
+            assert baseline_obs.product_name == candidate_obs.product_name
+            baseline_prop, candidate_prop = calls[index][2], calls[index + 1][2]
+            if baseline_prop is not None and candidate_prop is not None:
+                assert baseline_prop is not candidate_prop
+                assert baseline_prop.normal is not candidate_prop.normal
+                assert baseline_prop.conservative is not candidate_prop.conservative
 
     def test_candidate_rule_can_change_result(self, tmp_path):
         result, _paths = _run(
@@ -528,6 +538,9 @@ class TestIsolation:
             "candidate_package_id",
             "engine_version",
             "baseline_calibration_version",
+            "candidate_declared_base_calibration_version",
+            "candidate_package_rule_ids",
+            "input_fingerprints",
             "summary",
             "largest_degradations",
             "per_record",
@@ -602,3 +615,255 @@ class TestCli:
         assert payload["summary"]["conflicts"] == 1
         assert payload["conflicts"][0]["code"] == "duplicate_rule_id"
         assert payload["per_record"] == []
+
+
+# ---------------------------------------------------------------------------
+# 新增测试：mutation regression / V2 contract / batch provenance /
+# fingerprints / calibration version / candidate_rule_ids 语义
+# ---------------------------------------------------------------------------
+
+
+class TestMutationRegression:
+    """确认 baseline estimate 过程中对 observation / external_proposal 的可变修改
+    不会污染 candidate estimate 收到的数据。"""
+
+    def test_baseline_mutation_does_not_pollute_candidate(self, tmp_path, monkeypatch):
+        """在 baseline estimate 调用中故意修改 observation 和 external_proposal，
+        确认 candidate 调用收到的数据仍是原始值。"""
+        original = PackagingEstimationService.estimate
+        call_log: list[dict] = []
+
+        def spy(self, observation, *, external_proposal=None):
+            snapshot = {
+                "service": self,
+                "product_name": observation.product_name,
+                "normal_length": observation.length_cm,
+                "proposal_normal_length": (
+                    external_proposal.normal.length_cm if external_proposal else None
+                ),
+            }
+            call_log.append(snapshot)
+            # 故意在第一次（baseline）调用时修改 observation 和 proposal
+            if len(call_log) % 2 == 1:
+                observation.product_name = "MUTATED"
+                observation.length_cm = 9999.0
+                if external_proposal is not None:
+                    external_proposal.normal.length_cm = 9999.0
+            return original(self, observation, external_proposal=external_proposal)
+
+        monkeypatch.setattr(PackagingEstimationService, "estimate", spy)
+        _run(
+            tmp_path,
+            [_record("r1", actual=_actual({"length_cm": 30, "width_cm": 29, "height_cm": 6}, 300))],
+        )
+        assert len(call_log) == 2
+        # baseline 和 candidate 收到的原始值应该相同
+        assert call_log[0]["product_name"] == call_log[1]["product_name"] == "scarf 围巾"
+        assert call_log[0]["normal_length"] == call_log[1]["normal_length"]
+        assert call_log[0]["proposal_normal_length"] == call_log[1]["proposal_normal_length"]
+        # candidate 收到的值不应被 baseline 的修改污染
+        assert call_log[1]["product_name"] == "scarf 围巾"
+        assert call_log[1]["normal_length"] != 9999.0
+
+
+class TestV2ContractCheck:
+    """replay 开始时严格检查 manifest contract_version。"""
+
+    def test_replay_rejects_v1_manifest(self, tmp_path):
+        records = [_record("r1", actual=_actual(weight=300))]
+        paths = _write_inputs(tmp_path, records)
+        # 覆写 manifest 为 V1 contract_version
+        manifest_data = {
+            "contract_version": "Calibration Feedback Export V1",
+            "export_batch_id": "batch-replay-001",
+            "exported_at": "2026-08-11T00:00:00Z",
+            "records": records,
+        }
+        paths["manifest"].write_text(json.dumps(manifest_data, ensure_ascii=False), encoding="utf-8")
+        with pytest.raises(ReplayPrecheckError, match="contract_version"):
+            OfflineCalibrationReplay().run(
+                feedback_manifest=paths["manifest"],
+                candidate_package=paths["package"],
+                baseline_calibration=paths["calibration"],
+                baseline_registry=paths["registry"],
+            )
+
+    def test_replay_rejects_unknown_contract_version(self, tmp_path):
+        records = [_record("r1", actual=_actual(weight=300))]
+        paths = _write_inputs(tmp_path, records)
+        manifest_data = {
+            "contract_version": "unknown-version",
+            "export_batch_id": "batch-replay-001",
+            "exported_at": "2026-08-11T00:00:00Z",
+            "records": records,
+        }
+        paths["manifest"].write_text(json.dumps(manifest_data, ensure_ascii=False), encoding="utf-8")
+        with pytest.raises(ReplayPrecheckError, match="contract_version"):
+            OfflineCalibrationReplay().run(
+                feedback_manifest=paths["manifest"],
+                candidate_package=paths["package"],
+                baseline_calibration=paths["calibration"],
+                baseline_registry=paths["registry"],
+            )
+
+    def test_replay_accepts_v2_manifest(self, tmp_path):
+        result, _paths = _run(
+            tmp_path,
+            [_record("r1", actual=_actual(weight=300))],
+        )
+        assert result["replay_version"] == "offline-replay-v1"
+
+
+class TestBatchProvenance:
+    """candidate package 的 source_export_batch_ids 必须包含 manifest 的 export_batch_id。"""
+
+    def test_batch_match_runs_normally(self, tmp_path):
+        result, _paths = _run(
+            tmp_path,
+            [_record("r1", actual=_actual(weight=300))],
+        )
+        assert result["summary"]["total_records"] == 1
+
+    def test_batch_mismatch_rejects_replay(self, tmp_path):
+        records = [_record("r1", actual=_actual(weight=300))]
+        paths = _write_inputs(tmp_path, records)
+        # 覆写 candidate package 的 source_export_batch_ids 为不包含 manifest batch
+        package = _candidate_package()
+        package["source_export_batch_ids"] = ["batch-other-999"]
+        paths["package"].write_text(json.dumps(package, ensure_ascii=False), encoding="utf-8")
+        with pytest.raises(ReplayPrecheckError, match="source_export_batch_ids"):
+            OfflineCalibrationReplay().run(
+                feedback_manifest=paths["manifest"],
+                candidate_package=paths["package"],
+                baseline_calibration=paths["calibration"],
+                baseline_registry=paths["registry"],
+            )
+
+
+class TestInputFingerprints:
+    """replay_result.json 必须包含 4 个 SHA-256 指纹。"""
+
+    def test_four_hashes_present_and_valid_hex(self, tmp_path):
+        result, _paths = _run(
+            tmp_path,
+            [_record("r1", actual=_actual({"length_cm": 30, "width_cm": 29, "height_cm": 6}, 300))],
+        )
+        fingerprints = result["input_fingerprints"]
+        expected_keys = {
+            "feedback_manifest_sha256",
+            "candidate_package_sha256",
+            "baseline_calibration_sha256",
+            "baseline_registry_sha256",
+        }
+        assert set(fingerprints) == expected_keys
+        for key in expected_keys:
+            value = fingerprints[key]
+            assert isinstance(value, str)
+            assert len(value) == 64
+            assert all(c in "0123456789abcdef" for c in value)
+
+    def test_hash_changes_when_input_bytes_change(self, tmp_path):
+        result1, paths1 = _run(
+            tmp_path,
+            [_record("r1", actual=_actual({"length_cm": 30, "width_cm": 29, "height_cm": 6}, 300))],
+        )
+        # 修改 manifest 内容（增加一条记录），重新运行
+        run2_dir = tmp_path / "run2"
+        run2_dir.mkdir()
+        records = [
+            _record("r1", actual=_actual({"length_cm": 30, "width_cm": 29, "height_cm": 6}, 300)),
+            _record("r2", actual=_actual({"length_cm": 30, "width_cm": 29, "height_cm": 6}, 300)),
+        ]
+        paths2 = _write_inputs(run2_dir, records)
+        result2 = OfflineCalibrationReplay().run(
+            feedback_manifest=paths2["manifest"],
+            candidate_package=paths2["package"],
+            baseline_calibration=paths2["calibration"],
+            baseline_registry=paths2["registry"],
+        )
+        # manifest 内容不同 → hash 不同
+        assert result1["input_fingerprints"]["feedback_manifest_sha256"] != result2["input_fingerprints"]["feedback_manifest_sha256"]
+
+
+class TestCalibrationVersionValidation:
+    """baseline_calibration_version 使用 runtime 版本，不盲信 candidate 声明。"""
+
+    def test_runtime_version_used_as_baseline(self, tmp_path):
+        result, _paths = _run(
+            tmp_path,
+            [_record("r1", actual=_actual(weight=300))],
+        )
+        # baseline_calibration_version 应该是 runtime PackagingEstimationService 的版本
+        assert result["baseline_calibration_version"] == PackagingEstimationService.CALIBRATION_VERSION
+
+    def test_candidate_declared_version_preserved(self, tmp_path):
+        result, _paths = _run(
+            tmp_path,
+            [_record("r1", actual=_actual(weight=300))],
+        )
+        # candidate_declared_base_calibration_version 保留 candidate 原始声明
+        assert "candidate_declared_base_calibration_version" in result
+
+    def test_mismatched_calibration_version_rejected(self, tmp_path):
+        records = [_record("r1", actual=_actual(weight=300))]
+        paths = _write_inputs(tmp_path, records)
+        package = _candidate_package()
+        package["base_calibration_version"] = "nonexistent-calibration-version-xyz"
+        paths["package"].write_text(json.dumps(package, ensure_ascii=False), encoding="utf-8")
+        with pytest.raises(ReplayPrecheckError, match="base_calibration_version"):
+            OfflineCalibrationReplay().run(
+                feedback_manifest=paths["manifest"],
+                candidate_package=paths["package"],
+                baseline_calibration=paths["calibration"],
+                baseline_registry=paths["registry"],
+            )
+
+
+class TestCandidateRuleIdsSemantics:
+    """candidate_rule_ids 只保留该记录实际 applied 的候选规则。"""
+
+    def test_per_record_only_includes_applied_rules(self, tmp_path):
+        """candidate 包包含 A、B 两条规则，记录只命中 A，
+        per_record.candidate_rule_ids 必须只包含 A，不包含 B。"""
+        rule_a = _candidate_rule(
+            "AGR-REPLAY-A",
+            match={"any_terms": ["scarf"], "rigidity": ["soft"], "foldability": ["good"], "forbid_hard_structure": True},
+            action={"type": "smallest_axis_scale", "normal": 0.6, "conservative": 0.75, "min_cm": 1.0},
+        )
+        rule_b = _candidate_rule(
+            "AGR-REPLAY-B",
+            match={"any_terms": ["no_such_product_xyz"]},
+            action={"type": "smallest_axis_add", "normal_cm": 1.0, "conservative_cm": 2.0},
+        )
+        package = _candidate_package()
+        package["rules"] = [rule_a, rule_b]
+        result, _paths = _run(
+            tmp_path,
+            [_record("r1", actual=_actual({"length_cm": 30, "width_cm": 29, "height_cm": 6}, 300))],
+            package=package,
+        )
+        entry = result["per_record"][0]
+        # A 应该被 applied，B 不应该
+        assert "AGR-REPLAY-A" in entry["candidate_rule_ids"]
+        assert "AGR-REPLAY-B" not in entry["candidate_rule_ids"]
+        # 顶层 candidate_package_rule_ids 包含整包规则
+        assert "AGR-REPLAY-A" in result["candidate_package_rule_ids"]
+        assert "AGR-REPLAY-B" in result["candidate_package_rule_ids"]
+        # matched 基于实际 applied 的 candidate rules
+        assert entry["matched"] is True
+
+    def test_no_match_means_empty_candidate_rule_ids(self, tmp_path):
+        """candidate 规则完全不匹配时，per_record.candidate_rule_ids 为空。"""
+        package = _candidate_package(
+            _candidate_rule("AGR-REPLAY-NOMATCH", match={"any_terms": ["no_such_product"]})
+        )
+        result, _paths = _run(
+            tmp_path,
+            [_record("r1", actual=_actual({"length_cm": 30, "width_cm": 29, "height_cm": 6}, 300))],
+            package=package,
+        )
+        entry = result["per_record"][0]
+        assert entry["candidate_rule_ids"] == []
+        assert entry["matched"] is False
+        # 顶层仍包含整包规则 ID
+        assert "AGR-REPLAY-NOMATCH" in result["candidate_package_rule_ids"]

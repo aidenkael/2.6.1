@@ -47,6 +47,9 @@ def _conflict_output(conflicts: list) -> dict:
         "candidate_package_id": None,
         "engine_version": PackagingEstimationService.ENGINE_VERSION,
         "baseline_calibration_version": None,
+        "candidate_declared_base_calibration_version": None,
+        "candidate_package_rule_ids": [],
+        "input_fingerprints": {},
         "summary": {
             "total_records": 0,
             "evaluable_records": 0,

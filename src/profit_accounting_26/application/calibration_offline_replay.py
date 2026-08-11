@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import tempfile
@@ -96,6 +97,25 @@ def load_json(path: str | Path) -> Any:
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def sha256_of_file(path: str | Path) -> str:
+    """计算文件的 SHA-256，基于实际 bytes，不依赖重新序列化。"""
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def load_json_and_hash(path: str | Path) -> tuple[Any, str]:
+    """读取 JSON 并同时计算文件 SHA-256（基于原始 bytes）。"""
+    source = Path(path)
+    try:
+        raw = source.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"cannot read JSON input {source}: {exc}") from exc
+    digest = hashlib.sha256(raw).hexdigest()
+    try:
+        return json.loads(raw.decode("utf-8")), digest
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read JSON input {source}: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -356,27 +376,62 @@ class OfflineCalibrationReplay:
         baseline_calibration: str | Path,
         baseline_registry: str | Path,
     ) -> dict[str, Any]:
-        manifest = load_json(feedback_manifest)
+        manifest, manifest_sha256 = load_json_and_hash(feedback_manifest)
         if not isinstance(manifest, dict) or not isinstance(manifest.get("records"), list):
             raise ValueError("feedback manifest must be a JSON object with a 'records' list")
-        package = load_json(candidate_package)
+        # ── V2 contract 严格检查 ──
+        if manifest.get("contract_version") != "Calibration Feedback Export V2":
+            raise ReplayPrecheckError(
+                f"feedback manifest contract_version must be 'Calibration Feedback Export V2', "
+                f"got {manifest.get('contract_version')!r}"
+            )
+        package, package_sha256 = load_json_and_hash(candidate_package)
         if not isinstance(package, dict):
             raise ValueError("candidate package must be a JSON object")
-        baseline_registry_payload = load_json(baseline_registry)
+        baseline_registry_payload, registry_sha256 = load_json_and_hash(baseline_registry)
         if not isinstance(baseline_registry_payload, dict):
             raise ValueError("baseline registry must be a JSON object")
+        _, baseline_calib_sha256 = load_json_and_hash(baseline_calibration)
+
+        # ── batch provenance 检查 ──
+        manifest_batch_id = str(manifest.get("export_batch_id") or "")
+        source_batch_ids = [
+            str(batch_id) for batch_id in package.get("source_export_batch_ids", [])
+        ]
+        if manifest_batch_id and manifest_batch_id not in source_batch_ids:
+            raise ReplayPrecheckError(
+                f"candidate package source_export_batch_ids {source_batch_ids!r} "
+                f"does not contain manifest export_batch_id {manifest_batch_id!r}"
+            )
 
         validate_candidate(package)
         conflicts = check_candidate_conflicts(package, baseline_registry_payload)
         if conflicts:
             raise ReplayConflictError(conflicts)
 
-        candidate_rule_ids = [
+        candidate_package_rule_ids = [
             str(rule.get("rule_id")) for rule in package.get("rules", []) if isinstance(rule, dict)
         ]
         baseline_service = PackagingEstimationService(
             baseline_calibration, rule_registry_path=baseline_registry
         )
+
+        # ── baseline calibration version 验证 ──
+        runtime_baseline_version = baseline_service.calibration_version
+        candidate_declared_base = str(package.get("base_calibration_version") or "")
+        if candidate_declared_base and candidate_declared_base != runtime_baseline_version:
+            raise ReplayPrecheckError(
+                f"candidate declares base_calibration_version={candidate_declared_base!r} "
+                f"but runtime baseline calibration version is {runtime_baseline_version!r}"
+            )
+
+        input_fingerprints = {
+            "feedback_manifest_sha256": manifest_sha256,
+            "candidate_package_sha256": package_sha256,
+            "baseline_calibration_sha256": baseline_calib_sha256,
+            "baseline_registry_sha256": registry_sha256,
+        }
+
         per_record: list[dict[str, Any]] = []
         with tempfile.TemporaryDirectory(prefix="offline-replay-v1-") as temporary_dir:
             candidate_registry = build_candidate_registry(baseline_registry_payload, package)
@@ -394,17 +449,17 @@ class OfflineCalibrationReplay:
                         record,
                         baseline_service=baseline_service,
                         candidate_service=candidate_service,
-                        candidate_rule_ids=candidate_rule_ids,
+                        candidate_package_rule_ids=candidate_package_rule_ids,
                     )
                 )
         return self._build_result(
             records=manifest["records"],
             per_record=per_record,
             package=package,
-            baseline_calibration_version=(
-                str(package.get("base_calibration_version") or "")
-                or baseline_service.calibration_version
-            ),
+            baseline_calibration_version=runtime_baseline_version,
+            candidate_declared_base_calibration_version=candidate_declared_base,
+            candidate_package_rule_ids=candidate_package_rule_ids,
+            input_fingerprints=input_fingerprints,
         )
 
     # ------------------------------------------------------------------ 单条
@@ -415,14 +470,14 @@ class OfflineCalibrationReplay:
         *,
         baseline_service: PackagingEstimationService,
         candidate_service: PackagingEstimationService,
-        candidate_rule_ids: list[str],
+        candidate_package_rule_ids: list[str],
     ) -> dict[str, Any]:
         record_id = str(record.get("record_id") or "")
         machine_facts = record.get("machine_facts")
         ai_initial = machine_facts.get("ai_initial") if isinstance(machine_facts, dict) else None
         output: dict[str, Any] = {
             "record_id": record_id,
-            "candidate_rule_ids": list(candidate_rule_ids),
+            "candidate_rule_ids": [],
             "status": None,
             "matched": False,
             "applied_profile_ids": [],
@@ -443,14 +498,21 @@ class OfflineCalibrationReplay:
             output["status"] = "skipped_ai_initial_missing"
             return output
 
-        observation = rebuild_observation(ai_initial)
-        if observation is None:
+        # ── 从同一份 ai_initial 分别重建独立对象，防止 estimate() 内部可变修改互相污染 ──
+        baseline_observation = rebuild_observation(ai_initial)
+        if baseline_observation is None:
             output["status"] = "skipped_ai_initial_missing"
             return output
-        external_proposal = rebuild_external_proposal(ai_initial)
+        candidate_observation = rebuild_observation(ai_initial)
+        baseline_external_proposal = rebuild_external_proposal(ai_initial)
+        candidate_external_proposal = rebuild_external_proposal(ai_initial)
 
-        baseline_proposal = baseline_service.estimate(observation, external_proposal=external_proposal)
-        candidate_proposal = candidate_service.estimate(observation, external_proposal=external_proposal)
+        baseline_proposal = baseline_service.estimate(
+            baseline_observation, external_proposal=baseline_external_proposal,
+        )
+        candidate_proposal = candidate_service.estimate(
+            candidate_observation, external_proposal=candidate_external_proposal,
+        )
 
         truth = extract_truth(machine_facts.get("user_feedback") if isinstance(machine_facts, dict) else None)
         actual_dims = truth.get("dimensions")
@@ -461,9 +523,14 @@ class OfflineCalibrationReplay:
         output["baseline_conservative"] = scenario_summary(baseline_proposal.conservative)
         output["candidate_conservative"] = scenario_summary(candidate_proposal.conservative)
 
+        # ── candidate_rule_ids 只保留该记录实际 applied 的候选规则 ──
         applied = set(candidate_proposal.applied_profile_ids)
         output["applied_profile_ids"] = list(candidate_proposal.applied_profile_ids)
-        output["matched"] = bool(set(candidate_rule_ids) & applied)
+        actual_candidate_rule_ids = [
+            rule_id for rule_id in candidate_package_rule_ids if rule_id in applied
+        ]
+        output["candidate_rule_ids"] = actual_candidate_rule_ids
+        output["matched"] = bool(actual_candidate_rule_ids)
 
         actual_dims_tuple: tuple[float, float, float] | None = None
         if isinstance(actual_dims, dict):
@@ -500,6 +567,9 @@ class OfflineCalibrationReplay:
         per_record: list[dict[str, Any]],
         package: dict[str, Any],
         baseline_calibration_version: str,
+        candidate_declared_base_calibration_version: str,
+        candidate_package_rule_ids: list[str],
+        input_fingerprints: dict[str, str],
     ) -> dict[str, Any]:
         judged = {"improved", "unchanged", "degraded"}
         matched = sum(1 for item in per_record if item["status"] != "skipped_ai_initial_missing" and item["matched"])
@@ -544,6 +614,9 @@ class OfflineCalibrationReplay:
             "candidate_package_id": str(package.get("package_id") or ""),
             "engine_version": PackagingEstimationService.ENGINE_VERSION,
             "baseline_calibration_version": baseline_calibration_version,
+            "candidate_declared_base_calibration_version": candidate_declared_base_calibration_version,
+            "candidate_package_rule_ids": candidate_package_rule_ids,
+            "input_fingerprints": input_fingerprints,
             "summary": summary,
             "largest_degradations": largest_degradations,
             "per_record": per_record,
