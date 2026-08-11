@@ -23,8 +23,7 @@ dev = [
 profit-accounting-2-6 = "profit_accounting_26.ui.app:main"
 
 [tool.setuptools]
-package-dir = {"" = "src"
-}
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
