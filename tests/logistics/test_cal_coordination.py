@@ -33,37 +33,53 @@ def calibrated_observation(**overrides) -> AIObservation:
 def test_frozen_cal_assets_keep_expected_hashes_and_counts():
     registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
     # CAL asset hashes are computed from the Git-canonical LF file bytes.
+    # calibration_all_cleaned_v3.json stays byte-identical after the conservative migration.
     assert hashlib.sha256(CALIBRATION.read_bytes()).hexdigest() == "ae10226731d006a4ad540e6c6d9fc5224067823140cfbc34e408984529d6ad0d"
-    assert hashlib.sha256(REGISTRY.read_bytes()).hexdigest() == "a304a05989ffe9cbb4847fa541f20cec195c78aee5a7b9b91eb9b52d041d5e5b"
+    # Registry hash tracks packaging-rules-v2-cal77-conservative.
+    assert hashlib.sha256(REGISTRY.read_bytes()).hexdigest() == "ab291a936949020b0458e609f48bd3996139e444966b47ebe32e016be5b87874"
     assert len(json.loads(CALIBRATION.read_text(encoding="utf-8"))) == 77
     assert len(registry["aggregate_rules"]) == 9
     assert len(registry["sample_rules"]) == 77
-    assert all(item.get("enabled", True) for item in registry["aggregate_rules"] + registry["sample_rules"])
+    # Conservative contract: all legacy samples archived, only thin textile stays numeric.
+    assert all(item["enabled"] is False for item in registry["sample_rules"])
+    enabled_aggregates = [item["rule_id"] for item in registry["aggregate_rules"] if item["enabled"]]
+    assert enabled_aggregates == ["AGR-THIN-TEXTILE-001"]
 
 
-def test_every_legacy_sample_rule_is_reachable_through_compatibility_adapter():
+def test_no_legacy_sample_rule_is_reachable_through_compatibility_adapter():
+    # After the conservative migration every sample rule is disabled,
+    # so none of them may enter runtime sample matching.
     registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
     runtime = service()
-    unmatched = []
     for rule in registry["sample_rules"]:
         observation = AIObservation(product_type=rule["product_type"], material=rule.get("material") or "",
                                     rigidity=rule.get("rigidity") or "unknown",
                                     requires_shape_retention=rule.get("requires_shape_retention"))
         result = runtime.estimate(observation)
         matches = result.candidate_records["cal_match_audit"]["sample_matches"]
-        if not any(item["rule_id"] == rule["rule_id"] for item in matches):
-            unmatched.append(rule["rule_id"])
-    assert unmatched == []
+        assert matches == [], rule["rule_id"]
+
+
+def thin_textile_observation(**overrides) -> AIObservation:
+    values = dict(product_name="薄款袜", product_type="socks", material="thin_knit",
+                  rigidity="soft", foldability="good", compressibility="good",
+                  length_cm=30, width_cm=20, height_cm=8, weight_g=120,
+                  weight_scope="packaged_weight", requires_shape_retention=False)
+    values.update(overrides)
+    return AIObservation(**values)
 
 
 def test_strong_cal_corrects_low_confidence_ai_estimate_at_field_level():
-    result = service().estimate(calibrated_observation(), external_proposal=proposal())
+    # After the conservative migration the only surviving legacy numeric rule
+    # is AGR-THIN-TEXTILE-001; it still arbitrates at field level.
+    result = service().estimate(thin_textile_observation(), external_proposal=proposal())
     assert result.proposal_source == "ai_cal_coordinated"
-    assert result.normal.length_cm == 9
-    assert result.normal.weight_g >= 25
+    assert result.normal.height_cm == 6.0  # smallest axis 8 × 0.75
+    assert result.normal.length_cm == 30
     trace = result.candidate_records["cal_coordination"]
     assert trace["match_strength"] == "strong"
-    assert "normal.length_cm" in trace["adjusted_fields"]
+    assert "normal.height_cm" in trace["adjusted_fields"]
+    assert "AGR-THIN-TEXTILE-001" in result.applied_profile_ids
 
 
 def test_confirmed_net_weight_is_not_replaced_by_lower_calibration_weight():
@@ -85,10 +101,10 @@ def test_high_confidence_ai_beats_weak_cal_reference():
     assert trace["risk_only"] is True
 
 
-def test_cal_candidate_runs_before_generic_fallback_when_legacy_reference_is_available():
-    result = service().estimate(calibrated_observation())
+def test_cal_candidate_runs_before_generic_fallback_when_legacy_aggregate_available():
+    result = service().estimate(thin_textile_observation())
     assert result.proposal_source == "cal_candidate_completed"
-    assert "CAL-003" in result.applied_profile_ids
+    assert "AGR-THIN-TEXTILE-001" in result.applied_profile_ids
 
 
 def test_no_cal_match_preserves_complete_ai_candidate():
@@ -99,18 +115,21 @@ def test_no_cal_match_preserves_complete_ai_candidate():
 
 
 def test_cal_structure_risk_challenges_unsupported_shape_without_overriding_confirmed_weight():
+    # The surviving thin-textile rule still provides structure-risk lessons:
+    # an unsupported shape-retention claim on socks requires rigid evidence.
     observation = AIObservation(
-        product_type="handbag", product_family="bag", material_family="leather",
-        overall_form="hard_3d", rigidity="hard", foldability="none", compressibility="none",
-        requires_shape_retention=True, has_frame=True, length_cm=28.5, width_cm=12, height_cm=21,
-        weight_g=700, weight_scope="net_weight", dimension_scope="product_size",
+        product_name="薄袜", product_type="socks", material="thin_knit",
+        rigidity="soft", foldability="good", compressibility="good",
+        requires_shape_retention=True, length_cm=20, width_cm=10, height_cm=4,
+        weight_g=30, weight_scope="net_weight",
     )
     ai = PackagingProposal(
-        PackagingScenario("normal", PackagingState.SHAPE_RETAINED, "AI estimate", 30.5, 14, 23, 750),
-        PackagingScenario("conservative", PackagingState.SHAPE_RETAINED, "AI estimate", 32.5, 16, 25, 800),
+        PackagingScenario("normal", PackagingState.SHAPE_RETAINED, "AI estimate", 22, 12, 6, 40),
+        PackagingScenario("conservative", PackagingState.SHAPE_RETAINED, "AI estimate", 24, 14, 8, 50),
         proposal_source="vision_api",
     )
     result = service().estimate(observation, external_proposal=ai)
     assert "cal_structure_conflict_requires_evidence" in result.rejected_candidates["ai_candidate"]
-    assert "CAL-065" in result.candidate_records["cal_structure_risk"]["matched_rule_ids"]
-    assert result.normal.weight_g >= 700
+    risk_ids = result.candidate_records["cal_structure_risk"]["matched_rule_ids"]
+    assert "AGR-THIN-TEXTILE-001" in risk_ids
+    assert result.normal.weight_g >= 30

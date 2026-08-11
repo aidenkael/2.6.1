@@ -21,31 +21,27 @@ def no_hard_kwargs():
     )
 
 
-def test_cal068_is_scaled_reference_not_fixed_absolute_size(tmp_path: Path):
+def test_cal068_disabled_rule_no_longer_scales_pvc_package(tmp_path: Path):
+    # AGR-PVC-THIN-068 is disabled by the conservative migration:
+    # the observed structure must pass through instead of the 10×10×3 template.
     s = service(tmp_path)
-    base = AIObservation(product_name="透明PVC化妆包", product_type="transparent_cosmetic_bag", material="pvc",
-                         rigidity="soft", foldability="good", compressibility="good",
-                         length_cm=22, width_cm=11, height_cm=18, weight_g=100, **no_hard_kwargs())
-    large = AIObservation.from_dict(base.to_dict())
-    scale = 10 ** (1/3)
-    large.length_cm *= scale; large.width_cm *= scale; large.height_cm *= scale
-    p1 = s.estimate(base)
-    p2 = s.estimate(large)
-    assert (p1.normal.length_cm, p1.normal.width_cm, p1.normal.height_cm) == (10.0, 10.0, 3.0)
-    assert p2.normal.length_cm > p1.normal.length_cm
-    assert p2.normal.width_cm > p1.normal.width_cm
-    assert p2.normal.height_cm > p1.normal.height_cm
+    obs = AIObservation(product_name="透明PVC化妆包", product_type="transparent_cosmetic_bag", material="pvc",
+                        rigidity="soft", foldability="good", compressibility="good",
+                        length_cm=22, width_cm=11, height_cm=18, weight_g=100, **no_hard_kwargs())
+    result = s.estimate(obs)
+    assert "AGR-PVC-THIN-068" not in result.applied_profile_ids
+    assert (result.normal.length_cm, result.normal.width_cm, result.normal.height_cm) != (10.0, 10.0, 3.0)
 
 
-def test_cal075_guard_avoids_full_flat_fold(tmp_path: Path):
+def test_cal075_disabled_guard_rule_no_longer_applies(tmp_path: Path):
+    # AGR-PVC-STRUCTURED-075 is a boundary/counter-example kept only as history.
     s = service(tmp_path)
     obs = AIObservation(product_name="较厚透明PVC化妆包", product_type="transparent_cosmetic_bag", material="pvc",
                         rigidity="semi_rigid", foldability="limited", compressibility="limited",
                         has_hard_bottom=True, has_frame=False, has_rigid_parts=True,
                         requires_shape_retention=True, length_cm=23, width_cm=11, height_cm=11, weight_g=150)
     proposal = s.estimate(obs)
-    assert "AGR-PVC-STRUCTURED-075" in proposal.applied_profile_ids
-    assert proposal.normal.height_cm >= 4
+    assert "AGR-PVC-STRUCTURED-075" not in proposal.applied_profile_ids
 
 
 def test_external_ai_is_audit_reference_not_adopted(tmp_path: Path):
