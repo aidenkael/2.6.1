@@ -226,6 +226,7 @@ def _run(tmp_path: Path, records: list[dict], **kwargs) -> tuple[dict, dict[str,
         candidate_package=paths["package"],
         baseline_calibration=paths["calibration"],
         baseline_registry=paths["registry"],
+        baseline_calibration_version=PackagingEstimationService.CALIBRATION_VERSION,
     )
     return result, paths
 
@@ -504,6 +505,7 @@ class TestIsolation:
             candidate_package=paths["package"],
             baseline_calibration=paths["calibration"],
             baseline_registry=paths["registry"],
+            baseline_calibration_version=PackagingEstimationService.CALIBRATION_VERSION,
         )
         candidate_service = calls[1]
         assert candidate_service.rule_registry_path != paths["registry"]
@@ -520,6 +522,7 @@ class TestIsolation:
             candidate_package=paths["package"],
             baseline_calibration=paths["calibration"],
             baseline_registry=paths["registry"],
+            baseline_calibration_version=PackagingEstimationService.CALIBRATION_VERSION,
         )
         assert paths["calibration"].read_bytes() == calibration_before
         assert paths["registry"].read_bytes() == registry_before
@@ -577,6 +580,7 @@ class TestCli:
                 "--candidate-package", str(paths["package"]),
                 "--baseline-calibration", str(paths["calibration"]),
                 "--baseline-registry", str(paths["registry"]),
+                "--baseline-calibration-version", PackagingEstimationService.CALIBRATION_VERSION,
                 "--output", str(output),
             ]
         )
@@ -607,6 +611,7 @@ class TestCli:
                 "--candidate-package", str(paths["package"]),
                 "--baseline-calibration", str(paths["calibration"]),
                 "--baseline-registry", str(paths["registry"]),
+                "--baseline-calibration-version", PackagingEstimationService.CALIBRATION_VERSION,
                 "--output", str(output),
             ]
         )
@@ -615,6 +620,47 @@ class TestCli:
         assert payload["summary"]["conflicts"] == 1
         assert payload["conflicts"][0]["code"] == "duplicate_rule_id"
         assert payload["per_record"] == []
+
+    def test_cli_rejects_missing_baseline_calibration_version(self, tmp_path):
+        """CLI 未提供 --baseline-calibration-version → argparse 拒绝"""
+        from tools.calibration_offline_replay_v1 import main
+
+        paths = _write_inputs(tmp_path, [_record("r1", actual=_actual(weight=300))])
+        output = tmp_path / "replay_result.json"
+        with pytest.raises(SystemExit):
+            main(
+                [
+                    "--feedback-manifest", str(paths["manifest"]),
+                    "--candidate-package", str(paths["package"]),
+                    "--baseline-calibration", str(paths["calibration"]),
+                    "--baseline-registry", str(paths["registry"]),
+                    "--output", str(output),
+                ]
+            )
+
+    def test_cli_with_correct_version_runs_successfully(self, tmp_path):
+        """CLI 正确提供 --baseline-calibration-version 后可正常运行并写入结果"""
+        from tools.calibration_offline_replay_v1 import main
+
+        custom_version = "custom-calibration-version-A"
+        package = _candidate_package()
+        package["base_calibration_version"] = custom_version
+        paths = _write_inputs(tmp_path, [_record("r1", actual=_actual(weight=300))], package=package)
+        output = tmp_path / "replay_result.json"
+        exit_code = main(
+            [
+                "--feedback-manifest", str(paths["manifest"]),
+                "--candidate-package", str(paths["package"]),
+                "--baseline-calibration", str(paths["calibration"]),
+                "--baseline-registry", str(paths["registry"]),
+                "--baseline-calibration-version", custom_version,
+                "--output", str(output),
+            ]
+        )
+        assert exit_code == 0
+        assert output.is_file()
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        assert payload["baseline_calibration_version"] == custom_version
 
 
 # ---------------------------------------------------------------------------
@@ -686,6 +732,7 @@ class TestV2ContractCheck:
                 candidate_package=paths["package"],
                 baseline_calibration=paths["calibration"],
                 baseline_registry=paths["registry"],
+                baseline_calibration_version=PackagingEstimationService.CALIBRATION_VERSION,
             )
 
     def test_replay_rejects_unknown_contract_version(self, tmp_path):
@@ -704,6 +751,7 @@ class TestV2ContractCheck:
                 candidate_package=paths["package"],
                 baseline_calibration=paths["calibration"],
                 baseline_registry=paths["registry"],
+                baseline_calibration_version=PackagingEstimationService.CALIBRATION_VERSION,
             )
 
     def test_replay_accepts_v2_manifest(self, tmp_path):
@@ -737,6 +785,7 @@ class TestBatchProvenance:
                 candidate_package=paths["package"],
                 baseline_calibration=paths["calibration"],
                 baseline_registry=paths["registry"],
+                baseline_calibration_version=PackagingEstimationService.CALIBRATION_VERSION,
             )
 
 
@@ -780,42 +829,98 @@ class TestInputFingerprints:
             candidate_package=paths2["package"],
             baseline_calibration=paths2["calibration"],
             baseline_registry=paths2["registry"],
+            baseline_calibration_version=PackagingEstimationService.CALIBRATION_VERSION,
         )
         # manifest 内容不同 → hash 不同
         assert result1["input_fingerprints"]["feedback_manifest_sha256"] != result2["input_fingerprints"]["feedback_manifest_sha256"]
 
 
 class TestCalibrationVersionValidation:
-    """baseline_calibration_version 使用 runtime 版本，不盲信 candidate 声明。"""
+    """baseline_calibration_version 必须由显式参数传入，不依赖 Service 默认常量。"""
 
-    def test_runtime_version_used_as_baseline(self, tmp_path):
-        result, _paths = _run(
-            tmp_path,
-            [_record("r1", actual=_actual(weight=300))],
-        )
-        # baseline_calibration_version 应该是 runtime PackagingEstimationService 的版本
-        assert result["baseline_calibration_version"] == PackagingEstimationService.CALIBRATION_VERSION
-
-    def test_candidate_declared_version_preserved(self, tmp_path):
-        result, _paths = _run(
-            tmp_path,
-            [_record("r1", actual=_actual(weight=300))],
-        )
-        # candidate_declared_base_calibration_version 保留 candidate 原始声明
-        assert "candidate_declared_base_calibration_version" in result
-
-    def test_mismatched_calibration_version_rejected(self, tmp_path):
-        records = [_record("r1", actual=_actual(weight=300))]
-        paths = _write_inputs(tmp_path, records)
+    def test_explicit_version_used_as_baseline(self, tmp_path):
+        """显式传入 custom-version-A → replay_result.baseline_calibration_version == custom-version-A"""
+        custom_version = "custom-calibration-version-A"
+        # 同时让 candidate 声明相同版本以通过校验
         package = _candidate_package()
-        package["base_calibration_version"] = "nonexistent-calibration-version-xyz"
-        paths["package"].write_text(json.dumps(package, ensure_ascii=False), encoding="utf-8")
+        package["base_calibration_version"] = custom_version
+        paths = _write_inputs(tmp_path, [_record("r1", actual=_actual(weight=300))], package=package)
+        result = OfflineCalibrationReplay().run(
+            feedback_manifest=paths["manifest"],
+            candidate_package=paths["package"],
+            baseline_calibration=paths["calibration"],
+            baseline_registry=paths["registry"],
+            baseline_calibration_version=custom_version,
+        )
+        assert result["baseline_calibration_version"] == custom_version
+
+    def test_both_services_receive_explicit_version(self, tmp_path, monkeypatch):
+        """两个 PackagingEstimationService 实际收到 calibration_version == custom-version-A"""
+        custom_version = "custom-calibration-version-A"
+        package = _candidate_package()
+        package["base_calibration_version"] = custom_version
+        paths = _write_inputs(tmp_path, [_record("r1", actual=_actual(weight=300))], package=package)
+
+        calls: list = []
+        original_init = PackagingEstimationService.__init__
+
+        def wrapped_init(self, calibration_path=None, *, calibration_version=None, rule_registry_path=None):
+            calls.append(calibration_version)
+            return original_init(self, calibration_path, calibration_version=calibration_version, rule_registry_path=rule_registry_path)
+
+        monkeypatch.setattr(PackagingEstimationService, "__init__", wrapped_init)
+        OfflineCalibrationReplay().run(
+            feedback_manifest=paths["manifest"],
+            candidate_package=paths["package"],
+            baseline_calibration=paths["calibration"],
+            baseline_registry=paths["registry"],
+            baseline_calibration_version=custom_version,
+        )
+        # baseline 和 candidate 两个 Service 都应收到 custom_version
+        assert len(calls) >= 2
+        assert calls[0] == custom_version
+        assert calls[1] == custom_version
+
+    def test_candidate_matching_version_accepted(self, tmp_path):
+        """candidate base_calibration_version == custom-version-A → 正常"""
+        custom_version = "custom-calibration-version-A"
+        package = _candidate_package()
+        package["base_calibration_version"] = custom_version
+        paths = _write_inputs(tmp_path, [_record("r1", actual=_actual(weight=300))], package=package)
+        result = OfflineCalibrationReplay().run(
+            feedback_manifest=paths["manifest"],
+            candidate_package=paths["package"],
+            baseline_calibration=paths["calibration"],
+            baseline_registry=paths["registry"],
+            baseline_calibration_version=custom_version,
+        )
+        assert result["baseline_calibration_version"] == custom_version
+        assert result["candidate_declared_base_calibration_version"] == custom_version
+
+    def test_candidate_mismatched_version_rejected(self, tmp_path):
+        """candidate 声明 custom-version-B，baseline 显式 custom-version-A → ReplayPrecheckError"""
+        package = _candidate_package()
+        package["base_calibration_version"] = "custom-calibration-version-B"
+        paths = _write_inputs(tmp_path, [_record("r1", actual=_actual(weight=300))], package=package)
         with pytest.raises(ReplayPrecheckError, match="base_calibration_version"):
             OfflineCalibrationReplay().run(
                 feedback_manifest=paths["manifest"],
                 candidate_package=paths["package"],
                 baseline_calibration=paths["calibration"],
                 baseline_registry=paths["registry"],
+                baseline_calibration_version="custom-calibration-version-A",
+            )
+
+    def test_empty_version_rejected(self, tmp_path):
+        """空字符串 baseline_calibration_version → ValueError"""
+        paths = _write_inputs(tmp_path, [_record("r1", actual=_actual(weight=300))])
+        with pytest.raises(ValueError, match="non-empty"):
+            OfflineCalibrationReplay().run(
+                feedback_manifest=paths["manifest"],
+                candidate_package=paths["package"],
+                baseline_calibration=paths["calibration"],
+                baseline_registry=paths["registry"],
+                baseline_calibration_version="",
             )
 
 

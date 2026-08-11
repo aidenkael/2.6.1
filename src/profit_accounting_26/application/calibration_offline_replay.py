@@ -375,7 +375,10 @@ class OfflineCalibrationReplay:
         candidate_package: str | Path,
         baseline_calibration: str | Path,
         baseline_registry: str | Path,
+        baseline_calibration_version: str,
     ) -> dict[str, Any]:
+        if not isinstance(baseline_calibration_version, str) or not baseline_calibration_version.strip():
+            raise ValueError("baseline_calibration_version must be a non-empty string")
         manifest, manifest_sha256 = load_json_and_hash(feedback_manifest)
         if not isinstance(manifest, dict) or not isinstance(manifest.get("records"), list):
             raise ValueError("feedback manifest must be a JSON object with a 'records' list")
@@ -413,16 +416,17 @@ class OfflineCalibrationReplay:
             str(rule.get("rule_id")) for rule in package.get("rules", []) if isinstance(rule, dict)
         ]
         baseline_service = PackagingEstimationService(
-            baseline_calibration, rule_registry_path=baseline_registry
+            baseline_calibration,
+            calibration_version=baseline_calibration_version,
+            rule_registry_path=baseline_registry,
         )
 
-        # ── baseline calibration version 验证 ──
-        runtime_baseline_version = baseline_service.calibration_version
+        # ── baseline calibration version 验证：candidate 声明必须匹配显式传入版本 ──
         candidate_declared_base = str(package.get("base_calibration_version") or "")
-        if candidate_declared_base and candidate_declared_base != runtime_baseline_version:
+        if candidate_declared_base and candidate_declared_base != baseline_calibration_version:
             raise ReplayPrecheckError(
                 f"candidate declares base_calibration_version={candidate_declared_base!r} "
-                f"but runtime baseline calibration version is {runtime_baseline_version!r}"
+                f"but explicit baseline calibration version is {baseline_calibration_version!r}"
             )
 
         input_fingerprints = {
@@ -441,7 +445,9 @@ class OfflineCalibrationReplay:
                 encoding="utf-8",
             )
             candidate_service = PackagingEstimationService(
-                baseline_calibration, rule_registry_path=temporary_registry
+                baseline_calibration,
+                calibration_version=baseline_calibration_version,
+                rule_registry_path=temporary_registry,
             )
             for record in manifest["records"]:
                 per_record.append(
@@ -456,7 +462,7 @@ class OfflineCalibrationReplay:
             records=manifest["records"],
             per_record=per_record,
             package=package,
-            baseline_calibration_version=runtime_baseline_version,
+            baseline_calibration_version=baseline_service.calibration_version,
             candidate_declared_base_calibration_version=candidate_declared_base,
             candidate_package_rule_ids=candidate_package_rule_ids,
             input_fingerprints=input_fingerprints,
@@ -629,6 +635,7 @@ def run_offline_replay(
     candidate_package: str | Path,
     baseline_calibration: str | Path,
     baseline_registry: str | Path,
+    baseline_calibration_version: str,
 ) -> dict[str, Any]:
     """便捷入口：等价于 ``OfflineCalibrationReplay().run(...)``。"""
     return OfflineCalibrationReplay().run(
@@ -636,4 +643,5 @@ def run_offline_replay(
         candidate_package=candidate_package,
         baseline_calibration=baseline_calibration,
         baseline_registry=baseline_registry,
+        baseline_calibration_version=baseline_calibration_version,
     )

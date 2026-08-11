@@ -6,6 +6,7 @@
         --candidate-package  candidate_package.json \
         --baseline-calibration calibration_all_cleaned_v3.json \
         --baseline-registry    packaging_rule_registry_v1.json \
+        --baseline-calibration-version local-calibration-v3-77-samples-rules-v1 \
         --output               replay_result.json
 
 安全边界：
@@ -84,6 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--candidate-package", required=True, type=Path, help="Agent Calibration Rule Package V1 candidate JSON")
     parser.add_argument("--baseline-calibration", required=True, type=Path, help="baseline calibration samples JSON")
     parser.add_argument("--baseline-registry", required=True, type=Path, help="baseline packaging_rule_registry_v1.json")
+    parser.add_argument("--baseline-calibration-version", required=True, type=str, help="explicit baseline calibration version string")
     parser.add_argument("--output", required=True, type=Path, help="output replay_result.json path")
     return parser
 
@@ -96,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
             candidate_package=args.candidate_package,
             baseline_calibration=args.baseline_calibration,
             baseline_registry=args.baseline_registry,
+            baseline_calibration_version=args.baseline_calibration_version,
         )
     except ReplayConflictError as exc:
         _write_json(args.output, _conflict_output(exc.conflicts))
