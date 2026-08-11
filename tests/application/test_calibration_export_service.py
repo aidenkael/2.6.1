@@ -1,15 +1,16 @@
-"""阶段 3：校准反馈导出 V1 服务测试。
+"""阶段 3：校准反馈导出 V2 服务测试。
 
 覆盖：
-- Sheet1 严格 7 列（不存在“实际物流数据”列）、Sheet2 技术元数据；
-- 商品简名 / AI首次发货估算 / 用户校准 / 真实头程 的真实来源；
-- current_estimate 不得进入导出；
-- Sheet1 图片列直接嵌入第一张主图缩略图（不嵌全部高清原图）；
-- images/ 仍包含全部原图；manifest.json 存在、可解析、相对路径有效、
-  不含经济字段/current_estimate；
-- 图片多原图复制、相对路径、thumbnail fallback warning、完全缺失报错；
-- 全部 / 自定义范围 / 未导出 三种模式；
-- 失败事务（Excel/manifest/状态写失败）不标记已导出；删除记录后旧状态不崩溃；legacy 兼容。
+- CONTRACT_VERSION = Calibration Feedback Export V2；
+- Excel Sheet1 严格 7 列、Sheet2 技术元数据结构不变；
+- 原有人类可读 manifest 字段语义不变，每条 record 新增 machine_facts；
+- machine_facts.ai_initial：observation / evidence 白名单过滤、
+  packaging_proposal（external 优先、adopted 回退）精确输出；
+- machine_facts.user_feedback：structure / suggested_package /
+  actual_logistics 精确输出；
+- current_estimate 与经济字段递归排除（AI observation、raw evidence 均过滤）；
+- legacy / 缺失 AI initial 不报错、不伪造精确 AI 事实；
+- 图片复制、thumbnail fallback、pending/range/all、失败事务测试继续通过。
 """
 
 from __future__ import annotations
@@ -112,6 +113,10 @@ def _ai_initial(*, product_name: str = "AI首次简名") -> dict:
     return {
         "observation": {
             "product_name": product_name,
+            "length_cm": 25,
+            "width_cm": 20,
+            "height_cm": 5,
+            "weight_g": 600,
             "raw_payload": {
                 "shipment": {
                     "length_cm": 25,
@@ -431,14 +436,14 @@ class TestManifest:
         allowed_record = {
             "sequence", "record_id", "product_short_name", "product_link",
             "main_image", "images", "ai_initial_shipment",
-            "user_calibration", "actual_first_mile",
+            "user_calibration", "actual_first_mile", "machine_facts",
         }
         for entry in manifest["records"]:
             assert set(entry) == allowed_record
         for forbidden in (
             "current_estimate", "product_cost", "domestic_shipping", "system_cost",
-            "sale_price", "profit", "subsidy", "tail_fee", "exchange_rate",
-            "length_cm", "width_cm", "height_cm", "weight_g",
+            "sale_price", "profit_rmb", "profit_usd", "profit_rate",
+            "subsidy", "tail_fee", "exchange_rate", "shein_quote",
         ):
             assert forbidden not in raw
 
@@ -460,6 +465,356 @@ class TestManifest:
         with pytest.raises(ExportIncompleteError):
             context.calibration_export_service.export(records, "all", tmp_path)
         assert record_id not in ExportStateStore(context.paths.data_dir).exported_record_ids()
+
+
+class TestManifestV2:
+    """V2 合同：machine_facts 机器可读事实 + 经济字段递归排除。"""
+
+    def _export_one(self, context, tmp_path, *, ai_initial=None, images=None) -> tuple[str, Path]:
+        refs = _image_refs(context, count=1) if images else []
+        record_id = _create_v2(context, ai_initial=ai_initial, images=refs)
+        records = [context.store.load_record(record_id)]
+        result = context.calibration_export_service.export(records, "all", tmp_path)
+        return record_id, result.output_dir / "manifest.json"
+
+    def _read_manifest(self, manifest_path: Path) -> dict:
+        return json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _walk(value, predicate):
+        """递归遍历 manifest，对每个键名执行断言。"""
+        if isinstance(value, dict):
+            for key, item in value.items():
+                predicate(str(key))
+                TestManifestV2._walk(item, predicate)
+        elif isinstance(value, list):
+            for item in value:
+                TestManifestV2._walk(item, predicate)
+
+    def test_contract_version_is_v2(self):
+        assert CONTRACT_VERSION == "Calibration Feedback Export V2"
+
+    def test_top_level_and_record_keys_plus_machine_facts(self, context, tmp_path):
+        _record_id, manifest_path = self._export_one(context, tmp_path, images=True)
+        manifest = self._read_manifest(manifest_path)
+        assert set(manifest) == {"contract_version", "export_batch_id", "exported_at", "records"}
+        entry = manifest["records"][0]
+        assert set(entry) == {
+            "sequence", "record_id", "product_short_name", "product_link",
+            "main_image", "images", "ai_initial_shipment",
+            "user_calibration", "actual_first_mile", "machine_facts",
+        }
+        assert set(entry["machine_facts"]) == {"ai_initial", "user_feedback"}
+
+    def test_machine_facts_ai_initial_observation_exact_values(self, context, tmp_path):
+        _record_id, manifest_path = self._export_one(context, tmp_path)
+        manifest = self._read_manifest(manifest_path)
+        ai_initial = manifest["records"][0]["machine_facts"]["ai_initial"]
+        observation = ai_initial["observation"]
+        assert observation["product_name"] == "AI首次简名"
+        assert observation["length_cm"] == 25
+        assert observation["width_cm"] == 20
+        assert observation["height_cm"] == 5
+        assert observation["weight_g"] == 600
+        assert ai_initial["packaging_proposal"]["source_kind"] == "external_ai_packaging_proposal"
+        assert ai_initial["packaging_proposal"]["normal"]["length_cm"] == 25
+
+    def test_observation_economic_fields_never_enter_manifest(self, context, tmp_path):
+        ai_initial = _ai_initial()
+        ai_initial["observation"]["product_cost_rmb"] = 66.8
+        ai_initial["observation"]["product_cost_value_type"] = "page_estimate"
+        ai_initial["observation"]["domestic_shipping_rmb"] = 28.0
+        ai_initial["observation"]["domestic_shipping_value_type"] = "page_estimate"
+        _record_id, manifest_path = self._export_one(context, tmp_path, ai_initial=ai_initial)
+        raw = manifest_path.read_text(encoding="utf-8")
+        observation = self._read_manifest(manifest_path)["records"][0]["machine_facts"]["ai_initial"]["observation"]
+        assert "product_cost_rmb" not in observation
+        assert "product_cost_value_type" not in observation
+        assert "domestic_shipping_rmb" not in observation
+        assert "domestic_shipping_value_type" not in observation
+        assert "product_cost_rmb" not in raw
+        assert "domestic_shipping_rmb" not in raw
+
+    def test_raw_evidence_whitelist_keeps_structure_drops_economics(self, context, tmp_path):
+        ai_initial = _ai_initial()
+        ai_initial["observation"]["raw_payload"] = {
+            "field_evidence": {
+                "has_hard_bottom": {"observed": True, "confidence": "high"},
+                "material": {"value": "塑料", "confidence": "medium"},
+                "product_cost_rmb": {"value": 66.8},
+                "domestic_shipping_rmb": {"value": 28.0},
+            },
+            "confirmed_facts": {
+                "length_cm": {"value": 25},
+                "profit_rmb": {"value": 100},
+            },
+            "dimension_semantic_issue": "dimension_evidence_not_outer_dimensions",
+            "shipment": {
+                "length_cm": 25, "width_cm": 20, "height_cm": 5, "weight_g": 600,
+                "state": "可压缩；袋装发货", "packaging_method": "袋装",
+                "total_fee_rmb": 999,
+            },
+        }
+        _record_id, manifest_path = self._export_one(context, tmp_path, ai_initial=ai_initial)
+        raw = manifest_path.read_text(encoding="utf-8")
+        evidence = self._read_manifest(manifest_path)["records"][0]["machine_facts"]["ai_initial"]["evidence"]
+        assert evidence["field_evidence"]["has_hard_bottom"] == {"observed": True, "confidence": "high"}
+        assert "material" in evidence["field_evidence"]
+        assert "product_cost_rmb" not in evidence["field_evidence"]
+        assert "domestic_shipping_rmb" not in evidence["field_evidence"]
+        assert evidence["confirmed_facts"] == {"length_cm": {"value": 25}}
+        assert evidence["dimension_semantic_issue"] == "dimension_evidence_not_outer_dimensions"
+        assert evidence["shipment"] == {
+            "length_cm": 25, "width_cm": 20, "height_cm": 5, "weight_g": 600,
+            "state": "可压缩；袋装发货", "packaging_method": "袋装",
+        }
+        for forbidden in ("product_cost_rmb", "domestic_shipping_rmb", "profit_rmb", "total_fee_rmb"):
+            assert forbidden not in raw
+
+    def test_packaging_proposal_exports_scenario_whitelist_only(self, context, tmp_path):
+        ai_initial = _ai_initial()
+        ai_initial["external_ai_packaging_proposal"] = {
+            "normal": {
+                "label": "normal",
+                "packaging_state": "moderate_compression",
+                "packaging_method": "可压缩；袋装发货",
+                "length_cm": 25, "width_cm": 20, "height_cm": 5, "weight_g": 600,
+                "reasoning_summary": "软质可压缩",
+                "confidence": "medium",
+                "needs_review": True,
+                "default_fields_used": ["packaging_state"],
+            },
+            "conservative": {
+                "label": "conservative",
+                "packaging_method": "盒装",
+                "length_cm": 26, "width_cm": 21, "height_cm": 6, "weight_g": 650,
+            },
+            "proposal_source": "external_ai",
+            "engine_version": "packaging-estimation-v1",
+            "calibration_version": "local-calibration-v3",
+        }
+        _record_id, manifest_path = self._export_one(context, tmp_path, ai_initial=ai_initial)
+        proposal = self._read_manifest(manifest_path)["records"][0]["machine_facts"]["ai_initial"]["packaging_proposal"]
+        assert proposal["source_kind"] == "external_ai_packaging_proposal"
+        normal = proposal["normal"]
+        assert normal["packaging_method"] == "可压缩；袋装发货"
+        assert normal["length_cm"] == 25 and normal["weight_g"] == 600
+        assert set(normal) == {
+            "packaging_state", "packaging_method", "length_cm", "width_cm", "height_cm",
+            "weight_g", "reasoning_summary", "confidence", "needs_review", "default_fields_used",
+        }
+        assert proposal["conservative"]["length_cm"] == 26
+        assert proposal["conservative"]["packaging_method"] == "盒装"
+        assert proposal["engine_version"] == "packaging-estimation-v1"
+        assert proposal["calibration_version"] == "local-calibration-v3"
+
+    def test_packaging_proposal_falls_back_to_adopted_packaging(self, context, tmp_path):
+        ai_initial = _ai_initial()
+        ai_initial["external_ai_packaging_proposal"] = None
+        _record_id, manifest_path = self._export_one(context, tmp_path, ai_initial=ai_initial)
+        proposal = self._read_manifest(manifest_path)["records"][0]["machine_facts"]["ai_initial"]["packaging_proposal"]
+        assert proposal["source_kind"] == "ai_initial.adopted_packaging"
+        assert proposal["normal"]["length_cm"] == 25
+        assert proposal["normal"]["width_cm"] == 20
+
+    def test_user_feedback_structure_exact_output(self, context, tmp_path):
+        record_id = _create_v2(context)
+        service = context.calibration_feedback_service
+        feedback_id = service.save(
+            {
+                "record_id": record_id,
+                "source": "developer",
+                "structure": {
+                    "can_fold": True,
+                    "can_compress": True,
+                    "can_coil": False,
+                    "can_disassemble": "unknown",
+                    "requires_shape_retention": False,
+                    "foldable_parts": ["主体"],
+                    "compressible_parts": ["主体"],
+                    "coilable_parts": [],
+                    "detachable_parts": [],
+                    "rigid_parts": ["底板"],
+                    "axis_behavior": {"length": "compress", "width": "fold", "height": "preserve"},
+                },
+            }
+        )
+        context.history_record_v2_service.link_feedback(record_id, feedback_id)
+        records = [context.store.load_record(record_id)]
+        result = context.calibration_export_service.export(records, "all", tmp_path)
+        manifest = self._read_manifest(result.output_dir / "manifest.json")
+        user_feedback = manifest["records"][0]["machine_facts"]["user_feedback"]
+        assert user_feedback["feedback_id"] == feedback_id
+        assert user_feedback["feedback_schema_version"] == "calibration-feedback-v1"
+        assert user_feedback["source"] == "developer"
+        assert user_feedback["created_at"]
+        assert user_feedback["updated_at"]
+        assert user_feedback["structure"] == {
+            "can_fold": True,
+            "can_compress": True,
+            "can_coil": False,
+            "can_disassemble": "unknown",
+            "requires_shape_retention": False,
+            "foldable_parts": ["主体"],
+            "compressible_parts": ["主体"],
+            "coilable_parts": [],
+            "detachable_parts": [],
+            "rigid_parts": ["底板"],
+            "axis_behavior": {"length": "compress", "width": "fold", "height": "preserve"},
+        }
+
+    def test_suggested_package_exact_output_with_user_suggested_evidence(self, context, tmp_path):
+        record_id = _create_v2(context)
+        service = context.calibration_feedback_service
+        feedback_id = service.save(
+            {
+                "record_id": record_id,
+                "suggested_package": {
+                    "length_cm": 25, "width_cm": 20, "height_cm": 4, "weight_g": 550,
+                    "packaging_method": "压缩袋装",
+                    "evidence_level": "actual_measured",  # 合同强制降级为 user_suggested
+                },
+            }
+        )
+        context.history_record_v2_service.link_feedback(record_id, feedback_id)
+        records = [context.store.load_record(record_id)]
+        result = context.calibration_export_service.export(records, "all", tmp_path)
+        manifest = self._read_manifest(result.output_dir / "manifest.json")
+        suggested = manifest["records"][0]["machine_facts"]["user_feedback"]["suggested_package"]
+        assert suggested == {
+            "length_cm": 25.0, "width_cm": 20.0, "height_cm": 4.0, "weight_g": 550.0,
+            "packaging_method": "压缩袋装",
+            "evidence_level": "user_suggested",
+        }
+
+    def test_actual_logistics_exact_output(self, context, tmp_path):
+        record_id = _create_v2(context)
+        service = context.calibration_feedback_service
+        feedback_id = service.save(
+            {
+                "record_id": record_id,
+                "actual_logistics": {
+                    "actual_first_mile_fee_rmb": 26.0,
+                    "actual_forwarder": "深圳",
+                    "actual_chargeable_weight_kg": 0.53,
+                    "actual_package_dimensions": {"length_cm": 24, "width_cm": 19, "height_cm": 4},
+                    "actual_package_weight_g": 530,
+                    "actual_packaging_method": "袋装",
+                    "evidence_level": "actual_measured",
+                },
+            }
+        )
+        context.history_record_v2_service.link_feedback(record_id, feedback_id)
+        records = [context.store.load_record(record_id)]
+        result = context.calibration_export_service.export(records, "all", tmp_path)
+        manifest = self._read_manifest(result.output_dir / "manifest.json")
+        user_feedback = manifest["records"][0]["machine_facts"]["user_feedback"]
+        actual = user_feedback["actual_logistics"]
+        assert actual == {
+            "actual_first_mile_fee_rmb": 26.0,
+            "actual_forwarder": "深圳",
+            "actual_chargeable_weight_kg": 0.53,
+            "actual_package_dimensions": {"length_cm": 24, "width_cm": 19, "height_cm": 4},
+            "actual_package_weight_g": 530.0,
+            "actual_packaging_method": "袋装",
+            "evidence_level": "actual_measured",
+        }
+        # 软件内部导出状态不属于规则分析事实
+        for excluded in ("calibration_exported_at", "calibration_export_batch_id",
+                         "feedback_updated_after_export", "record_id"):
+            assert excluded not in user_feedback
+
+    def test_manifest_still_excludes_current_estimate_recursively(self, context, tmp_path):
+        _record_id, manifest_path = self._export_one(context, tmp_path, images=True)
+        raw = manifest_path.read_text(encoding="utf-8")
+        manifest = self._read_manifest(manifest_path)
+        assert "current_estimate" not in raw
+
+        def assert_not_current_estimate(key: str):
+            assert key != "current_estimate"
+
+        self._walk(manifest, assert_not_current_estimate)
+
+    def test_manifest_recursive_economic_field_scan(self, context, tmp_path):
+        ai_initial = _ai_initial()
+        # 误落位经济字段：顶层、observation、raw evidence 三层都塞入
+        ai_initial["product_cost_rmb"] = 66.8
+        ai_initial["observation"]["sale_price_usd"] = 30.0
+        ai_initial["observation"]["raw_payload"] = {
+            "field_evidence": {
+                "has_hard_bottom": {"observed": True},
+                "subsidy": {"value": 5.0},
+                "exchange_rate": {"value": 7.2},
+            },
+            "shipment": {"length_cm": 25, "tail_fee_rmb": 39.98},
+        }
+        record_id = _create_v2(context, ai_initial=ai_initial)
+        service = context.calibration_feedback_service
+        feedback_id = service.save({"record_id": record_id, "user_note": "备注"})
+        context.history_record_v2_service.link_feedback(record_id, feedback_id)
+        records = [context.store.load_record(record_id)]
+        result = context.calibration_export_service.export(records, "all", tmp_path)
+        raw = (result.output_dir / "manifest.json").read_text(encoding="utf-8")
+        manifest = self._read_manifest(result.output_dir / "manifest.json")
+        forbidden_tokens = (
+            "current_estimate", "calculation_snapshot", "profit_scenarios",
+            "product_cost_rmb", "product_cost_value_type",
+            "domestic_shipping_rmb", "domestic_shipping_value_type",
+            "system_cost_rmb", "exchange_rate",
+            "sale_price_usd", "sale_price_rmb",
+            "profit_rmb", "profit_usd", "profit_rate",
+            "subsidy", "tail_fee_rmb", "shein_quote_usd",
+        )
+        for token in forbidden_tokens:
+            assert token not in raw
+        forbidden_key_parts = (
+            "current_estimate", "product_cost", "domestic_shipping", "system_cost",
+            "sale_price", "profit", "subsidy", "tail_fee", "exchange_rate", "shein_quote",
+        )
+
+        def assert_not_forbidden_key(key: str):
+            assert not any(part in key for part in forbidden_key_parts), key
+
+        self._walk(manifest, assert_not_forbidden_key)
+
+    def test_legacy_missing_ai_initial_safe_and_not_fabricated(self, context, tmp_path):
+        payload = _payload("旧商品")
+        record_id = context.history_record_v2_service.create_record(
+            payload, ai_initial=None, record_id="legacy-v2-manifest"
+        )
+        records = [context.store.load_record(record_id)]
+        result = context.calibration_export_service.export(records, "all", tmp_path)
+        manifest = self._read_manifest(result.output_dir / "manifest.json")
+        entry = manifest["records"][0]
+        assert entry["record_id"] == record_id
+        assert entry["product_short_name"] == "—"
+        assert entry["machine_facts"]["ai_initial"] is None
+        assert entry["machine_facts"]["user_feedback"] is None
+
+    def test_legacy_layers_ai_raw_not_masqueraded_as_first_ai_facts(self, context, tmp_path):
+        payload = _payload("旧商品")
+        payload["_v2"] = {
+            "record_schema_version": "2.6.1",
+            "ai_initial": {
+                "legacy_layers_ai_raw": {"shipment": {"length_cm": 99, "weight_g": 999}},
+            },
+        }
+        payload["id"] = "legacy-raw-v2-manifest"
+        context.store.save_new_record(payload)
+        records = [context.store.load_record("legacy-raw-v2-manifest")]
+        result = context.calibration_export_service.export(records, "all", tmp_path)
+        raw = (result.output_dir / "manifest.json").read_text(encoding="utf-8")
+        manifest = self._read_manifest(result.output_dir / "manifest.json")
+        assert manifest["records"][0]["machine_facts"]["ai_initial"] is None
+        assert "legacy_layers_ai_raw" not in raw
+
+    def test_no_image_record_still_exports_with_machine_facts(self, context, tmp_path):
+        _record_id, manifest_path = self._export_one(context, tmp_path, images=False)
+        manifest = self._read_manifest(manifest_path)
+        entry = manifest["records"][0]
+        assert entry["main_image"] == ""
+        assert entry["images"] == []
+        assert set(entry["machine_facts"]) == {"ai_initial", "user_feedback"}
 
 
 class TestExportModes:
