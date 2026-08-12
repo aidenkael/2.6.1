@@ -116,18 +116,21 @@ class ImageRiskScanService:
     def scan_batch(
         self,
         products: list[dict[str, str]],
+        *,
+        force_refresh: bool = False,
     ) -> tuple[list[ImageRiskItem], ImageRiskScanStats]:
         """批量检测图片风险。
 
         products: [{"id": "product_id", "main_image": "url"}, ...]
+        force_refresh: True 时忽略运行期缓存，强制重新检测；新结果覆盖旧缓存。
         返回: (risky_items, stats)
         - risky_items: has_risk=True 的结果列表（含缓存）
-        - stats: 检测统计信息
+        - stats: 检测统计信息，保证 requested_count = cached_count + checked_count + failed_count
         """
         if not products:
             return [], ImageRiskScanStats(0, 0, 0, 0, 0)
 
-        # 过滤已有缓存的商品
+        # 过滤缓存（force_refresh 时全部视为待检）
         to_scan: list[dict[str, str]] = []
         cached_risky: list[ImageRiskItem] = []
         cached_count = 0
@@ -136,13 +139,14 @@ class ImageRiskScanService:
             img = str(p.get("main_image") or "").strip()
             if not pid or not img:
                 continue
-            cached = self.get_cached(pid, img)
-            if cached is not None:
-                cached_count += 1
-                if cached.has_risk:
-                    cached_risky.append(cached)
-            else:
-                to_scan.append(p)
+            if not force_refresh:
+                cached = self.get_cached(pid, img)
+                if cached is not None:
+                    cached_count += 1
+                    if cached.has_risk:
+                        cached_risky.append(cached)
+                    continue
+            to_scan.append(p)
 
         requested_count = cached_count + len(to_scan)
 
@@ -163,14 +167,18 @@ class ImageRiskScanService:
         for i in range(0, len(to_scan), BATCH_SIZE):
             batch = to_scan[i:i + BATCH_SIZE]
             try:
-                batch_results = self._scan_single_batch(batch)
+                batch_results, batch_download_failed = self._scan_single_batch(batch)
                 checked_count += len(batch_results)
+                # 未下载的商品 + AI 漏返回的商品都算失败
+                batch_failed = batch_download_failed + (len(batch) - batch_download_failed - len(batch_results))
+                failed_count += batch_failed
                 for item in batch_results:
                     self._set_cached(item.product_id, item.main_image, item)
                     if item.has_risk:
                         all_risky.append(item)
             except Exception as exc:
                 logger.warning("图片风险检测批次失败: %s", exc)
+                # 整批异常：所有商品计入失败（含下载阶段已失败的，但不重复计数）
                 failed_count += len(batch)
 
         stats = ImageRiskScanStats(
@@ -182,8 +190,13 @@ class ImageRiskScanService:
         )
         return all_risky, stats
 
-    def _scan_single_batch(self, products: list[dict[str, str]]) -> list[ImageRiskItem]:
-        """单批次图片风险检测。"""
+    def _scan_single_batch(self, products: list[dict[str, str]]) -> tuple[list[ImageRiskItem], int]:
+        """单批次图片风险检测。
+
+        返回: (results, download_failed_count)
+        - results: 成功解析的结果（已去重）
+        - download_failed_count: 本批次图片下载失败的商品数量
+        """
         bound = self.profile_store.bound_profile(VISUAL_AI)
         if bound is None:
             raise RecognitionUnavailableError("图片风险检测尚未绑定视觉API配置，请先在设置中配置。")
@@ -197,6 +210,7 @@ class ImageRiskScanService:
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
 
         image_items: list[tuple[str, str, bytes]] = []  # (product_id, url, data)
+        download_failed_count = 0
         for p in products:
             pid = str(p.get("id") or "").strip()
             img_url = str(p.get("main_image") or "").strip()
@@ -207,10 +221,10 @@ class ImageRiskScanService:
                 image_items.append((pid, img_url, img_data))
             except Exception as exc:
                 logger.warning("下载图片失败 %s: %s", img_url, exc)
-                continue
+                download_failed_count += 1
 
         if not image_items:
-            return []
+            return [], download_failed_count
 
         # 添加图片到 content（每张图前加 id 标记）
         for pid, _url, img_data in image_items:
@@ -254,7 +268,8 @@ class ImageRiskScanService:
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise RecognitionResponseError("图片风险检测返回格式无效。") from exc
 
-        return self._parse_results(data, image_items)
+        results = self._parse_results(data, image_items)
+        return results, download_failed_count
 
     @staticmethod
     def _download_image(url: str) -> bytes:
@@ -268,15 +283,19 @@ class ImageRiskScanService:
         data: Any,
         image_items: list[tuple[str, str, bytes]],
     ) -> list[ImageRiskItem]:
-        """解析 AI 返回的图片风险结果。"""
+        """解析 AI 返回的图片风险结果。
+
+        未知 id 忽略；同一 id 重复返回只取第一个。
+        """
         if not isinstance(data, dict):
             return []
         results_raw = data.get("results")
         if not isinstance(results_raw, list):
             return []
 
-        # 构建 id -> url 映射
+        # 构建 id -> url 映射（仅含本次送检的商品）
         id_to_url: dict[str, str] = {pid: url for pid, url, _ in image_items}
+        seen_ids: set[str] = set()
 
         results: list[ImageRiskItem] = []
         for item in results_raw:
@@ -284,7 +303,12 @@ class ImageRiskScanService:
                 continue
             pid = str(item.get("id") or "").strip()
             if not pid or pid not in id_to_url:
+                # 未知 id：忽略，不计入结果
                 continue
+            if pid in seen_ids:
+                # 重复返回：只取第一个，跳过后续
+                continue
+            seen_ids.add(pid)
             has_risk = bool(item.get("has_risk"))
             internal_labels = [
                 str(lb).strip()

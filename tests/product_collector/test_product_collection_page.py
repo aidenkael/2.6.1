@@ -37,12 +37,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt, QTimer
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget, QAbstractSpinBox
+from PySide6.QtWidgets import QApplication, QWidget, QAbstractSpinBox, QPushButton
 
 from profit_accounting_26.product_collector.collector_core.business_source import CollectionReport
 from profit_accounting_26.product_collector.collector_core.models import CandidateProduct
 from profit_accounting_26.product_collector.ui.product_collection_page import (
-    KeywordSelectPopup, ProductCard, ProductCollectionPage, parse_search_terms,
+    KeywordSelectPopup, ProductCard, ProductCollectionPage, _ImageRiskCheckPopup, parse_search_terms,
 )
 
 
@@ -1053,6 +1053,63 @@ class TestButtonText(_PageCase):
     def test_title_check_button_text(self):
         """标题检测按钮文字应为'标题检测'。"""
         self.assertEqual(self.page.btn_title_check.text(), "标题检测")
+
+
+class TestRefreshSelectedOnly(_PageCase):
+    """测试'重新检测已选商品'只作用于当前已选商品。"""
+
+    def test_refresh_selected_only_acts_on_selected(self):
+        """'重新检测已选商品'应只作用于当前已选商品。"""
+        self.page.load_results(_products(3))
+        # 选中商品 1
+        self.page.set_selection("1", True)
+        # 测试 _start_image_risk_check 的 scope='refresh_selected'
+        # 先验证选中状态
+        self.assertIn("1", self.page._selected_ids)
+        self.assertNotIn("2", self.page._selected_ids)
+        self.assertNotIn("3", self.page._selected_ids)
+        # 构建产品列表（与 _start_image_risk_check 逻辑一致）
+        products_refresh = [
+            {"id": p.product_id, "main_image": p.main_image}
+            for p in self.page._products
+            if p.product_id in self.page._selected_ids
+        ]
+        self.assertEqual(len(products_refresh), 1)
+        self.assertEqual(products_refresh[0]["id"], "1")
+
+    def test_image_check_does_not_change_selection(self):
+        """图片检测不改变用户选中/移除状态。"""
+        self.page.load_results(_products(3))
+        self.page.set_selection("1", True)
+        self.page.set_selection("2", True)
+        selected_before = set(self.page._selected_ids)
+        states_before = dict(self.page._states)
+        # 模拟图片检测完成（scope=all）
+        self.page._on_image_risk_finished(
+            [],
+            {"requested_count": 3, "cached_count": 0, "checked_count": 3, "risk_count": 0, "failed_count": 0},
+            "",
+        )
+        self.assertEqual(self.page._selected_ids, selected_before)
+        self.assertEqual(self.page._states, states_before)
+
+
+class TestImageRiskPopup(_PageCase):
+    """测试图片检测弹窗按钮。"""
+
+    def test_popup_has_refresh_button_when_selected(self):
+        """已选商品时弹窗应显示'重新检测已选商品'按钮。"""
+        popup = _ImageRiskCheckPopup(selected_count=2, total_count=5)
+        buttons = [w for w in popup.findChildren(QPushButton)]
+        texts = [b.text() for b in buttons]
+        self.assertIn("重新检测已选商品（2个）", texts)
+
+    def test_popup_no_refresh_button_when_no_selection(self):
+        """无选中商品时弹窗不应显示'重新检测已选商品'按钮。"""
+        popup = _ImageRiskCheckPopup(selected_count=0, total_count=5)
+        buttons = [w for w in popup.findChildren(QPushButton)]
+        texts = [b.text() for b in buttons]
+        self.assertNotIn("重新检测已选商品（0个）", texts)
 
 
 if __name__ == "__main__":

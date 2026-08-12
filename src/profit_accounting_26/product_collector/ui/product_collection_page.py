@@ -1369,8 +1369,16 @@ class ProductCollectionPage(QWidget):
         popup.show()
 
     def _start_image_risk_check(self, scope: str) -> None:
-        """启动图片风险检测。scope: 'selected' 或 'all'。"""
-        if scope == "selected" and self._selected_ids:
+        """启动图片风险检测。scope: 'selected' 或 'all' 或 'refresh_selected'。"""
+        force_refresh = False
+        if scope == "refresh_selected":
+            force_refresh = True
+            products = [
+                {"id": p.product_id, "main_image": p.main_image}
+                for p in self._products
+                if p.product_id in self._selected_ids
+            ]
+        elif scope == "selected" and self._selected_ids:
             products = [
                 {"id": p.product_id, "main_image": p.main_image}
                 for p in self._products
@@ -1392,7 +1400,7 @@ class ProductCollectionPage(QWidget):
 
         # 启动后台线程
         self._image_risk_thread = QThread(self)
-        self._image_risk_worker = _ImageRiskWorker(self._image_risk_service, products)
+        self._image_risk_worker = _ImageRiskWorker(self._image_risk_service, products, force_refresh=force_refresh)
         self._image_risk_worker.moveToThread(self._image_risk_thread)
         self._image_risk_thread.started.connect(self._image_risk_worker.run)
         self._image_risk_worker.finished.connect(self._on_image_risk_finished)
@@ -1470,15 +1478,16 @@ class _ImageRiskWorker(QObject):
 
     finished = Signal(list, dict, str)  # (risky_items, stats_dict, error)
 
-    def __init__(self, service, products: list) -> None:
+    def __init__(self, service, products: list, *, force_refresh: bool = False) -> None:
         super().__init__()
         self._service = service
         self._products = products
+        self._force_refresh = force_refresh
 
     @Slot()
     def run(self) -> None:
         try:
-            risky_items, stats_obj = self._service.scan_batch(self._products)
+            risky_items, stats_obj = self._service.scan_batch(self._products, force_refresh=self._force_refresh)
             stats = {
                 "requested_count": stats_obj.requested_count,
                 "cached_count": stats_obj.cached_count,
@@ -1497,11 +1506,11 @@ class _ImageRiskWorker(QObject):
 class _ImageRiskCheckPopup(QWidget):
     """图片风险检测范围选择弹窗。"""
 
-    checkRequested = Signal(str)  # 'selected' 或 'all'
+    checkRequested = Signal(str)  # 'selected' 或 'all' 或 'refresh_selected'
 
     def __init__(self, selected_count: int, total_count: int, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.WindowType.Popup)
-        self.setFixedSize(320, 180)
+        self.setFixedSize(320, 230)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -1519,6 +1528,11 @@ class _ImageRiskCheckPopup(QWidget):
         btn_all = QPushButton(f"检测全部商品（{total_count}个）")
         btn_all.clicked.connect(lambda: self._on_click("all"))
         layout.addWidget(btn_all)
+
+        if selected_count > 0:
+            btn_refresh = QPushButton(f"重新检测已选商品（{selected_count}个）")
+            btn_refresh.clicked.connect(lambda: self._on_click("refresh_selected"))
+            layout.addWidget(btn_refresh)
 
         btn_cancel = QPushButton("取消")
         btn_cancel.clicked.connect(self.close)
