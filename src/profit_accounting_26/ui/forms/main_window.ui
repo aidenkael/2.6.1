@@ -275,6 +275,22 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
         </widget>
        </item>
        <item>
+        <widget class="QPushButton" name="btnNavProductCollection">
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>42</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>采  商品采集</string>
+         </property>
+         <property name="navItem" stdset="0">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
         <widget class="QPushButton" name="btnNavHistory">
          <property name="minimumSize">
           <size>
@@ -6574,6 +6590,35 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                </item>
               </layout>
              </widget>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+         <widget class="QWidget" name="pageProductCollection">
+          <layout class="QVBoxLayout" name="pageProductCollectionLayout">
+           <property name="spacing">
+            <number>0</number>
+           </property>
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
+           <item>
+            <widget class="QLabel" name="pageProductCollectionLabel">
+             <property name="text">
+              <string>运行时挂载“商品采集”页面</string>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignmentFlag::AlignCenter</set>
+             </property>
             </widget>
            </item>
           </layout>

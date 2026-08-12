@@ -139,7 +139,8 @@ class TestUIFileContract:
         """.ui SHA 与输入文件一致。"""
         expected = {
             # Stage 4：导航精简 + 校准管理迁入 Settings 后的新契约 SHA
-            "main_window.ui": "cbd5759187214770bc40df03d6f85a54839b13bddc8bf42175b31f0d4431aba8",
+            # Product Collector 集成后 main_window.ui 新增导航按钮和页面占位
+            "main_window.ui": "c46dffb688f00fe6ecd968ed09f04d9b26005094da6d7dbe95f82def6c819d8d",
             "settings_page.ui": "97c57f1980586cd65f1333aee449188930d35db11b7f983d66f3f08566101a63",
         }
         for name, sha in expected.items():
@@ -175,7 +176,8 @@ class TestRuntimeLoading:
         from PySide6.QtWidgets import QStackedWidget
         stack = main_window_ui.findChild(QStackedWidget, "mainStack")
         assert stack is not None
-        assert stack.count() == 3
+        # Product Collector 集成后为 4 页：测算 / 采集 / 历史 / 设置
+        assert stack.count() == 4
 
     def test_profit_fields_accessible(self, main_window_ui):
         from PySide6.QtWidgets import QDoubleSpinBox
