@@ -6,7 +6,7 @@
 from .collector_core import CandidateProduct, collect
 from .ui import ProductCollectionPage
 from .title_risk_scan import TitleRiskScanService, TitleRiskItem
-from .image_risk_scan import ImageRiskScanService, ImageRiskItem
+from .image_risk_scan import ImageRiskScanService, ImageRiskItem, ImageRiskScanStats
 
 __all__ = [
     "CandidateProduct",
@@ -16,4 +16,5 @@ __all__ = [
     "TitleRiskItem",
     "ImageRiskScanService",
     "ImageRiskItem",
+    "ImageRiskScanStats",
 ]

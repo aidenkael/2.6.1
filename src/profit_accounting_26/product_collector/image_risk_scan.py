@@ -42,6 +42,17 @@ class ImageRiskItem:
     display_label: str     # UI 显示标签：品牌/IP复核
 
 
+@dataclass(frozen=True, slots=True)
+class ImageRiskScanStats:
+    """图片风险检测统计。"""
+
+    requested_count: int     # 用户请求检测的商品总数
+    cached_count: int        # 从运行期缓存中获取的数量
+    checked_count: int       # 实际通过 API 检测的数量
+    risk_count: int          # 检测到风险的数量
+    failed_count: int        # 检测失败的数量
+
+
 def _build_image_prompt() -> str:
     """构建图片品牌/IP检测 Prompt。"""
     return (
@@ -69,7 +80,8 @@ def _build_image_prompt() -> str:
         "- 不输出'已侵权''侵权''违法'等法律结论\n\n"
         "严格 JSON 格式返回，每张图一个结果：\n"
         '{"results": [{"id": "商品id", "has_risk": true, "internal_labels": ["品牌Logo"], "detail": "Nike Swoosh Logo"}]}\n\n'
-        "has_risk 为 false 的商品不要输出。\n"
+        "每张送检图片都必须有一个对应的结果条目。\n"
+        "无风险的图片 has_risk 设为 false。\n"
         "internal_labels 可选值：品牌Logo、品牌文字、品牌纹样、角色IP、球队/组织标志\n"
     )
 
@@ -104,20 +116,21 @@ class ImageRiskScanService:
     def scan_batch(
         self,
         products: list[dict[str, str]],
-    ) -> tuple[list[ImageRiskItem], int]:
+    ) -> tuple[list[ImageRiskItem], ImageRiskScanStats]:
         """批量检测图片风险。
 
         products: [{"id": "product_id", "main_image": "url"}, ...]
-        返回: (results, failed_count)
-        - results: 成功检测到的风险列表
-        - failed_count: 检测失败的商品数量
+        返回: (risky_items, stats)
+        - risky_items: has_risk=True 的结果列表（含缓存）
+        - stats: 检测统计信息
         """
         if not products:
-            return [], 0
+            return [], ImageRiskScanStats(0, 0, 0, 0, 0)
 
         # 过滤已有缓存的商品
         to_scan: list[dict[str, str]] = []
-        cached_results: list[ImageRiskItem] = []
+        cached_risky: list[ImageRiskItem] = []
+        cached_count = 0
         for p in products:
             pid = str(p.get("id") or "").strip()
             img = str(p.get("main_image") or "").strip()
@@ -125,30 +138,49 @@ class ImageRiskScanService:
                 continue
             cached = self.get_cached(pid, img)
             if cached is not None:
+                cached_count += 1
                 if cached.has_risk:
-                    cached_results.append(cached)
+                    cached_risky.append(cached)
             else:
                 to_scan.append(p)
 
+        requested_count = cached_count + len(to_scan)
+
         if not to_scan:
-            return cached_results, 0
+            stats = ImageRiskScanStats(
+                requested_count=requested_count,
+                cached_count=cached_count,
+                checked_count=0,
+                risk_count=len(cached_risky),
+                failed_count=0,
+            )
+            return cached_risky, stats
 
         # 分批处理
-        all_results: list[ImageRiskItem] = list(cached_results)
+        all_risky: list[ImageRiskItem] = list(cached_risky)
+        checked_count = 0
         failed_count = 0
         for i in range(0, len(to_scan), BATCH_SIZE):
             batch = to_scan[i:i + BATCH_SIZE]
             try:
                 batch_results = self._scan_single_batch(batch)
+                checked_count += len(batch_results)
                 for item in batch_results:
                     self._set_cached(item.product_id, item.main_image, item)
                     if item.has_risk:
-                        all_results.append(item)
+                        all_risky.append(item)
             except Exception as exc:
                 logger.warning("图片风险检测批次失败: %s", exc)
                 failed_count += len(batch)
 
-        return all_results, failed_count
+        stats = ImageRiskScanStats(
+            requested_count=requested_count,
+            cached_count=cached_count,
+            checked_count=checked_count,
+            risk_count=len(all_risky),
+            failed_count=failed_count,
+        )
+        return all_risky, stats
 
     def _scan_single_batch(self, products: list[dict[str, str]]) -> list[ImageRiskItem]:
         """单批次图片风险检测。"""

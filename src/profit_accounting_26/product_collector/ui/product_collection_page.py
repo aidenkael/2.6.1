@@ -323,6 +323,10 @@ class ProductCard(QFrame):
         self.lbl_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.lbl_badge.hide()
 
+        # 标题风险和图片风险独立存储
+        self._title_risk_data: dict | None = None  # {"labels": [...], "result": "..."}
+        self._image_risk_data: dict | None = None  # {"labels": [...]}
+
         self._network = network
         self._load_image()
 
@@ -353,17 +357,36 @@ class ProductCard(QFrame):
         style.polish(self)
         self.lbl_badge.setVisible(selected)
 
-    def set_risk_labels(self, labels: list[str], result: str = "") -> None:
-        """设置风险标签显示。"""
-        if not labels:
+    def set_title_risk_data(self, labels: list[str], result: str = "") -> None:
+        """设置标题风险状态，不影响图片风险。"""
+        self._title_risk_data = {"labels": labels, "result": result} if labels else None
+        self._refresh_risk_display()
+
+    def set_image_risk_data(self, labels: list[str]) -> None:
+        """设置图片风险状态，不影响标题风险。"""
+        self._image_risk_data = {"labels": labels} if labels else None
+        self._refresh_risk_display()
+
+    def _refresh_risk_display(self) -> None:
+        """合并标题风险和图片风险到统一显示区域。"""
+        title = self._title_risk_data
+        image = self._image_risk_data
+        if not title and not image:
             self.lbl_risk.hide()
             return
-        # 显示格式：[禁止] 带电, 电池充电 或 [复核] 品牌/IP复核
-        prefix = "⛔" if result == "禁止" else "⚠️"
-        text = f"{prefix} {', '.join(labels)}"
+        lines: list[str] = []
+        has_banned = False
+        if title:
+            prefix = "\u26d4" if title.get("result") == "\u7981\u6b62" else "\u26a0\ufe0f"
+            if title.get("result") == "\u7981\u6b62":
+                has_banned = True
+            lines.append(f"{prefix} {', '.join(title['labels'])}")
+        if image:
+            lines.append(f"\u26a0\ufe0f {', '.join(image['labels'])}")
+        text = "\n".join(lines)
         self.lbl_risk.setText(text)
         self.lbl_risk.setToolTip(text)
-        if result == "禁止":
+        if has_banned:
             self.lbl_risk.setStyleSheet(
                 "background:#FEE2E2;color:#DC2626;border:1px solid #FCA5A5;"
                 "border-radius:4px;padding:2px 6px;font-size:11px;"
@@ -1307,14 +1330,14 @@ class ProductCollectionPage(QWidget):
             self._notice(self, "标题风险检测失败", error, level="error")
             return
 
-        # 更新卡片风险标签
+        # 只更新标题风险状态，不影响图片风险
         risk_map = {r.product_id: r for r in risks}
         for pid, card in self._cards.items():
             if pid in risk_map:
                 risk = risk_map[pid]
-                card.set_risk_labels(risk.labels, risk.result)
+                card.set_title_risk_data(risk.labels, risk.result)
             else:
-                card.set_risk_labels([])
+                card.set_title_risk_data([])
 
         self.lbl_status.setText(f"标题检测完成，发现 {len(risks)} 个风险商品")
         if risks:
@@ -1381,7 +1404,7 @@ class ProductCollectionPage(QWidget):
         )
         self._image_risk_thread.start()
 
-    def _on_image_risk_finished(self, risks: list, failed_count: int, error: str) -> None:
+    def _on_image_risk_finished(self, risks: list, stats: dict, error: str) -> None:
         """图片风险检测完成回调。"""
         self.btn_infringement_check.setEnabled(True)
         if error:
@@ -1389,32 +1412,35 @@ class ProductCollectionPage(QWidget):
             self._notice(self, "图片风险检测失败", error, level="error")
             return
 
-        # 更新卡片风险标签
+        # 只更新图片风险状态，不影响标题风险
         risk_map = {r.product_id: r for r in risks}
         for pid, card in self._cards.items():
             if pid in risk_map:
                 risk = risk_map[pid]
-                if risk.has_risk:
-                    card.set_risk_labels([risk.display_label] if risk.display_label else [])
-            # 不清除已有的标题风险标签
+                card.set_image_risk_data([risk.display_label] if risk.display_label else [])
 
-        total_checked = len(risks) + failed_count
-        if failed_count > 0:
-            self.lbl_status.setText(f"图片检测完成，{len(risks)} 个风险，{failed_count} 个失败")
+        requested = stats.get("requested_count", 0)
+        risk_count = stats.get("risk_count", 0)
+        failed = stats.get("failed_count", 0)
+        if failed > 0:
+            self.lbl_status.setText(f"图片检测完成，{risk_count} 个需复核，{failed} 个失败")
             self._notice(
                 self, "图片风险检测完成",
-                f"共检测 {total_checked} 个商品，发现 {len(risks)} 个风险商品，{failed_count} 个检测失败。",
+                f"共处理 {requested} 个商品，发现 {risk_count} 个需复核商品，{failed} 个检测失败。",
                 level="warning",
             )
-        elif risks:
-            self.lbl_status.setText(f"图片检测完成，发现 {len(risks)} 个风险商品")
+        elif risk_count > 0:
+            self.lbl_status.setText(f"图片检测完成，发现 {risk_count} 个需复核商品")
             self._notice(
                 self, "图片风险检测完成",
-                f"共检测 {total_checked} 个商品，发现 {len(risks)} 个风险商品。",
+                f"共处理 {requested} 个商品，发现 {risk_count} 个需复核商品。",
             )
         else:
-            self.lbl_status.setText("图片检测完成")
-            self._notice(self, "图片风险检测完成", "未发现风险商品。")
+            self.lbl_status.setText(f"图片检测完成，共处理 {requested} 个商品")
+            self._notice(
+                self, "图片风险检测完成",
+                f"共处理 {requested} 个商品，未发现需复核商品。",
+            )
 
 
 # ── AI 风险检测 Worker ──────────────────────────────────────────
@@ -1442,7 +1468,7 @@ class _TitleRiskWorker(QObject):
 class _ImageRiskWorker(QObject):
     """图片风险检测后台线程。"""
 
-    finished = Signal(list, int, str)  # (risks, failed_count, error)
+    finished = Signal(list, dict, str)  # (risky_items, stats_dict, error)
 
     def __init__(self, service, products: list) -> None:
         super().__init__()
@@ -1452,10 +1478,17 @@ class _ImageRiskWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            risks, failed_count = self._service.scan_batch(self._products)
-            self.finished.emit(risks, failed_count, "")
+            risky_items, stats_obj = self._service.scan_batch(self._products)
+            stats = {
+                "requested_count": stats_obj.requested_count,
+                "cached_count": stats_obj.cached_count,
+                "checked_count": stats_obj.checked_count,
+                "risk_count": stats_obj.risk_count,
+                "failed_count": stats_obj.failed_count,
+            }
+            self.finished.emit(risky_items, stats, "")
         except Exception as exc:
-            self.finished.emit([], 0, str(exc))
+            self.finished.emit([], {"requested_count": 0, "cached_count": 0, "checked_count": 0, "risk_count": 0, "failed_count": 0}, str(exc))
 
 
 # ── 图片风险检测选择弹窗 ──────────────────────────────────────────

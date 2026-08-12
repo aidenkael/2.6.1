@@ -958,5 +958,102 @@ class TestStartupEntry(unittest.TestCase):
         self.assertTrue(hasattr(mod, "CandidateProduct"))
 
 
+# ── 风险检测独立性 ──────────────────────────────────────────────
+
+
+class TestRiskIndependence(_PageCase):
+    """验证标题风险与图片风险独立保存、合并显示。"""
+
+    def _load_one_product(self):
+        products = _products(1)
+        self.page.load_results(products)
+        return products[0]
+
+    def test_title_risk_preserved_after_image_check(self):
+        """标题风险存在后执行图片检测，标题风险仍保留。"""
+        self._load_one_product()
+        card = self.page._cards["1"]
+        card.set_title_risk_data(["带电"], "人工复核")
+        # 模拟图片检测完成（无风险）
+        card.set_image_risk_data([])
+        # 标题风险应保留
+        self.assertIsNotNone(card._title_risk_data)
+        self.assertEqual(card._title_risk_data["labels"], ["带电"])
+        self.assertFalse(card.lbl_risk.isHidden())
+        self.assertIn("带电", card.lbl_risk.text())
+
+    def test_image_risk_preserved_after_title_check(self):
+        """图片风险存在后重新执行标题检测，图片风险仍保留。"""
+        self._load_one_product()
+        card = self.page._cards["1"]
+        card.set_image_risk_data(["品牌/IP复核"])
+        # 模拟标题检测完成（无风险）
+        card.set_title_risk_data([])
+        # 图片风险应保留
+        self.assertIsNotNone(card._image_risk_data)
+        self.assertEqual(card._image_risk_data["labels"], ["品牌/IP复核"])
+        self.assertFalse(card.lbl_risk.isHidden())
+        self.assertIn("品牌/IP复核", card.lbl_risk.text())
+
+    def test_both_risks_shown_simultaneously(self):
+        """两种风险同时存在时可以同时显示。"""
+        self._load_one_product()
+        card = self.page._cards["1"]
+        card.set_title_risk_data(["带电"], "人工复核")
+        card.set_image_risk_data(["品牌/IP复核"])
+        text = card.lbl_risk.text()
+        self.assertIn("带电", text)
+        self.assertIn("品牌/IP复核", text)
+        self.assertFalse(card.lbl_risk.isHidden())
+
+    def test_title_risk_cleared_keeps_image_risk(self):
+        """标题风险清除时不影响图片风险。"""
+        self._load_one_product()
+        card = self.page._cards["1"]
+        card.set_title_risk_data(["带电"], "人工复核")
+        card.set_image_risk_data(["品牌/IP复核"])
+        # 清除标题风险
+        card.set_title_risk_data([])
+        # 图片风险应保留
+        self.assertIsNone(card._title_risk_data)
+        self.assertIsNotNone(card._image_risk_data)
+        self.assertIn("品牌/IP复核", card.lbl_risk.text())
+
+    def test_image_risk_cleared_keeps_title_risk(self):
+        """图片风险清除时不影响标题风险。"""
+        self._load_one_product()
+        card = self.page._cards["1"]
+        card.set_title_risk_data(["食品"], "禁止")
+        card.set_image_risk_data(["品牌/IP复核"])
+        # 清除图片风险
+        card.set_image_risk_data([])
+        # 标题风险应保留
+        self.assertIsNotNone(card._title_risk_data)
+        self.assertIsNone(card._image_risk_data)
+        self.assertIn("食品", card.lbl_risk.text())
+
+    def test_both_risks_cleared_hides_label(self):
+        """两种风险都清除后标签应隐藏。"""
+        self._load_one_product()
+        card = self.page._cards["1"]
+        card.set_title_risk_data(["带电"], "人工复核")
+        card.set_image_risk_data(["品牌/IP复核"])
+        card.set_title_risk_data([])
+        card.set_image_risk_data([])
+        self.assertTrue(card.lbl_risk.isHidden())
+
+
+class TestButtonText(_PageCase):
+    """验证按钮文字。"""
+
+    def test_image_check_button_text(self):
+        """图片检测按钮文字应为'图片检测'。"""
+        self.assertEqual(self.page.btn_infringement_check.text(), "图片检测")
+
+    def test_title_check_button_text(self):
+        """标题检测按钮文字应为'标题检测'。"""
+        self.assertEqual(self.page.btn_title_check.text(), "标题检测")
+
+
 if __name__ == "__main__":
     unittest.main()
