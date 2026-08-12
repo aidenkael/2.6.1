@@ -1420,12 +1420,18 @@ class ProductCollectionPage(QWidget):
             self._notice(self, "图片风险检测失败", error, level="error")
             return
 
-        # 只更新图片风险状态，不影响标题风险
-        risk_map = {r.product_id: r for r in risks}
+        # 根据本次实际检测的结果更新图片风险状态（不影响标题风险）
+        # all_checked 包含本次通过 API 成功检测的所有商品（含风险和安全）
+        all_checked = stats.get("all_checked", [])
+        checked_map = {r.product_id: r for r in all_checked}
         for pid, card in self._cards.items():
-            if pid in risk_map:
-                risk = risk_map[pid]
-                card.set_image_risk_data([risk.display_label] if risk.display_label else [])
+            if pid in checked_map:
+                item = checked_map[pid]
+                if item.has_risk and item.display_label:
+                    card.set_image_risk_data([item.display_label])
+                else:
+                    # 本次成功检测为安全 → 清除旧图片风险标签
+                    card.set_image_risk_data([])
 
         requested = stats.get("requested_count", 0)
         risk_count = stats.get("risk_count", 0)
@@ -1487,17 +1493,18 @@ class _ImageRiskWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            risky_items, stats_obj = self._service.scan_batch(self._products, force_refresh=self._force_refresh)
+            risky_items, stats_obj, all_checked = self._service.scan_batch(self._products, force_refresh=self._force_refresh)
             stats = {
                 "requested_count": stats_obj.requested_count,
                 "cached_count": stats_obj.cached_count,
                 "checked_count": stats_obj.checked_count,
                 "risk_count": stats_obj.risk_count,
                 "failed_count": stats_obj.failed_count,
+                "all_checked": all_checked,
             }
             self.finished.emit(risky_items, stats, "")
         except Exception as exc:
-            self.finished.emit([], {"requested_count": 0, "cached_count": 0, "checked_count": 0, "risk_count": 0, "failed_count": 0}, str(exc))
+            self.finished.emit([], {"requested_count": 0, "cached_count": 0, "checked_count": 0, "risk_count": 0, "failed_count": 0, "all_checked": []}, str(exc))
 
 
 # ── 图片风险检测选择弹窗 ──────────────────────────────────────────

@@ -128,7 +128,7 @@ class ImageRiskScanService:
         - stats: 检测统计信息，保证 requested_count = cached_count + checked_count + failed_count
         """
         if not products:
-            return [], ImageRiskScanStats(0, 0, 0, 0, 0)
+            return [], ImageRiskScanStats(0, 0, 0, 0, 0), []
 
         # 过滤缓存（force_refresh 时全部视为待检）
         to_scan: list[dict[str, str]] = []
@@ -158,10 +158,11 @@ class ImageRiskScanService:
                 risk_count=len(cached_risky),
                 failed_count=0,
             )
-            return cached_risky, stats
+            return cached_risky, stats, []
 
         # 分批处理
         all_risky: list[ImageRiskItem] = list(cached_risky)
+        all_checked: list[ImageRiskItem] = []  # 本次通过 API 成功检测的所有商品（含安全）
         checked_count = 0
         failed_count = 0
         for i in range(0, len(to_scan), BATCH_SIZE):
@@ -172,6 +173,7 @@ class ImageRiskScanService:
                 # 未下载的商品 + AI 漏返回的商品都算失败
                 batch_failed = batch_download_failed + (len(batch) - batch_download_failed - len(batch_results))
                 failed_count += batch_failed
+                all_checked.extend(batch_results)
                 for item in batch_results:
                     self._set_cached(item.product_id, item.main_image, item)
                     if item.has_risk:
@@ -188,7 +190,7 @@ class ImageRiskScanService:
             risk_count=len(all_risky),
             failed_count=failed_count,
         )
-        return all_risky, stats
+        return all_risky, stats, all_checked
 
     def _scan_single_batch(self, products: list[dict[str, str]]) -> tuple[list[ImageRiskItem], int]:
         """单批次图片风险检测。
