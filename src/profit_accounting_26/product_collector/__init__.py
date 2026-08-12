@@ -5,5 +5,16 @@
 
 from .collector_core import CandidateProduct, collect
 from .ui import ProductCollectionPage
+from .title_risk_scan import TitleRiskScanService, TitleRiskItem
+from .image_risk_scan import ImageRiskScanService, ImageRiskItem, ImageRiskScanStats
 
-__all__ = ["CandidateProduct", "collect", "ProductCollectionPage"]
+__all__ = [
+    "CandidateProduct",
+    "collect",
+    "ProductCollectionPage",
+    "TitleRiskScanService",
+    "TitleRiskItem",
+    "ImageRiskScanService",
+    "ImageRiskItem",
+    "ImageRiskScanStats",
+]
