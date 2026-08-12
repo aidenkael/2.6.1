@@ -256,7 +256,7 @@ class KeywordSelectPopup(QWidget):
 # ── 商品卡片 ──────────────────────────────────────────────────
 
 class ProductCard(QFrame):
-    """单张商品卡片：主图 + 标题（最多 3 行）+ 选中角标。
+    """单张商品卡片：主图 + 标题（最多 3 行）+ 选中角标 + 风险标签。
 
     左键单击选中、右键单击取消选中；双击图片或标题执行对应动作。
     """
@@ -305,6 +305,18 @@ class ProductCard(QFrame):
         self.lbl_title.setToolTip(product.title)
         layout.addWidget(self.lbl_title)
 
+        # 风险标签（初始隐藏）
+        self.lbl_risk = QLabel(self)
+        self.lbl_risk.setObjectName("productCardRisk")
+        self.lbl_risk.setWordWrap(True)
+        self.lbl_risk.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.lbl_risk.setStyleSheet(
+            "background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;"
+            "border-radius:4px;padding:2px 6px;font-size:11px;"
+        )
+        self.lbl_risk.hide()
+        layout.addWidget(self.lbl_risk)
+
         # 右上角"已选"角标（绝对定位，不参与布局）
         self.lbl_badge = QLabel("✓ 已选", self)
         self.lbl_badge.setObjectName("productCardBadge")
@@ -340,6 +352,28 @@ class ProductCard(QFrame):
         style.unpolish(self)
         style.polish(self)
         self.lbl_badge.setVisible(selected)
+
+    def set_risk_labels(self, labels: list[str], result: str = "") -> None:
+        """设置风险标签显示。"""
+        if not labels:
+            self.lbl_risk.hide()
+            return
+        # 显示格式：[禁止] 带电, 电池充电 或 [复核] 品牌/IP复核
+        prefix = "⛔" if result == "禁止" else "⚠️"
+        text = f"{prefix} {', '.join(labels)}"
+        self.lbl_risk.setText(text)
+        self.lbl_risk.setToolTip(text)
+        if result == "禁止":
+            self.lbl_risk.setStyleSheet(
+                "background:#FEE2E2;color:#DC2626;border:1px solid #FCA5A5;"
+                "border-radius:4px;padding:2px 6px;font-size:11px;"
+            )
+        else:
+            self.lbl_risk.setStyleSheet(
+                "background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;"
+                "border-radius:4px;padding:2px 6px;font-size:11px;"
+            )
+        self.lbl_risk.show()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         super().resizeEvent(event)
@@ -510,7 +544,7 @@ class ImageSearchWorker(QObject):
 
 
 class ProductCollectionPage(QWidget):
-    """商品采集页 V1.1：中英文映射 + 多搜索词顺序采集 + 卡片批量操作。
+    """商品采集页 V1.1：中英文映射 + 多搜索词顺序采集 + 卡片批量操作 + AI风险检测。
 
     独立创建：``ProductCollectionPage()``
     也可注入同签名采集函数（async (keyword, target) -> CollectionReport）：
@@ -521,6 +555,7 @@ class ProductCollectionPage(QWidget):
         super().__init__()
         self._collector = collector
         self._log_dir: str | None = None
+        self._api_profile_store = None  # 由宿主注入
         self._products: list[CandidateProduct] = []
         self._states: dict[str, str] = {}
         self._selected_ids: set[str] = set()
@@ -543,11 +578,30 @@ class ProductCollectionPage(QWidget):
         # 已移除视图
         self._showing_removed = False
 
+        # AI 风险检测
+        self._title_risk_thread: QThread | None = None
+        self._title_risk_worker: QObject | None = None
+        self._image_risk_thread: QThread | None = None
+        self._image_risk_worker: QObject | None = None
+        self._title_risk_service = None
+        self._image_risk_service = None
+
         self._load_ui()
 
     def set_log_dir(self, log_dir: str | None) -> None:
         """注入日志目录（由宿主应用调用）。"""
         self._log_dir = log_dir
+
+    def set_api_profile_store(self, profile_store) -> None:
+        """注入 API Profile Store（由宿主应用调用）。"""
+        self._api_profile_store = profile_store
+        # 初始化风险检测服务
+        if profile_store is not None:
+            from ..title_risk_scan import TitleRiskScanService
+            from ..image_risk_scan import ImageRiskScanService
+            self._title_risk_service = TitleRiskScanService(profile_store)
+            self._image_risk_service = ImageRiskScanService(profile_store)
+        self._update_risk_buttons_state()
 
     # ------------------------------------------------------------------
     # UI 构建（从 .ui 加载静态布局）
@@ -621,9 +675,10 @@ class ProductCollectionPage(QWidget):
         self.btn_view_removed.clicked.connect(self._toggle_removed_view)
         self.btn_restore.clicked.connect(self._restore_selected)
 
-        # 标题检测 / 侵权检测：预留按钮，本阶段保持禁用
-        self.btn_title_check.setEnabled(False)
-        self.btn_infringement_check.setEnabled(False)
+        # 标题检测 / 图片检测
+        self.btn_title_check.clicked.connect(self._on_title_risk_check)
+        self.btn_infringement_check.clicked.connect(self._on_image_risk_check)
+        self._update_risk_buttons_state()
         self._update_selection_buttons()
 
         # 容器尺寸变化时重排卡片
@@ -983,6 +1038,7 @@ class ProductCollectionPage(QWidget):
 
         self._update_stats()
         self._update_selection_buttons()
+        self._update_risk_buttons_state()
         self._relayout_cards()
 
     def _relayout_cards(self) -> None:
@@ -1195,3 +1251,246 @@ class ProductCollectionPage(QWidget):
             if not self._showing_removed
             else "返回商品视图"
         )
+
+    # ------------------------------------------------------------------
+    # AI 风险检测
+    # ------------------------------------------------------------------
+
+    def _update_risk_buttons_state(self) -> None:
+        """根据 API 配置状态启用/禁用风险检测按钮。"""
+        has_products = bool(self._products)
+        has_store = self._api_profile_store is not None
+        self.btn_title_check.setEnabled(has_products and has_store)
+        self.btn_infringement_check.setEnabled(has_products and has_store)
+
+    def _on_title_risk_check(self) -> None:
+        """标题风险检测按钮点击。"""
+        if self._title_risk_service is None:
+            self._notice(self, "提示", "标题风险检测尚未配置，请先在设置中绑定文字API。", level="warning")
+            return
+        if not self._products:
+            self._notice(self, "提示", "没有可检测的商品。")
+            return
+        if self._title_risk_thread is not None and self._title_risk_thread.isRunning():
+            self._notice(self, "提示", "标题风险检测正在进行中，请稍候。", level="warning")
+            return
+
+        self.lbl_status.setText("标题风险检测中...")
+        self.btn_title_check.setEnabled(False)
+
+        # 构建标题列表
+        titles = [
+            {"id": p.product_id, "title": p.title}
+            for p in self._products
+            if self._states.get(p.product_id) == KEEP
+        ]
+
+        # 启动后台线程
+        self._title_risk_thread = QThread(self)
+        self._title_risk_worker = _TitleRiskWorker(self._title_risk_service, titles)
+        self._title_risk_worker.moveToThread(self._title_risk_thread)
+        self._title_risk_thread.started.connect(self._title_risk_worker.run)
+        self._title_risk_worker.finished.connect(self._on_title_risk_finished)
+        self._title_risk_worker.finished.connect(self._title_risk_thread.quit)
+        self._title_risk_thread.finished.connect(self._title_risk_worker.deleteLater)
+        self._title_risk_thread.finished.connect(self._title_risk_thread.deleteLater)
+        self._title_risk_thread.finished.connect(
+            lambda: setattr(self, '_title_risk_thread', None)
+        )
+        self._title_risk_thread.start()
+
+    def _on_title_risk_finished(self, risks: list, error: str) -> None:
+        """标题风险检测完成回调。"""
+        self.btn_title_check.setEnabled(True)
+        if error:
+            self.lbl_status.setText("标题检测失败")
+            self._notice(self, "标题风险检测失败", error, level="error")
+            return
+
+        # 更新卡片风险标签
+        risk_map = {r.product_id: r for r in risks}
+        for pid, card in self._cards.items():
+            if pid in risk_map:
+                risk = risk_map[pid]
+                card.set_risk_labels(risk.labels, risk.result)
+            else:
+                card.set_risk_labels([])
+
+        self.lbl_status.setText(f"标题检测完成，发现 {len(risks)} 个风险商品")
+        if risks:
+            self._notice(
+                self, "标题风险检测完成",
+                f"共检测 {len(self._products)} 个商品，发现 {len(risks)} 个风险商品。",
+            )
+        else:
+            self._notice(self, "标题风险检测完成", "未发现风险商品。")
+
+    def _on_image_risk_check(self) -> None:
+        """图片风险检测按钮点击，弹出选择框。"""
+        if self._image_risk_service is None:
+            self._notice(self, "提示", "图片风险检测尚未配置，请先在设置中绑定视觉API。", level="warning")
+            return
+        if not self._products:
+            self._notice(self, "提示", "没有可检测的商品。")
+            return
+        if self._image_risk_thread is not None and self._image_risk_thread.isRunning():
+            self._notice(self, "提示", "图片风险检测正在进行中，请稍候。", level="warning")
+            return
+
+        # 弹出选择框
+        selected_count = len(self._selected_ids)
+        total_count = len([p for p in self._products if self._states.get(p.product_id) == KEEP])
+
+        popup = _ImageRiskCheckPopup(selected_count, total_count, self)
+        popup.checkRequested.connect(self._start_image_risk_check)
+        popup.show()
+
+    def _start_image_risk_check(self, scope: str) -> None:
+        """启动图片风险检测。scope: 'selected' 或 'all'。"""
+        if scope == "selected" and self._selected_ids:
+            products = [
+                {"id": p.product_id, "main_image": p.main_image}
+                for p in self._products
+                if p.product_id in self._selected_ids
+            ]
+        else:
+            products = [
+                {"id": p.product_id, "main_image": p.main_image}
+                for p in self._products
+                if self._states.get(p.product_id) == KEEP
+            ]
+
+        if not products:
+            self._notice(self, "提示", "没有可检测的商品。")
+            return
+
+        self.lbl_status.setText("图片风险检测中...")
+        self.btn_infringement_check.setEnabled(False)
+
+        # 启动后台线程
+        self._image_risk_thread = QThread(self)
+        self._image_risk_worker = _ImageRiskWorker(self._image_risk_service, products)
+        self._image_risk_worker.moveToThread(self._image_risk_thread)
+        self._image_risk_thread.started.connect(self._image_risk_worker.run)
+        self._image_risk_worker.finished.connect(self._on_image_risk_finished)
+        self._image_risk_worker.finished.connect(self._image_risk_thread.quit)
+        self._image_risk_thread.finished.connect(self._image_risk_worker.deleteLater)
+        self._image_risk_thread.finished.connect(self._image_risk_thread.deleteLater)
+        self._image_risk_thread.finished.connect(
+            lambda: setattr(self, '_image_risk_thread', None)
+        )
+        self._image_risk_thread.start()
+
+    def _on_image_risk_finished(self, risks: list, failed_count: int, error: str) -> None:
+        """图片风险检测完成回调。"""
+        self.btn_infringement_check.setEnabled(True)
+        if error:
+            self.lbl_status.setText("图片检测失败")
+            self._notice(self, "图片风险检测失败", error, level="error")
+            return
+
+        # 更新卡片风险标签
+        risk_map = {r.product_id: r for r in risks}
+        for pid, card in self._cards.items():
+            if pid in risk_map:
+                risk = risk_map[pid]
+                if risk.has_risk:
+                    card.set_risk_labels([risk.display_label] if risk.display_label else [])
+            # 不清除已有的标题风险标签
+
+        total_checked = len(risks) + failed_count
+        if failed_count > 0:
+            self.lbl_status.setText(f"图片检测完成，{len(risks)} 个风险，{failed_count} 个失败")
+            self._notice(
+                self, "图片风险检测完成",
+                f"共检测 {total_checked} 个商品，发现 {len(risks)} 个风险商品，{failed_count} 个检测失败。",
+                level="warning",
+            )
+        elif risks:
+            self.lbl_status.setText(f"图片检测完成，发现 {len(risks)} 个风险商品")
+            self._notice(
+                self, "图片风险检测完成",
+                f"共检测 {total_checked} 个商品，发现 {len(risks)} 个风险商品。",
+            )
+        else:
+            self.lbl_status.setText("图片检测完成")
+            self._notice(self, "图片风险检测完成", "未发现风险商品。")
+
+
+# ── AI 风险检测 Worker ──────────────────────────────────────────
+
+
+class _TitleRiskWorker(QObject):
+    """标题风险检测后台线程。"""
+
+    finished = Signal(list, str)  # (risks, error)
+
+    def __init__(self, service, titles: list) -> None:
+        super().__init__()
+        self._service = service
+        self._titles = titles
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            risks = self._service.scan(self._titles)
+            self.finished.emit(risks, "")
+        except Exception as exc:
+            self.finished.emit([], str(exc))
+
+
+class _ImageRiskWorker(QObject):
+    """图片风险检测后台线程。"""
+
+    finished = Signal(list, int, str)  # (risks, failed_count, error)
+
+    def __init__(self, service, products: list) -> None:
+        super().__init__()
+        self._service = service
+        self._products = products
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            risks, failed_count = self._service.scan_batch(self._products)
+            self.finished.emit(risks, failed_count, "")
+        except Exception as exc:
+            self.finished.emit([], 0, str(exc))
+
+
+# ── 图片风险检测选择弹窗 ──────────────────────────────────────────
+
+
+class _ImageRiskCheckPopup(QWidget):
+    """图片风险检测范围选择弹窗。"""
+
+    checkRequested = Signal(str)  # 'selected' 或 'all'
+
+    def __init__(self, selected_count: int, total_count: int, parent: QWidget | None = None) -> None:
+        super().__init__(parent, Qt.WindowType.Popup)
+        self.setFixedSize(320, 180)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        title = QLabel("选择检测范围")
+        title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        layout.addWidget(title)
+
+        if selected_count > 0:
+            btn_selected = QPushButton(f"检测已选商品（{selected_count}个）")
+            btn_selected.clicked.connect(lambda: self._on_click("selected"))
+            layout.addWidget(btn_selected)
+
+        btn_all = QPushButton(f"检测全部商品（{total_count}个）")
+        btn_all.clicked.connect(lambda: self._on_click("all"))
+        layout.addWidget(btn_all)
+
+        btn_cancel = QPushButton("取消")
+        btn_cancel.clicked.connect(self.close)
+        layout.addWidget(btn_cancel)
+
+    def _on_click(self, scope: str) -> None:
+        self.checkRequested.emit(scope)
+        self.close()

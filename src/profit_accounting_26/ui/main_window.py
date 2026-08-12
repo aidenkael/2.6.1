@@ -80,6 +80,8 @@ class MainWindow(QMainWindow):
         # 注入日志目录：<data_dir>/product_collector/
         collector_log_dir = str(context.paths.data_dir / "product_collector")
         self.product_collection_page.set_log_dir(collector_log_dir)
+        # 注入 API Profile Store（用于风险检测）
+        self.product_collection_page.set_api_profile_store(context.api_profile_store)
 
         # 使用 Binder 绑定 .ui 控件
         self.binder = MainWindowBinder(self, context)
