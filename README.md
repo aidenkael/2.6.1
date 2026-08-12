@@ -1,43 +1,48 @@
-# Profit-Accounting-2.6
+# Profit-Accounting-2.6.1
 
-本任务以 `Development rules-2.6.1.md` 为最高需求。
+本项目以 `Development rules-2.6.1.md` 为最高需求。
 
-微智能利润管理软件 2.6：面向 SHEIN 美国站单个商品、单个 SKC 的 Windows 本地桌面工具。
+微智能利润管理软件 2.6.1：面向 SHEIN 美国站单个商品、单个 SKC 的 Windows 本地桌面利润与物流核算工具。
 
 ## 当前版本
 
 ```text
-2.6.0-rc1
+2.6.1
 ```
 
-当前属于 **Windows 发布候选源码版**。核心业务、数据和 PySide6 页面已经实现；真实视觉 API、Edge 插件通信和 Windows 成品打包仍需在用户本机完成最终验收。
+2.6.1 已完成 Windows 实机发布前验收。正式发布 tag 应指向本次版本元数据收口完成后的最终 `main` commit。
 
-## 当前最高准则与固定来源
+## 当前主功能
 
-- 最高准则：`Development rules-2.6.1.md`
-- R2 冻结标签：`profit-legacy-freeze-20260728-r2`
-- R2 来源 Commit：`d0c07d374c9ee61926de9cd3e01b8c35260c8e5c`
-- 物流核算 2.0 固定接入 Commit：`ddad3b7486c2afc7de0b266defb3f5dd22028d00`
-- 本地候选校准数据：`local-calibration-v3-77-samples`
+软件主导航固定为：
 
-## 已实现
+1. 新商品测算
+2. 历史记录管理
+3. 设置
 
-- 最新 Figma PNG/SVG 对应的 PySide6 主界面和设置页；
-- 左侧 6 项导航、顶部保存状态和本地数据目录；
-- 3～6 图片框，支持点击上传、拖拽、Ctrl+V、预览、删除和类型修改；
-- `AIObservation` 与 `PackagingProposal` 分层；
-- 正常档、保守档、人工采用值和复核状态；
-- 77 条本地校准数据驱动的包装候选服务；
-- 动态货代、体积重、计费重、头程、固定费和尾程确定性计算；
-- 利润正算、按当前条件规则执行的目标利润/利润率反推和活动预留；
-- 可配置的 29 USD 以下 2.99 USD 补贴规则；
-- SQLite 商品记录、不可变初始快照和重算/反馈快照；
-- 图片保存后复制到数据目录，源文件不移动、不删除；
-- 历史记录、实际反馈、误差展示；
-- 数据导入导出、校准反馈导出、校准包结构校验、即时启用和回滚；
-- 以图搜图本机入口、候选链接复制和发送到测算页；
-- 数据目录持久切换（重启生效）与图片估算过期提示；
-- Windows 验证、运行、PyInstaller构建和文件夹版打包脚本。
+主要能力包括：
+
+- PySide6 本地桌面 UI，1920×1080 下完整展示，缩小窗口后通过滚动区域保持布局可用；
+- 商品图片、名称、材质、类型、重量和尺寸输入；
+- 正常档 / 保守档包装估算与确定性物流核算；
+- SHEIN 核价、标价、标价利率、活动预留、活动后售价、利润和利润率计算；
+- SQLite 本地历史记录、修改保存和重启持久化；
+- 校准反馈 Excel + `Calibration Feedback Export V2` manifest 导出；
+- 校准闭环：Feedback V2 → Candidate → Validator → Offline Replay → Promotion → Formal Runtime Bundle → 用户手动启用；
+- Formal Bundle 导入默认 inactive，启用、重启、删除和 builtin fallback 均带完整性校验；
+- CAL77 原始 77 条历史样本完整保留，但 sample runtime 已全部停用；builtin registry 仅保留低置信 `AGR-THIN-TEXTILE-001` 作为 legacy fallback；
+- 数据目录隔离、校准包管理、敏感信息扫描和 Windows 文件夹版构建脚本。
+
+## 物流边界
+
+物流核算继续由确定性引擎执行。当前两家货代：
+
+- 深圳：80 元/kg + 10 元固定服务费；
+- 义乌：100 元/kg + 6 元固定服务费；
+- 计费重取实际重量与体积重较高值；
+- 体积重 = 长 × 宽 × 高（cm）/ 8000。
+
+具体当前参数仍以项目配置文件和软件设置为准。
 
 ## 本地运行
 
@@ -52,7 +57,7 @@ run_app.bat
 也可手动执行：
 
 ```powershell
-cd "E:\Profit-Accounting-2.6"
+cd "E:\Profit-Accounting-2.6.1"
 py -3.11 -m venv .venv-311
 .\.venv-311\Scripts\python -m pip install -U pip
 .\.venv-311\Scripts\python -m pip install -e ".[dev]"
@@ -65,12 +70,14 @@ py -3.11 -m venv .venv-311
 .\verify_release_candidate.bat
 ```
 
-必须达到：
+发布前必须至少满足：
 
 - `0 failed`
 - `0 collection errors`
 - 敏感信息扫描通过
-- PySide6 环境存在时 UI 离屏烟测通过
+- Windows 实机启动和 UI 验收通过
+
+2.6.1 最终发布前验收基线：`909 passed`、敏感扫描 `0 findings`、Windows 实机启动与 1920×1080 / 缩小窗口验收通过。
 
 ## Windows 文件夹版打包
 
@@ -100,19 +107,14 @@ release\
 $env:PROFIT_ACCOUNTING_DATA_DIR = "E:\Profit-Accounting-Data"
 ```
 
-数据库、保存后的商品图片、导出文件和校准包均位于该目录，不提交 GitHub。
+数据库、商品图片、导出文件和校准包均位于数据目录，不提交 GitHub。
 
-## 重要限制
+## 版本冻结说明
 
-- 当前真实视觉 AI API 未配置时，点击“AI识图”使用明确的人工回退，不伪造识别结果；
-- Edge + 1688 插件自动通信依赖用户本机插件环境，当前候选链接可人工粘贴与复制；
-- 上传的本地物流压缩包缺少已复审 `ddad3b...` 安全补丁文件，因此只导入校准数据，不覆盖固定物流适配边界；
-- Windows GUI、DPI、真实 API、Edge 插件和 PyInstaller成品必须在用户电脑最终验收。
+2.6.1 的发布验收与校准闭环均已完成。发布后新增真实校准数据不再手工扩展 CAL77，而统一走 Formal calibration closed loop。
 
-详细资料：
+详细发布说明见：
 
-- `docs/LOCAL_INTEGRATION_AUDIT.md`
-- `docs/UI_IMPLEMENTATION_REPORT.md`
-- `PROGRESS_STATUS.md`
-- `BLOCKERS.md`
-- `NEXT_STEP.md`
+- `RELEASE_NOTES_2.6.1.md`
+- `calibration/logistics_v2/CAL77_CONSERVATIVE_MIGRATION.md`
+- `Development rules-2.6.1.md`

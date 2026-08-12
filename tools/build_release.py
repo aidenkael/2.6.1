@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist" / "ProfitAccounting26"
 RELEASE_ROOT = ROOT / "release"
-VERSION = "2.6.0-rc1"
+VERSION = "2.6.1"
 
 
 def sha256(path: Path) -> str:
@@ -46,11 +46,16 @@ def main() -> int:
     if not DIST.is_dir():
         raise SystemExit(f"Missing PyInstaller output: {DIST}")
     RELEASE_ROOT.mkdir(exist_ok=True)
-    target = RELEASE_ROOT / f"Profit-Accounting-2.6_{VERSION}"
+    target = RELEASE_ROOT / f"Profit-Accounting-{VERSION}"
     if target.exists():
         shutil.rmtree(target)
     shutil.copytree(DIST, target)
-    for name in ("README.md", "Development rules-2.6.1.md", "SOURCE_PROVENANCE.md", "TEST_REPORT_E_STAGE.md"):
+    for name in (
+        "README.md",
+        "RELEASE_NOTES_2.6.1.md",
+        "Development rules-2.6.1.md",
+        "SOURCE_PROVENANCE.md",
+    ):
         source = ROOT / name
         if source.is_file():
             shutil.copy2(source, target / name)
@@ -59,13 +64,14 @@ def main() -> int:
         "built_at": datetime.now(UTC).isoformat(),
         "source_commit": source_commit(),
         "logistics_source_commit": "ddad3b7486c2afc7de0b266defb3f5dd22028d00",
-        "packaging_calibration": "local-calibration-v3-77-samples",
+        "packaging_calibration": "local-calibration-v3-77-samples-rules-v1",
+        "packaging_registry": "packaging-rules-v2-cal77-conservative",
         "entry": "ProfitAccounting26.exe",
     }
     (target / "RELEASE_MANIFEST.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    archive_base = RELEASE_ROOT / f"Profit-Accounting-2.6_{VERSION}_windows"
+    archive_base = RELEASE_ROOT / f"Profit-Accounting-{VERSION}_windows"
     zip_path = Path(shutil.make_archive(str(archive_base), "zip", target.parent, target.name))
     (RELEASE_ROOT / f"{zip_path.name}.sha256.txt").write_text(
         f"{sha256(zip_path)}  {zip_path.name}\n", encoding="utf-8"
