@@ -12,14 +12,17 @@ from profit_accounting_26.ui.pages import (
     SettingsPage,
 )
 from profit_accounting_26.ui.theme import APP_STYLE
+from profit_accounting_26.product_collector import ProductCollectionPage
 # 保留 NAV_ITEMS 供 app.py 和测试导入
 NAV_ITEMS = [
     "新商品测算",
+    "商品采集",
     "历史记录管理",
     "设置",
 ]
 SUBTITLES = {
     "新商品测算": "图片识别、物流估算与利润测算在同一页面完成",
+    "商品采集": "AliExpress Business 商品搜索与候选管理",
     "历史记录管理": "打开记录、查看快照并补充实际反馈",
     "设置": "货代、利润规则、AI识图与物流校准配置",
 }
@@ -72,9 +75,16 @@ class MainWindow(QMainWindow):
         self.history_page = HistoryPage(context)
         self.settings_page = SettingsPage(context)
 
+        # 创建商品采集页（独立模块，不依赖 AppContext）
+        self.product_collection_page = ProductCollectionPage()
+        # 注入日志目录：<data_dir>/product_collector/
+        collector_log_dir = str(context.paths.data_dir / "product_collector")
+        self.product_collection_page.set_log_dir(collector_log_dir)
+
         # 使用 Binder 绑定 .ui 控件
         self.binder = MainWindowBinder(self, context)
         self.binder.calculation_page = self.calculation_page
+        self.binder.product_collection_page = self.product_collection_page
         self.binder.settings_page = self.settings_page
         self.binder.history_page = self.history_page
         self.binder.bind()

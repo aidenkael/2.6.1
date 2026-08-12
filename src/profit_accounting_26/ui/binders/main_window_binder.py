@@ -38,6 +38,7 @@ from profit_accounting_26.ui.ui_loader import load_settings_page
 # 导航按钮 objectName 与页面 objectName 的映射（顺序固定）
 NAV_BINDINGS: list[tuple[str, str, str]] = [
     ("btnNavCalculation", "pageCalculation", "新商品测算"),
+    ("btnNavProductCollection", "pageProductCollection", "商品采集"),
     ("btnNavHistory", "pageHistory", "历史记录管理"),
     ("btnNavSettings", "pageSettingsHost", "设置"),
 ]
@@ -58,6 +59,7 @@ class MainWindowBinder:
         self._page_widgets: dict[str, QWidget] = {}
         # 外部设置：由 MainWindow 注入实际页面 widget
         self.calculation_page = None
+        self.product_collection_page = None
         self.settings_page = None
         self.history_page = None
 
@@ -131,6 +133,7 @@ class MainWindowBinder:
         """将现有页面 widget 挂载到 .ui 的页面占位中。"""
         page_map = {
             "pageCalculation": self.calculation_page,
+            "pageProductCollection": self.product_collection_page,
             "pageHistory": self.history_page,
             "pageSettingsHost": self.settings_page,
         }
