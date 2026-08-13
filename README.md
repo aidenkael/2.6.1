@@ -33,7 +33,7 @@
 
 当前软件不再内置历史校准样本或数值规则。builtin 仅提供 `runtime-safety-baseline-v1` 空校准基线和空 registry，因此在没有正式校准包时，本地层只执行确定性物理安全检查与通用 fallback，不用历史经验覆盖 AI 数值。
 
-新的校准规则必须通过 Formal calibration closed loop 验证，并基于 `runtime-safety-baseline-v1` 构建 Formal Bundle。只有包内 `validated_rule_ids` 对应的规则在用户手动启用后才可参与运行。
+新的校准规则必须通过 Formal calibration closed loop 验证。新一轮规则建议以 `runtime-safety-baseline-v1` 作为 replay / promotion / bundle 构建基线；软件会硬拒绝已退役旧校准基线构建的 Formal Bundle。只有包内 `validated_rule_ids` 对应的规则在用户手动启用后才可参与运行。
 
 ## 物流边界
 
@@ -61,7 +61,7 @@ cd "E:\Profit-Accounting-2.6.1"
 .\.venv-311\Scripts\python -m profit_accounting_26.ui.app
 ```
 
-升级到当前版本后，软件首次启动会清理数据目录中的旧 bundled builtin 校准副本，并建立新的空安全基线；商品历史、反馈数据和 API 设置不受影响。
+升级到当前版本后，软件首次启动会清理数据目录中的旧 bundled builtin 校准副本，以及本地曾手工导入的已知旧 77 基线版本副本，并建立新的空安全基线；商品历史、反馈数据和 API 设置不受影响。
 
 ## 完整验证
 
@@ -83,4 +83,4 @@ cd "E:\Profit-Accounting-2.6.1"
 
 ## 校准基线
 
-详见 `docs/CALIBRATION_BASELINE.md`。当前仓库不再携带旧历史校准数据；以后只接受基于当前空基线重新验证构建的 Formal Bundle。
+详见 `docs/CALIBRATION_BASELINE.md`。当前仓库不再携带旧历史校准数据；新规则应优先基于当前空基线重新验证构建，已退役旧基线的 Formal Bundle 会被拒绝。
