@@ -111,7 +111,7 @@ def test_current_builtin_can_be_established_after_cleanup(tmp_path):
     assert active["metadata"]["builtin"] is True
 
 
-def test_formal_bundle_from_different_baseline_is_rejected(monkeypatch, tmp_path):
+def test_formal_bundle_from_retired_bundled_baseline_is_rejected(monkeypatch, tmp_path):
     paths = _paths(tmp_path)
     paths.ensure()
     store = SQLiteStore(paths.database_path)
@@ -122,11 +122,13 @@ def test_formal_bundle_from_different_baseline_is_rejected(monkeypatch, tmp_path
         calibration_baseline,
         "validate_formal_bundle_zip",
         lambda _source: SimpleNamespace(
-            manifest={"baseline_calibration_version": "retired-baseline"}
+            manifest={
+                "baseline_calibration_version": "local-calibration-v3-77-samples-rules-v1"
+            }
         ),
     )
 
-    with pytest.raises(FormalBundleValidationError, match="基线版本与当前软件不一致"):
+    with pytest.raises(FormalBundleValidationError, match="已退役的旧校准基线"):
         manager._import_formal_bundle(
             tmp_path / "old.zip",
             tmp_path / "package",
