@@ -18,7 +18,7 @@ Agent 不拥有生产规则的直接激活权。
 - `runtime-safety-empty-v1`：`aggregate_rules=[]`、`sample_rules=[]`；
 - `PackagingEstimationService` 的确定性物理安全校验和通用 fallback。
 
-新的 Formal Bundle 必须基于当前空基线重新验证和构建。导入默认 inactive；只有包内已验证规则在用户手动启用后才进入生产仲裁。
+新一轮 Formal Bundle 建议以当前空基线重新验证和构建；基于已退役旧 77 基线构建的 Formal Bundle 会被明确拒绝。导入默认 inactive；只有包内已验证规则在用户手动启用后才进入生产仲裁。
 
 ## 不变边界
 
