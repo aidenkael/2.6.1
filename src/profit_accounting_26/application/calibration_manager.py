@@ -239,6 +239,9 @@ class CalibrationManager:
     def ensure_builtin(self, source: str | Path, *, version: str) -> dict[str, Any]:
         source_path = Path(source)
         samples, _ = self._read_json_payload(source_path)
+        sample_count = sum(
+            1 for sample in samples if str(sample.get("sample_id") or "").strip()
+        )
         packages = self.store.list_calibration_packages()
         existing = next(
             (
@@ -261,7 +264,7 @@ class CalibrationManager:
                 path=str(target),
                 metadata={
                     "builtin": True,
-                    "sample_count": len(samples),
+                    "sample_count": sample_count,
                     "source": str(source_path),
                     "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
                 },
@@ -272,12 +275,18 @@ class CalibrationManager:
                 for item in self.store.list_calibration_packages()
                 if item["id"] == package_id
             )
-        elif not Path(existing["path"]).is_file():
-            target = Path(existing["path"])
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(
-                json.dumps(samples, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+        else:
+            metadata = dict(existing.get("metadata") or {})
+            if metadata.get("sample_count") != sample_count:
+                metadata["sample_count"] = sample_count
+                self.store.update_calibration_package_metadata(existing["id"], metadata)
+                existing["metadata"] = metadata
+            if not Path(existing["path"]).is_file():
+                target = Path(existing["path"])
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(
+                    json.dumps(samples, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
         active = self.store.get_active_calibration()
         active_valid = False
         if active is not None:

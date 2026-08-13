@@ -126,7 +126,7 @@ def test_ai_shipment_judgment_has_one_visible_contract_location(qapp, app_contex
 
 
 def test_visual_and_reestimate_prompts_are_frozen_minimal_contracts():
-    assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.2-frozen"
+    assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.3"
     # 阶段 3 最后一次调整：重估 Prompt 按用户明确要求升级为 v1.2（冲突优先级）
     assert LocalReestimateService.PROMPT_VERSION == "2.6.1-reestimate-v1.2"
     schema = RecognitionService.RESPONSE_SCHEMA
@@ -136,6 +136,9 @@ def test_visual_and_reestimate_prompts_are_frozen_minimal_contracts():
     assert set(be_schema["required"]) == {"length_cm", "width_cm", "height_cm", "weight_g"}
     prompt = RecognitionService._prompt(2)
     assert "bare_estimate" in prompt
+    assert "数量为 0、未识别、模糊或无法可靠确认时，按 1 个销售单位判断" in prompt
+    assert "不得将单个商品的长、宽、高机械全部乘以数量" in prompt
+    assert "页面明确包装方式不等于页面明确包装尺寸" in prompt
     reestimate = LocalReestimateService._context(
         product_name="商品", confirmed_facts={}, current_shipment={}, user_correction="修正",
     )
