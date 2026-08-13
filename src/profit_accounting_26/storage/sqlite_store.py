@@ -221,6 +221,17 @@ class SQLiteStore:
             for row in rows
         ]
 
+    def update_calibration_package_metadata(
+        self, package_id: str, metadata: dict[str, Any]
+    ) -> None:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "UPDATE calibration_packages SET metadata_json = ? WHERE id = ?",
+                (self._serialize(metadata), package_id),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(package_id)
+
     def get_active_calibration(self) -> dict[str, Any] | None:
         return next(
             (item for item in self.list_calibration_packages() if item["active"]),

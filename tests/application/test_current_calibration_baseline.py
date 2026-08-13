@@ -112,6 +112,36 @@ def test_current_builtin_can_be_established_after_cleanup(tmp_path):
     assert active["metadata"]["sample_count"] == 0
 
 
+def test_existing_current_builtin_refreshes_stale_sample_count_without_replacing_it(tmp_path):
+    paths = _paths(tmp_path)
+    paths.ensure()
+    store = SQLiteStore(paths.database_path)
+    store.initialize()
+    builtin_path = paths.calibration_packages_dir / "builtin" / "calibration.json"
+    builtin_path.parent.mkdir(parents=True)
+    builtin_path.write_text(
+        resource_path(CURRENT_BASELINE_RESOURCE).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    package_id = store.register_calibration_package(
+        version=CURRENT_BASELINE_VERSION,
+        path=str(builtin_path),
+        metadata={"builtin": True, "sample_count": 1},
+        activate=True,
+    )
+    manager = CurrentBaselineCalibrationManager(store, paths)
+
+    refreshed = manager.ensure_builtin(
+        resource_path(CURRENT_BASELINE_RESOURCE),
+        version=CURRENT_BASELINE_VERSION,
+    )
+
+    assert refreshed["id"] == package_id
+    assert refreshed["active"] is True
+    assert refreshed["path"] == str(builtin_path)
+    assert refreshed["metadata"]["sample_count"] == 0
+
+
 def test_formal_bundle_from_retired_bundled_baseline_is_rejected(monkeypatch, tmp_path):
     paths = _paths(tmp_path)
     paths.ensure()
