@@ -41,11 +41,12 @@ def _safe_remove_package_dir(package: dict[str, Any], paths: ApplicationPaths) -
 
 
 def purge_obsolete_bundled_calibration(store: SQLiteStore, paths: ApplicationPaths) -> None:
-    """One-time local migration that removes bundled calibration from older releases.
+    """One-time local migration that removes retired bundled calibration copies.
 
-    It removes obsolete builtin package registrations/files and Formal Bundles
-    known to have been built on the retired bundled baseline.  Product history,
-    feedback exports, API settings and unrelated user files are not touched.
+    It removes every registered package whose own version is a retired bundled
+    baseline, obsolete builtin registrations, and Formal Bundles known to have
+    been built on the retired bundled baseline. Product history, feedback
+    exports, API settings and unrelated user files are not touched.
     """
 
     if store.get_setting(_CLEANUP_FLAG, False):
@@ -55,11 +56,12 @@ def purge_obsolete_bundled_calibration(store: SQLiteStore, paths: ApplicationPat
         metadata = package.get("metadata") if isinstance(package.get("metadata"), dict) else {}
         version = str(package.get("version") or "")
         baseline_version = str(metadata.get("baseline_calibration_version") or "")
+        retired_version = version in _LEGACY_BUNDLED_BASELINE_VERSIONS
         obsolete_builtin = bool(metadata.get("builtin")) and version != CURRENT_BASELINE_VERSION
         obsolete_formal = bool(metadata.get("formal_bundle")) and (
             baseline_version in _LEGACY_BUNDLED_BASELINE_VERSIONS
         )
-        if not (obsolete_builtin or obsolete_formal):
+        if not (retired_version or obsolete_builtin or obsolete_formal):
             continue
         try:
             store.delete_calibration_package(str(package["id"]))
