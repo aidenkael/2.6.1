@@ -71,6 +71,29 @@ def test_local_migration_removes_obsolete_builtin_copy_once(tmp_path):
     assert store.list_calibration_packages() == []
 
 
+def test_local_migration_removes_manually_imported_retired_version(tmp_path):
+    paths = _paths(tmp_path)
+    paths.ensure()
+    store = SQLiteStore(paths.database_path)
+    store.initialize()
+
+    old_dir = paths.calibration_packages_dir / "manual-old"
+    old_dir.mkdir(parents=True)
+    old_file = old_dir / "runtime_calibration.json"
+    old_file.write_text('[{"sample_id":"OLD-MANUAL"}]', encoding="utf-8")
+    store.register_calibration_package(
+        version="local-calibration-v3-77-samples-rules-v1",
+        path=str(old_file),
+        metadata={"original_name": "old-copy.json"},
+        activate=True,
+    )
+
+    purge_obsolete_bundled_calibration(store, paths)
+
+    assert store.list_calibration_packages() == []
+    assert not old_dir.exists()
+
+
 def test_current_builtin_can_be_established_after_cleanup(tmp_path):
     paths = _paths(tmp_path)
     paths.ensure()
