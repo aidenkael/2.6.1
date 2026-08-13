@@ -1,0 +1,11 @@
+{
+  "version": "runtime-safety-empty-v1",
+  "policy": {
+    "bundled_calibration_rules": false,
+    "formal_bundle_required_for_runtime_rules": true,
+    "user_confirmed_shipping_data_is_authoritative": true,
+    "conservative_must_not_be_lower_than_normal": true
+  },
+  "aggregate_rules": [],
+  "sample_rules": []
+}
