@@ -109,6 +109,7 @@ def test_current_builtin_can_be_established_after_cleanup(tmp_path):
     assert active["active"] is True
     assert active["version"] == CURRENT_BASELINE_VERSION
     assert active["metadata"]["builtin"] is True
+    assert active["metadata"]["sample_count"] == 0
 
 
 def test_formal_bundle_from_retired_bundled_baseline_is_rejected(monkeypatch, tmp_path):

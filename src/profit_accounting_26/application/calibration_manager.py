@@ -261,7 +261,11 @@ class CalibrationManager:
                 path=str(target),
                 metadata={
                     "builtin": True,
-                    "sample_count": len(samples),
+                    "sample_count": sum(
+                        1
+                        for sample in samples
+                        if str(sample.get("sample_id") or "").strip()
+                    ),
                     "source": str(source_path),
                     "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
                 },
