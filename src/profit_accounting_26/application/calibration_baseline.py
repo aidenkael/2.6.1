@@ -76,13 +76,13 @@ def purge_obsolete_bundled_calibration(store: SQLiteStore, paths: ApplicationPat
 
 
 class CurrentBaselineCalibrationManager(CalibrationManager):
-    """Calibration manager that accepts Formal Bundles for the current baseline only."""
+    """Calibration manager that permanently rejects retired bundled baselines."""
 
     def _import_formal_bundle(self, source: Path, package_dir: Path, digest: str) -> dict[str, Any]:
         bundle = validate_formal_bundle_zip(source)
         baseline_version = str(bundle.manifest.get("baseline_calibration_version") or "")
-        if baseline_version != CURRENT_BASELINE_VERSION:
+        if baseline_version in _LEGACY_BUNDLED_BASELINE_VERSIONS:
             raise FormalBundleValidationError(
-                "校准包基线版本与当前软件不一致。请基于当前空校准基线重新验证并构建 Formal Bundle。"
+                "该校准包基于已退役的旧校准基线，不能重新导入。请使用当前规则重新验证并构建 Formal Bundle。"
             )
         return super()._import_formal_bundle(source, package_dir, digest)
