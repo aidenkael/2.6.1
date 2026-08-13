@@ -64,8 +64,8 @@ def main() -> int:
         "built_at": datetime.now(UTC).isoformat(),
         "source_commit": source_commit(),
         "logistics_source_commit": "ddad3b7486c2afc7de0b266defb3f5dd22028d00",
-        "packaging_calibration": "local-calibration-v3-77-samples-rules-v1",
-        "packaging_registry": "packaging-rules-v2-cal77-conservative",
+        "packaging_calibration": "runtime-safety-baseline-v1",
+        "packaging_registry": "runtime-safety-empty-v1",
         "entry": "ProfitAccounting26.exe",
     }
     (target / "RELEASE_MANIFEST.json").write_text(

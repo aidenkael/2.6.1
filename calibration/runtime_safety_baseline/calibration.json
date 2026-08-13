@@ -1,0 +1,7 @@
+[
+  {
+    "baseline_id": "runtime-safety-baseline-v1",
+    "kind": "empty_calibration_baseline",
+    "note": "No bundled calibration samples or numeric rules. Runtime uses deterministic physical safety checks until a validated Formal Bundle is activated."
+  }
+]

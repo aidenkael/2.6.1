@@ -16,12 +16,11 @@ from profit_accounting_26.domain.models import AIObservation, PackagingProposal
 class RuntimePackagingArbitrator:
     """Production packaging boundary for the simplified V1.2 AI contracts.
 
-    Legacy/builtin CAL assets stay available for audit and offline calibration, but
-    they do not participate in production numeric overrides.  The runtime still
-    uses ``PackagingEstimationService`` for deterministic physical validation and
-    generic safety fallback.  Only rules from an explicitly activated Formal
-    Bundle that were recorded as validated rule IDs may participate in runtime
-    arbitration.
+    The bundled baseline contains no calibration samples or numeric rules.  The
+    runtime uses ``PackagingEstimationService`` for deterministic physical
+    validation and generic safety fallback.  Only rules from an explicitly
+    activated Formal Bundle that were recorded as validated rule IDs may
+    participate in runtime arbitration.
     """
 
     SAFETY_CALIBRATION_VERSION = "runtime-safety-only-v1.2"
@@ -92,8 +91,7 @@ class RuntimePackagingArbitrator:
                     external_proposal=external_proposal,
                 )
 
-        # Builtin/legacy packages and malformed formal metadata are deliberately
-        # safety-only: no CAL77 sample/aggregate rule is allowed to change values.
+        # Neutral builtin and invalid/unvalidated formal metadata are safety-only.
         return self.safety_service.estimate(
             observation,
             external_proposal=external_proposal,
