@@ -87,18 +87,18 @@ class TestTitleRiskScanService:
         assert risks[2].risk == "infringement"
         assert risks[2].reason == "Nike品牌商标"
 
-    def test_parse_risks_unknown_risk_becomes_none(self):
-        """未知风险值应视为 none。"""
+    def test_parse_risks_unknown_risk_skipped(self):
+        """未知/非法风险值应跳过该条目，不生成 none。"""
         data = {
             "results": [
-                {"id": "1", "risk": "unknown_value", "reason": ""},
+                {"id": "1", "risk": "unknown_value", "reason": ""},  # 跳过
                 {"id": "2", "risk": "platform", "reason": "ok"},
             ]
         }
         risks = TitleRiskScanService._parse_risks(data)
-        assert len(risks) == 2
-        assert risks[0].risk == "none"
-        assert risks[1].risk == "platform"
+        assert len(risks) == 1
+        assert risks[0].product_id == "2"
+        assert risks[0].risk == "platform"
 
     def test_parse_risks_old_format_returns_empty(self):
         """旧"禁止"/"人工复核"格式不再作为有效输出。"""

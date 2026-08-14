@@ -94,6 +94,7 @@ def _build_image_prompt() -> str:
         "输出格式（严格 JSON）：\n"
         '{"results": [{"id": "商品id", "risk": "none | platform | infringement", "reason": "简短中文原因"}]}\n\n'
         "每张实际送检图片必须返回对应 id。\n"
+        "当同一个商品同时满足多种风险时，只返回一个最终 risk：infringement > platform > none。\n"
         "不输出置信度、风险分、人工复核等级、Markdown、额外说明。\n"
         "reason 一句话即可，none 可以空 reason。\n"
         "品牌/IP原因：优先常用中文名 + 英文原名。\n"
@@ -332,7 +333,8 @@ class ImageRiskScanService:
             seen_ids.add(pid)
             risk = str(item.get("risk") or "").strip().lower()
             if risk not in _VALID_RISKS:
-                risk = "none"
+                # 非法/未知 risk：跳过该条目，不生成 none，不计入安全缓存
+                continue
             reason = str(item.get("reason") or "").strip()
             results.append(ImageRiskItem(
                 product_id=pid,

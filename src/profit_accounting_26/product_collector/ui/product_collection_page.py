@@ -321,6 +321,8 @@ class ProductCard(QFrame):
         self.lbl_title_risk.setWordWrap(True)
         self.lbl_title_risk.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.lbl_title_risk.hide()
+        # 限制 Overlay 最大高度约为 2 行文字，防止长 reason 覆盖整个卡片
+        self.lbl_title_risk.setMaximumHeight(36)
 
         # 图片风险 Overlay（绝对定位，不参与布局）
         self.lbl_image_risk = QLabel(self)
@@ -328,6 +330,8 @@ class ProductCard(QFrame):
         self.lbl_image_risk.setWordWrap(True)
         self.lbl_image_risk.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.lbl_image_risk.hide()
+        # 限制 Overlay 最大高度约为 2 行文字
+        self.lbl_image_risk.setMaximumHeight(36)
 
         # 标题风险和图片风险独立存储（新格式）
         self._title_risk_data: dict | None = None  # {"risk": "...", "reason": "..."}
@@ -428,14 +432,23 @@ class ProductCard(QFrame):
         else:
             self.lbl_image_risk.hide()
 
-    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        super().resizeEvent(event)
-        self.lbl_badge.move(self.width() - self.lbl_badge.width() - 8, 8)
+        # 更新文字和显示状态后，重新计算 Overlay 几何位置
+        self._layout_risk_overlays()
+
+    def _layout_risk_overlays(self) -> None:
+        """重新计算并设置两个风险 Overlay 的尺寸和位置。
+
+        在 resizeEvent() 和 _refresh_risk_display() 后调用，
+        确保 Overlay 始终位于对应区域内。
+        """
         # 标题风险 Overlay：覆盖在标题区域内部，最大宽度 90%
         title_geo = self.lbl_title.geometry()
         max_w = int(title_geo.width() * 0.9)
         self.lbl_title_risk.setMaximumWidth(max_w)
         self.lbl_title_risk.adjustSize()
+        # 确保 Overlay 不跑出标题区域
+        overlay_h = min(self.lbl_title_risk.height(), title_geo.height() - 4)
+        self.lbl_title_risk.setFixedHeight(overlay_h) if overlay_h > 0 else None
         self.lbl_title_risk.move(
             title_geo.left() + 4,
             title_geo.bottom() - self.lbl_title_risk.height() - 2,
@@ -445,10 +458,18 @@ class ProductCard(QFrame):
         max_img_w = int(img_geo.width() * 0.9)
         self.lbl_image_risk.setMaximumWidth(max_img_w)
         self.lbl_image_risk.adjustSize()
+        # 确保 Overlay 不跑出图片区域
+        overlay_img_h = min(self.lbl_image_risk.height(), img_geo.height() - 8)
+        self.lbl_image_risk.setFixedHeight(overlay_img_h) if overlay_img_h > 0 else None
         self.lbl_image_risk.move(
             img_geo.left() + 4,
             img_geo.bottom() - self.lbl_image_risk.height() - 4,
         )
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        super().resizeEvent(event)
+        self.lbl_badge.move(self.width() - self.lbl_badge.width() - 8, 8)
+        self._layout_risk_overlays()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         # 检测只读期间：拦截所有鼠标事件，不改变 selected
@@ -1353,15 +1374,22 @@ class ProductCollectionPage(QWidget):
     # 检测只读模式
     # ------------------------------------------------------------------
 
-    def _enter_detecting(self) -> None:
-        """进入检测只读模式：禁用选择/全选/移除/恢复/视图切换/重新采集/启动其他检测。"""
+    def _enter_detecting(self, targets: list[CandidateProduct] | None = None) -> None:
+        """进入检测只读模式：禁用选择/全选/移除/恢复/视图切换/重新采集/启动其他检测。
+
+        targets: 本次实际检测的商品列表，用作检测快照。
+                 如果不传，则默认全部 KEEP 商品。
+        """
         self._detecting_active = True
         self._cancel_requested = False
-        # 冻结检测对象快照
-        self._detect_snapshot = [
-            p for p in self._products
-            if self._states.get(p.product_id) == KEEP
-        ]
+        # 冻结本次实际检测对象快照
+        if targets is not None:
+            self._detect_snapshot = list(targets)
+        else:
+            self._detect_snapshot = [
+                p for p in self._products
+                if self._states.get(p.product_id) == KEEP
+            ]
         # 禁用所有非检测操作按钮
         for btn in (
             self.btn_select_all, self.btn_keep_only, self.btn_remove_selected,
@@ -1472,7 +1500,7 @@ class ProductCollectionPage(QWidget):
 
     def _start_title_risk_check(self, targets: list[CandidateProduct]) -> None:
         """启动标题风险检测。"""
-        self._enter_detecting()
+        self._enter_detecting(targets)
         self.lbl_status.setText("标题检测中")
         self.btn_title_check.setText("取消标题检测")
         self.btn_title_check.setEnabled(True)
@@ -1510,13 +1538,11 @@ class ProductCollectionPage(QWidget):
             pass
         self.btn_title_check.clicked.connect(self._on_title_risk_check)
 
-        if self._cancel_requested:
-            self.lbl_status.setText("检测已取消，已完成部分结果")
-        elif error:
+        if error:
             self.lbl_status.setText("标题检测失败")
             self._notice(self, "标题风险检测失败", error, level="error")
         else:
-            # 更新标题风险状态
+            # 无论是否取消，先应用本次成功结果
             risk_map = {r.product_id: r for r in risks}
             snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
             for pid, card in self._cards.items():
@@ -1526,11 +1552,15 @@ class ProductCollectionPage(QWidget):
                     r = risk_map[pid]
                     card.set_title_risk_data(r.risk, r.reason)
             risk_count = sum(1 for r in risks if r.risk != "none")
-            self.lbl_status.setText(f"检测完成" if not self._cancel_requested else "检测已取消，已完成部分结果")
-            if risk_count > 0:
-                self._notice(self, "标题风险检测完成", f"共检测 {len(risks)} 个商品，发现 {risk_count} 个风险商品。")
+            # 根据取消状态显示不同消息
+            if self._cancel_requested:
+                self.lbl_status.setText("检测已取消，已完成部分结果")
             else:
-                self._notice(self, "标题风险检测完成", "未发现风险商品。")
+                self.lbl_status.setText("检测完成")
+                if risk_count > 0:
+                    self._notice(self, "标题风险检测完成", f"共检测 {len(risks)} 个商品，发现 {risk_count} 个风险商品。")
+                else:
+                    self._notice(self, "标题风险检测完成", "未发现风险商品。")
 
         self._exit_detecting()
 
@@ -1553,7 +1583,7 @@ class ProductCollectionPage(QWidget):
 
     def _start_image_risk_check(self, targets: list[CandidateProduct]) -> None:
         """启动图片风险检测。"""
-        self._enter_detecting()
+        self._enter_detecting(targets)
         self.lbl_status.setText("图片检测中")
         self.btn_infringement_check.setText("取消图片检测")
         self.btn_infringement_check.setEnabled(True)
@@ -1589,13 +1619,11 @@ class ProductCollectionPage(QWidget):
             pass
         self.btn_infringement_check.clicked.connect(self._on_image_risk_check)
 
-        if self._cancel_requested:
-            self.lbl_status.setText("检测已取消，已完成部分结果")
-        elif error:
+        if error:
             self.lbl_status.setText("图片检测失败")
             self._notice(self, "图片风险检测失败", error, level="error")
         else:
-            # 更新图片风险状态
+            # 无论是否取消，先应用本次成功结果（all_checked 中的成功商品）
             all_checked = stats.get("all_checked", [])
             checked_map = {r.product_id: r for r in all_checked}
             snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
@@ -1607,14 +1635,18 @@ class ProductCollectionPage(QWidget):
                     card.set_image_risk_data(item.risk, item.reason)
             risk_count = stats.get("risk_count", 0)
             failed = stats.get("failed_count", 0)
-            if failed > 0:
-                self.lbl_status.setText(f"图片检测完成，{risk_count} 个风险，{failed} 个失败")
+            # 根据取消状态显示不同消息
+            if self._cancel_requested:
+                self.lbl_status.setText("检测已取消，已完成部分结果")
             else:
-                self.lbl_status.setText(f"检测完成")
-            if risk_count > 0:
-                self._notice(self, "图片风险检测完成", f"共处理 {stats.get('requested_count', 0)} 个商品，发现 {risk_count} 个风险商品。")
-            else:
-                self._notice(self, "图片风险检测完成", "未发现风险商品。")
+                if failed > 0:
+                    self.lbl_status.setText(f"图片检测完成，{risk_count} 个风险，{failed} 个失败")
+                else:
+                    self.lbl_status.setText("检测完成")
+                if risk_count > 0:
+                    self._notice(self, "图片风险检测完成", f"共处理 {stats.get('requested_count', 0)} 个商品，发现 {risk_count} 个风险商品。")
+                else:
+                    self._notice(self, "图片风险检测完成", "未发现风险商品。")
 
         self._exit_detecting()
 
@@ -1642,7 +1674,7 @@ class ProductCollectionPage(QWidget):
 
     def _start_title_risk_check_for_all(self, targets: list[CandidateProduct]) -> None:
         """全部检测的标题阶段。"""
-        self._enter_detecting()
+        self._enter_detecting(targets)
         self.lbl_status.setText("全部检测｜正在检测标题")
         self.btn_detect_all.setText("取消全部检测")
         self.btn_detect_all.setEnabled(True)
@@ -1716,6 +1748,7 @@ class ProductCollectionPage(QWidget):
             self.lbl_status.setText("图片检测失败")
             self._notice(self, "图片风险检测失败", error, level="error")
         else:
+            # 无论是否取消，先应用本次成功结果
             all_checked = stats.get("all_checked", [])
             checked_map = {r.product_id: r for r in all_checked}
             snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
@@ -1726,10 +1759,14 @@ class ProductCollectionPage(QWidget):
                     item = checked_map[pid]
                     card.set_image_risk_data(item.risk, item.reason)
 
-        if self._cancel_requested:
-            self.lbl_status.setText("检测已取消，已完成部分结果")
-        else:
-            self.lbl_status.setText("检测完成")
+            failed = stats.get("failed_count", 0)
+            # 根据取消状态和失败数量显示不同消息
+            if self._cancel_requested:
+                self.lbl_status.setText("检测已取消，已完成部分结果")
+            elif failed > 0:
+                self.lbl_status.setText(f"检测完成，图片检测失败 {failed} 个")
+            else:
+                self.lbl_status.setText("检测完成")
 
         self._restore_detect_all_button()
         self._exit_detecting()

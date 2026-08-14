@@ -1094,18 +1094,98 @@ class TestRefreshSelectedOnly(_PageCase):
         self.assertEqual(self.page._states, states_before)
 
 
-class TestImageRiskPopup(_PageCase):
-    """测试图片检测弹窗按钮。"""
+class TestCancelPreservesResults(_PageCase):
+    """测试取消后已完成结果保留。"""
 
-    def test_popup_has_refresh_button_when_selected(self):
-        """已选商品时弹窗应显示'重新检测已选商品'按钮。"""
-        # _ImageRiskCheckPopup 已移除，确认框逻辑改为内嵌
-        pass
+    def test_title_cancel_preserves_successful_results(self):
+        """标题检测取消后，已成功的结果应保留并写入卡片。"""
+        self.page.load_results(_products(2))
+        card1 = self.page._cards["1"]
+        card2 = self.page._cards["2"]
+        # 模拟检测开始
+        self.page._enter_detecting([self.page._products[0], self.page._products[1]])
+        self.page._cancel_requested = True  # 用户点击取消
+        # 模拟检测完成（成功返回结果）
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+        risks = [
+            TitleRiskItem("1", "platform", "带电商品"),
+            TitleRiskItem("2", "none", ""),
+        ]
+        self.page._on_title_risk_finished(risks, "")
+        # 结果应被应用，尽管取消了
+        self.assertIsNotNone(card1._title_risk_data)
+        self.assertEqual(card1._title_risk_data["risk"], "platform")
+        # 状态显示取消消息
+        self.assertIn("取消", self.page.lbl_status.text())
 
-    def test_popup_no_refresh_button_when_no_selection(self):
-        """无选中商品时弹窗不应显示'重新检测已选商品'按钮。"""
-        # _ImageRiskCheckPopup 已移除
-        pass
+    def test_image_cancel_preserves_current_batch_results(self):
+        """图片检测取消后，当前批成功结果应保留并写入卡片。"""
+        self.page.load_results(_products(2))
+        card1 = self.page._cards["1"]
+        # 模拟检测开始
+        self.page._enter_detecting([self.page._products[0], self.page._products[1]])
+        self.page._cancel_requested = True
+        # 模拟第一批成功完成
+        from profit_accounting_26.product_collector.image_risk_scan import ImageRiskItem
+        all_checked = [
+            ImageRiskItem("1", "https://img.example/1.jpg", "infringement", "品牌Logo"),
+        ]
+        stats = {
+            "requested_count": 2, "cached_count": 0, "checked_count": 1,
+            "risk_count": 1, "failed_count": 1, "all_checked": all_checked,
+        }
+        self.page._on_image_risk_finished([], stats, "")
+        # id=1 的结果应被应用
+        self.assertIsNotNone(card1._image_risk_data)
+        self.assertEqual(card1._image_risk_data["risk"], "infringement")
+        self.assertIn("取消", self.page.lbl_status.text())
+
+
+class TestOverlayGeometry(_PageCase):
+    """测试风险 Overlay 几何位置。"""
+
+    def test_title_risk_overlay_has_positive_dimensions(self):
+        """标题风险 Overlay 设置文字后应有正宽高。"""
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        card.set_title_risk_data("platform", "USB充电风扇")
+        # 强制布局计算
+        card._layout_risk_overlays()
+        self.assertGreater(card.lbl_title_risk.width(), 0)
+        self.assertGreater(card.lbl_title_risk.height(), 0)
+
+    def test_image_risk_overlay_has_positive_dimensions(self):
+        """图片风险 Overlay 设置文字后应有正宽高。"""
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        card.set_image_risk_data("infringement", "Nike品牌Logo")
+        card._layout_risk_overlays()
+        self.assertGreater(card.lbl_image_risk.width(), 0)
+        self.assertGreater(card.lbl_image_risk.height(), 0)
+
+    def test_title_risk_overlay_within_title_area(self):
+        """标题风险 Overlay 应位于标题区域内。"""
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        card.set_title_risk_data("platform", "测试风险原因")
+        card._layout_risk_overlays()
+        title_geo = card.lbl_title.geometry()
+        overlay_geo = card.lbl_title_risk.geometry()
+        # Overlay 应在标题区域内
+        self.assertGreaterEqual(overlay_geo.left(), title_geo.left())
+        self.assertLessEqual(overlay_geo.right(), title_geo.right() + 10)  # 允许小误差
+
+    def test_image_risk_overlay_within_image_area(self):
+        """图片风险 Overlay 应位于图片区域内。"""
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        card.set_image_risk_data("infringement", "品牌Logo明显")
+        card._layout_risk_overlays()
+        img_geo = card.lbl_image.geometry()
+        overlay_geo = card.lbl_image_risk.geometry()
+        # Overlay 应在图片区域内
+        self.assertGreaterEqual(overlay_geo.left(), img_geo.left())
+        self.assertLessEqual(overlay_geo.right(), img_geo.right() + 10)
 
 
 class TestForceRefreshClearsRisk(_PageCase):
@@ -1175,6 +1255,71 @@ class TestForceRefreshClearsRisk(_PageCase):
         # 由于回调在error为空时继续处理，但all_checked为空，所以没有卡片被更新
         self.assertIsNotNone(card._image_risk_data)
         self.assertIn("品牌IP", card.lbl_image_risk.text())
+
+
+class TestDetectSnapshotIsActualTargets(_PageCase):
+    """测试检测快照是实际传入的 targets。"""
+
+    def test_detect_snapshot_is_targets_not_all_keep(self):
+        """检测快照应是实际传入的 targets，不是全部 KEEP 商品。"""
+        self.page.load_results(_products(3))
+        # 只选择前 2 个商品进行检测
+        targets = [self.page._products[0], self.page._products[1]]
+        self.page._enter_detecting(targets)
+        # 快照应只包含 2 个目标，而不是 3 个 KEEP
+        self.assertEqual(len(self.page._detect_snapshot), 2)
+        snapshot_ids = {p.product_id for p in self.page._detect_snapshot}
+        self.assertEqual(snapshot_ids, {"1", "2"})
+
+    def test_detect_snapshot_default_is_all_keep(self):
+        """不传 targets 时，快照默认是全部 KEEP 商品。"""
+        self.page.load_results(_products(3))
+        self.page._enter_detecting()  # 不传 targets
+        self.assertEqual(len(self.page._detect_snapshot), 3)
+
+
+class TestDetectAllShowsFailedCount(_PageCase):
+    """测试全部检测显示失败数量。"""
+
+    def test_detect_all_image_shows_failed_count(self):
+        """全部检测图片阶段有失败时，状态应显示失败数量。"""
+        self.page.load_results(_products(2))
+        # 模拟全部检测开始
+        targets = [self.page._products[0], self.page._products[1]]
+        self.page._enter_detecting(targets)
+        self.page._detect_all_targets = targets
+        # 模拟图片阶段完成，有 1 个失败
+        from profit_accounting_26.product_collector.image_risk_scan import ImageRiskItem
+        all_checked = [
+            ImageRiskItem("1", "https://img.example/1.jpg", "none", ""),
+        ]
+        stats = {
+            "requested_count": 2, "cached_count": 0, "checked_count": 1,
+            "risk_count": 0, "failed_count": 1, "all_checked": all_checked,
+        }
+        self.page._on_detect_all_image_finished([], stats, "")
+        # 状态应显示失败数量
+        self.assertIn("失败", self.page.lbl_status.text())
+        self.assertIn("1", self.page.lbl_status.text())
+
+
+class TestInvalidRiskPreservesExistingState(_PageCase):
+    """测试非法 risk 不清除卡片已有风险状态。"""
+
+    def test_invalid_title_risk_does_not_clear_existing(self):
+        """标题检测返回非法 risk 时，卡片原有风险状态不得清除。"""
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        # 先设置一个有风险的状态
+        card.set_title_risk_data("platform", "原有风险")
+        self.assertIsNotNone(card._title_risk_data)
+        # 模拟检测完成，但返回的 risk 在 _parse_risks 中被跳过（非法 risk）
+        # 所以 risks 列表为空
+        self.page._enter_detecting([self.page._products[0]])
+        self.page._on_title_risk_finished([], "")  # 空列表因为非法 risk 被跳过
+        # 原有风险应保留
+        self.assertIsNotNone(card._title_risk_data)
+        self.assertEqual(card._title_risk_data["risk"], "platform")
 
 
 if __name__ == "__main__":

@@ -88,6 +88,8 @@ def _build_prompt(titles: list[dict[str, str]]) -> str:
         "- Replica / 仿 / 复制 / Inspired by 等直接关联具体品牌/IP。\n\n"
         "输出格式（严格 JSON）：\n"
         '{"results": [{"id": "商品id", "risk": "none | platform | infringement", "reason": "简短中文原因"}]}\n\n'
+        "每个送检商品都必须返回且只能返回一个对应结果，包括 risk=none 的商品，不得省略安全商品。\n"
+        "当同一个商品同时满足多种风险时，只返回一个最终 risk：infringement > platform > none。\n"
         "每个送检商品必须保留 id。reason 一句话即可，none 可以空 reason。\n"
         "品牌/IP原因：优先常用中文名 + 英文原名，例如：爱马仕（Hermès）、迪士尼（Disney）。\n"
         "LV、Nike 等常用写法可以直接使用。\n"
@@ -189,8 +191,8 @@ class TitleRiskScanService:
                 continue
             risk = str(item.get("risk") or "").strip().lower()
             if risk not in _VALID_RISKS:
-                # 未知风险值：视为 none
-                risk = "none"
+                # 非法/未知 risk：跳过该条目，不生成 none，不清除已有风险状态
+                continue
             reason = str(item.get("reason") or "").strip()
             results.append(TitleRiskItem(
                 product_id=pid,

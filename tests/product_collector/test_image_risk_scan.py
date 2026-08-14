@@ -162,6 +162,67 @@ class TestImageRiskScanService:
         results = ImageRiskScanService._parse_results(data, image_items)
         assert len(results) == 0
 
+    def test_parse_results_invalid_risk_skipped(self):
+        """非法/未知 risk 值应跳过该条目，不生成 none。"""
+        image_items = [
+            ("1", "https://example.com/pic1.jpg", b"fake"),
+            ("2", "https://example.com/pic2.jpg", b"fake"),
+        ]
+        data = {
+            "results": [
+                {"id": "1", "risk": "invalid_value", "reason": ""},  # 跳过
+                {"id": "2", "risk": "platform", "reason": "ok"},
+            ]
+        }
+        results = ImageRiskScanService._parse_results(data, image_items)
+        assert len(results) == 1
+        assert results[0].product_id == "2"
+        assert results[0].risk == "platform"
+
+    def test_parse_results_invalid_risk_not_in_cache(self):
+        """非法 risk 不得写入安全缓存。"""
+        profile_store = MagicMock()
+        service = ImageRiskScanService(profile_store)
+
+        def mock_scan_batch(batch):
+            # 模拟 AI 返回非法 risk，应在 _parse_results 内跳过
+            # 这里模拟 _scan_single_batch 返回空结果（因为非法 risk 被跳过）
+            return [], 0
+
+        service._scan_single_batch = mock_scan_batch
+        products = [{"id": "1", "main_image": "https://example.com/pic.jpg"}]
+        results, stats, all_checked = service.scan_batch(products)
+
+        # 非法 risk 不进入缓存
+        assert service.get_cached("1", "https://example.com/pic.jpg") is None
+        assert len(all_checked) == 0
+
+
+class TestInvalidRiskPreservesExistingState:
+    """测试非法 risk 不清除已有风险状态。"""
+
+    def test_invalid_image_risk_preserves_existing(self):
+        """图片检测返回非法 risk 时，卡片原有风险状态不得清除。"""
+        profile_store = MagicMock()
+        service = ImageRiskScanService(profile_store)
+
+        # 预先缓存一个有风险的结果
+        old_item = ImageRiskItem("1", "https://example.com/pic.jpg", "infringement", "品牌Logo")
+        service._set_cached("1", "https://example.com/pic.jpg", old_item)
+
+        # 模拟 API 返回非法 risk（在 _parse_results 中被跳过）
+        def mock_scan_batch(batch):
+            return [], 0  # 非法结果被跳过，返回空
+
+        service._scan_single_batch = mock_scan_batch
+        products = [{"id": "1", "main_image": "https://example.com/pic.jpg"}]
+        results, stats, all_checked = service.scan_batch(products, force_refresh=True)
+
+        # 旧缓存应保留（因为新结果是非法的，不写入缓存）
+        cached = service.get_cached("1", "https://example.com/pic.jpg")
+        assert cached is not None
+        assert cached.risk == "infringement"
+
 
 class TestImageRiskScanServiceIntegration:
     """集成测试。"""
