@@ -121,7 +121,7 @@ class TestUIFileContract:
             "txtDisplayName", "cmbLogLevel", "spinLogRetentionDays",
             "btnOpenLogDirectory", "btnSaveSettings", "btnDiscardSettings",
             "cmbApiProfileSelect", "btnAddApiConfig",
-            "cmbVisionApiConfig", "cmbPartialEstimateApiConfig",
+            "cmbVisionApiConfig", "cmbPartialEstimateApiConfig", "cmbImageRiskApiConfig",
             "txtApiProfileName", "cmbApiProvider", "txtApiEndpoint", "txtApiModel", "txtApiKey",
             "btnSaveApiProfile", "btnShowApiKey1", "btnTestApi1", "btnDeleteApi1",
             "tableForwarders", "btnAddFreightForwarder", "btnSaveForwarders",
@@ -141,7 +141,7 @@ class TestUIFileContract:
             # Stage 4：导航精简 + 校准管理迁入 Settings 后的新契约 SHA
             # Product Collector 集成后 main_window.ui 新增导航按钮和页面占位
             "main_window.ui": "c46dffb688f00fe6ecd968ed09f04d9b26005094da6d7dbe95f82def6c819d8d",
-            "settings_page.ui": "97c57f1980586cd65f1333aee449188930d35db11b7f983d66f3f08566101a63",
+            "settings_page.ui": "e7ff5f8b380066a097462f094f1e25e31c81d1c1efc857c3cb35eafa30bdd614",
         }
         for name, sha in expected.items():
             data = (FORMS_DIR / name).read_bytes()

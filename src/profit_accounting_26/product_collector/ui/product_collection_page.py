@@ -305,17 +305,9 @@ class ProductCard(QFrame):
         self.lbl_title.setToolTip(product.title)
         layout.addWidget(self.lbl_title)
 
-        # 风险标签（初始隐藏）
         self.lbl_risk = QLabel(self)
-        self.lbl_risk.setObjectName("productCardRisk")
-        self.lbl_risk.setWordWrap(True)
-        self.lbl_risk.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.lbl_risk.setStyleSheet(
-            "background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;"
-            "border-radius:4px;padding:2px 6px;font-size:11px;"
-        )
-        self.lbl_risk.hide()
-        layout.addWidget(self.lbl_risk)
+        self.lbl_risk.setObjectName("productCardRiskLegacy")
+        self.lbl_risk.hide()  # 永久隐藏，不再承担风险显示
 
         # 右上角"已选"角标（绝对定位，不参与布局）
         self.lbl_badge = QLabel("✓ 已选", self)
@@ -323,9 +315,26 @@ class ProductCard(QFrame):
         self.lbl_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.lbl_badge.hide()
 
-        # 标题风险和图片风险独立存储
-        self._title_risk_data: dict | None = None  # {"labels": [...], "result": "..."}
-        self._image_risk_data: dict | None = None  # {"labels": [...]}
+        # 标题风险 Overlay（绝对定位，不参与布局）
+        self.lbl_title_risk = QLabel(self)
+        self.lbl_title_risk.setObjectName("productCardTitleRisk")
+        self.lbl_title_risk.setWordWrap(True)
+        self.lbl_title_risk.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.lbl_title_risk.hide()
+
+        # 图片风险 Overlay（绝对定位，不参与布局）
+        self.lbl_image_risk = QLabel(self)
+        self.lbl_image_risk.setObjectName("productCardImageRisk")
+        self.lbl_image_risk.setWordWrap(True)
+        self.lbl_image_risk.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.lbl_image_risk.hide()
+
+        # 标题风险和图片风险独立存储（新格式）
+        self._title_risk_data: dict | None = None  # {"risk": "...", "reason": "..."}
+        self._image_risk_data: dict | None = None  # {"risk": "...", "reason": "..."}
+
+        # 检测只读标记：检测期间拦截卡片级鼠标事件
+        self._detecting: bool = False
 
         self._network = network
         self._load_image()
@@ -357,52 +366,95 @@ class ProductCard(QFrame):
         style.polish(self)
         self.lbl_badge.setVisible(selected)
 
-    def set_title_risk_data(self, labels: list[str], result: str = "") -> None:
+    def set_title_risk_data(self, risk: str, reason: str = "") -> None:
         """设置标题风险状态，不影响图片风险。"""
-        self._title_risk_data = {"labels": labels, "result": result} if labels else None
+        if risk and risk != "none":
+            self._title_risk_data = {"risk": risk, "reason": reason}
+        else:
+            self._title_risk_data = None
         self._refresh_risk_display()
 
-    def set_image_risk_data(self, labels: list[str]) -> None:
+    def set_image_risk_data(self, risk: str, reason: str = "") -> None:
         """设置图片风险状态，不影响标题风险。"""
-        self._image_risk_data = {"labels": labels} if labels else None
+        if risk and risk != "none":
+            self._image_risk_data = {"risk": risk, "reason": reason}
+        else:
+            self._image_risk_data = None
         self._refresh_risk_display()
+
+    def set_detecting(self, detecting: bool) -> None:
+        """设置检测只读标记。检测期间拦截卡片级鼠标事件，不改变 selected。"""
+        self._detecting = detecting
+
+    # -- 风险样式常量 --
+    _RISK_STYLE_PLATFORM = (
+        "background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;"
+        "border-radius:4px;padding:2px 6px;font-size:11px;"
+    )
+    _RISK_STYLE_INFRINGEMENT = (
+        "background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;"
+        "border-radius:4px;padding:2px 6px;font-size:11px;"
+    )
 
     def _refresh_risk_display(self) -> None:
-        """合并标题风险和图片风险到统一显示区域。"""
+        """分别更新标题风险和图片风险 Overlay。"""
+        # 标题风险 Overlay
         title = self._title_risk_data
-        image = self._image_risk_data
-        if not title and not image:
-            self.lbl_risk.hide()
-            return
-        lines: list[str] = []
-        has_banned = False
-        if title:
-            prefix = "\u26d4" if title.get("result") == "\u7981\u6b62" else "\u26a0\ufe0f"
-            if title.get("result") == "\u7981\u6b62":
-                has_banned = True
-            lines.append(f"{prefix} {', '.join(title['labels'])}")
-        if image:
-            lines.append(f"\u26a0\ufe0f {', '.join(image['labels'])}")
-        text = "\n".join(lines)
-        self.lbl_risk.setText(text)
-        self.lbl_risk.setToolTip(text)
-        if has_banned:
-            self.lbl_risk.setStyleSheet(
-                "background:#FEE2E2;color:#DC2626;border:1px solid #FCA5A5;"
-                "border-radius:4px;padding:2px 6px;font-size:11px;"
+        if title and title.get("risk") != "none":
+            risk = title["risk"]
+            reason = title.get("reason", "")
+            text = reason if reason else risk
+            self.lbl_title_risk.setText(text)
+            self.lbl_title_risk.setToolTip(reason)
+            self.lbl_title_risk.setStyleSheet(
+                self._RISK_STYLE_INFRINGEMENT if risk == "infringement" else self._RISK_STYLE_PLATFORM
             )
+            self.lbl_title_risk.show()
         else:
-            self.lbl_risk.setStyleSheet(
-                "background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;"
-                "border-radius:4px;padding:2px 6px;font-size:11px;"
+            self.lbl_title_risk.hide()
+
+        # 图片风险 Overlay
+        image = self._image_risk_data
+        if image and image.get("risk") != "none":
+            risk = image["risk"]
+            reason = image.get("reason", "")
+            text = reason if reason else risk
+            self.lbl_image_risk.setText(text)
+            self.lbl_image_risk.setToolTip(reason)
+            self.lbl_image_risk.setStyleSheet(
+                self._RISK_STYLE_INFRINGEMENT if risk == "infringement" else self._RISK_STYLE_PLATFORM
             )
-        self.lbl_risk.show()
+            self.lbl_image_risk.show()
+        else:
+            self.lbl_image_risk.hide()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         super().resizeEvent(event)
         self.lbl_badge.move(self.width() - self.lbl_badge.width() - 8, 8)
+        # 标题风险 Overlay：覆盖在标题区域内部，最大宽度 90%
+        title_geo = self.lbl_title.geometry()
+        max_w = int(title_geo.width() * 0.9)
+        self.lbl_title_risk.setMaximumWidth(max_w)
+        self.lbl_title_risk.adjustSize()
+        self.lbl_title_risk.move(
+            title_geo.left() + 4,
+            title_geo.bottom() - self.lbl_title_risk.height() - 2,
+        )
+        # 图片风险 Overlay：覆盖在图片区内部左下角，最大宽度 90%
+        img_geo = self.lbl_image.geometry()
+        max_img_w = int(img_geo.width() * 0.9)
+        self.lbl_image_risk.setMaximumWidth(max_img_w)
+        self.lbl_image_risk.adjustSize()
+        self.lbl_image_risk.move(
+            img_geo.left() + 4,
+            img_geo.bottom() - self.lbl_image_risk.height() - 4,
+        )
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        # 检测只读期间：拦截所有鼠标事件，不改变 selected
+        if self._detecting:
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             self.selectionRequested.emit(self._product.product_id, True)
             event.accept()
@@ -655,6 +707,7 @@ class ProductCollectionPage(QWidget):
         self.lbl_sampling = form.findChild(QWidget, "lblSampling")
         self.btn_title_check = form.findChild(QWidget, "btnTitleCheck")
         self.btn_infringement_check = form.findChild(QWidget, "btnInfringementCheck")
+        self.btn_detect_all = form.findChild(QWidget, "btnDetectAll")
         self.btn_copy = form.findChild(QWidget, "btnCopyLinks")
         self.btn_keep_only = form.findChild(QWidget, "btnKeepOnlySelected")
         self.btn_remove_selected = form.findChild(QWidget, "btnRemoveSelected")
@@ -698,11 +751,18 @@ class ProductCollectionPage(QWidget):
         self.btn_view_removed.clicked.connect(self._toggle_removed_view)
         self.btn_restore.clicked.connect(self._restore_selected)
 
-        # 标题检测 / 图片检测
+        # 标题检测 / 图片检测 / 全部检测
         self.btn_title_check.clicked.connect(self._on_title_risk_check)
         self.btn_infringement_check.clicked.connect(self._on_image_risk_check)
+        self.btn_detect_all.clicked.connect(self._on_detect_all)
         self._update_risk_buttons_state()
         self._update_selection_buttons()
+
+        # 检测只读状态
+        self._detecting_active = False
+        self._cancel_requested = False
+        # 检测快照：本次检测对象冻结列表
+        self._detect_snapshot: list[CandidateProduct] | None = None
 
         # 容器尺寸变化时重排卡片
         self._container.installEventFilter(self)
@@ -1283,178 +1343,406 @@ class ProductCollectionPage(QWidget):
         """根据 API 配置状态启用/禁用风险检测按钮。"""
         has_products = bool(self._products)
         has_store = self._api_profile_store is not None
-        self.btn_title_check.setEnabled(has_products and has_store)
-        self.btn_infringement_check.setEnabled(has_products and has_store)
+        has_title_api = has_store
+        has_image_api = has_store
+        self.btn_title_check.setEnabled(has_products and has_title_api and not self._detecting_active)
+        self.btn_infringement_check.setEnabled(has_products and has_image_api and not self._detecting_active)
+        self.btn_detect_all.setEnabled(has_products and has_title_api and has_image_api and not self._detecting_active)
+
+    # ------------------------------------------------------------------
+    # 检测只读模式
+    # ------------------------------------------------------------------
+
+    def _enter_detecting(self) -> None:
+        """进入检测只读模式：禁用选择/全选/移除/恢复/视图切换/重新采集/启动其他检测。"""
+        self._detecting_active = True
+        self._cancel_requested = False
+        # 冻结检测对象快照
+        self._detect_snapshot = [
+            p for p in self._products
+            if self._states.get(p.product_id) == KEEP
+        ]
+        # 禁用所有非检测操作按钮
+        for btn in (
+            self.btn_select_all, self.btn_keep_only, self.btn_remove_selected,
+            self.btn_view_removed, self.btn_restore, self.btn_start,
+            self.btn_title_check, self.btn_infringement_check, self.btn_detect_all,
+        ):
+            if btn:
+                btn.setEnabled(False)
+        # 禁用卡片级鼠标事件
+        for card in self._cards.values():
+            card.set_detecting(True)
+
+    def _exit_detecting(self) -> None:
+        """退出检测只读模式：恢复所有操作。"""
+        self._detecting_active = False
+        self._detect_snapshot = None
+        # 恢复卡片级鼠标事件
+        for card in self._cards.values():
+            card.set_detecting(False)
+        # 恢复按钮状态
+        self._update_risk_buttons_state()
+        self._update_selection_buttons()
+        self.btn_start.setEnabled(True)
+
+    # ------------------------------------------------------------------
+    # 确认框
+    # ------------------------------------------------------------------
+
+    def _get_keep_products(self) -> list[CandidateProduct]:
+        """返回所有 KEEP 商品。"""
+        return [p for p in self._products if self._states.get(p.product_id) == KEEP]
+
+    def _get_selected_keep_products(self) -> list[CandidateProduct]:
+        """返回已选中的 KEEP 商品。"""
+        return [
+            p for p in self._products
+            if p.product_id in self._selected_ids and self._states.get(p.product_id) == KEEP
+        ]
+
+    def _show_detect_confirm(self, detect_type: str) -> tuple[list[CandidateProduct], bool] | None:
+        """显示检测确认框。
+
+        detect_type: "标题" | "图片" | "标题 + 图片"
+        返回 (products_to_detect, confirmed) 或 None（取消）。
+        """
+        selected = self._get_selected_keep_products()
+        all_keep = self._get_keep_products()
+        if not all_keep:
+            self._notice(self, "提示", "没有可检测的商品。")
+            return None
+
+        if selected:
+            msg = f"已选择 {len(selected)} 个商品\n检测：{detect_type}风险"
+            target = selected
+        else:
+            msg = f"将检测全部保留商品，共 {len(all_keep)} 个。\n检测：{detect_type}风险"
+            target = all_keep
+
+        from PySide6.QtWidgets import QDialog, QLabel as QLbl, QPushButton as QBtn, QVBoxLayout as VBL
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"确认{detect_type}检测")
+        dlg.setFixedSize(380, 160)
+        v = VBL(dlg)
+        v.setContentsMargins(20, 20, 20, 20)
+        v.setSpacing(12)
+        lbl = QLbl(msg)
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet("font-size: 13px;")
+        v.addWidget(lbl)
+        v.addStretch()
+        btn_row = QHBoxLayout()
+        btn_start = QBtn("开始检测")
+        btn_start.setStyleSheet("background:#4a90d9;color:#fff;border-radius:6px;padding:6px 20px;")
+        btn_cancel = QBtn("取消")
+        result = [False]
+        def on_start():
+            result[0] = True
+            dlg.accept()
+        def on_cancel():
+            dlg.reject()
+        btn_start.clicked.connect(on_start)
+        btn_cancel.clicked.connect(on_cancel)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_start)
+        btn_row.addWidget(btn_cancel)
+        v.addLayout(btn_row)
+        dlg.exec()
+        if result[0]:
+            return (target, True)
+        return None
+
+    # ------------------------------------------------------------------
+    # 标题检测
+    # ------------------------------------------------------------------
 
     def _on_title_risk_check(self) -> None:
         """标题风险检测按钮点击。"""
         if self._title_risk_service is None:
             self._notice(self, "提示", "标题风险检测尚未配置，请先在设置中绑定文字API。", level="warning")
             return
-        if not self._products:
-            self._notice(self, "提示", "没有可检测的商品。")
+        if self._detecting_active:
             return
-        if self._title_risk_thread is not None and self._title_risk_thread.isRunning():
-            self._notice(self, "提示", "标题风险检测正在进行中，请稍候。", level="warning")
+        result = self._show_detect_confirm("标题")
+        if result is None:
             return
+        targets, _ = result
+        self._start_title_risk_check(targets)
 
-        self.lbl_status.setText("标题风险检测中...")
-        self.btn_title_check.setEnabled(False)
+    def _start_title_risk_check(self, targets: list[CandidateProduct]) -> None:
+        """启动标题风险检测。"""
+        self._enter_detecting()
+        self.lbl_status.setText("标题检测中")
+        self.btn_title_check.setText("取消标题检测")
+        self.btn_title_check.setEnabled(True)
+        self.btn_title_check.setStyleSheet("background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;border-radius:6px;")
+        self.btn_title_check.clicked.disconnect()
+        self.btn_title_check.clicked.connect(self._cancel_current_detect)
 
-        # 构建标题列表
-        titles = [
-            {"id": p.product_id, "title": p.title}
-            for p in self._products
-            if self._states.get(p.product_id) == KEEP
-        ]
+        titles = [{"id": p.product_id, "title": p.title} for p in targets]
+        self._cancel_requested = False
 
-        # 启动后台线程
         self._title_risk_thread = QThread(self)
-        self._title_risk_worker = _TitleRiskWorker(self._title_risk_service, titles)
+        self._title_risk_worker = _TitleRiskWorker(self._title_risk_service, titles, cancel_requested=lambda: self._cancel_requested)
         self._title_risk_worker.moveToThread(self._title_risk_thread)
         self._title_risk_thread.started.connect(self._title_risk_worker.run)
         self._title_risk_worker.finished.connect(self._on_title_risk_finished)
         self._title_risk_worker.finished.connect(self._title_risk_thread.quit)
         self._title_risk_thread.finished.connect(self._title_risk_worker.deleteLater)
         self._title_risk_thread.finished.connect(self._title_risk_thread.deleteLater)
-        self._title_risk_thread.finished.connect(
-            lambda: setattr(self, '_title_risk_thread', None)
-        )
+        self._title_risk_thread.finished.connect(lambda: setattr(self, '_title_risk_thread', None))
         self._title_risk_thread.start()
+
+    def _cancel_current_detect(self) -> None:
+        """协作式取消当前检测。"""
+        self._cancel_requested = True
+        self.lbl_status.setText("正在取消检测...")
 
     def _on_title_risk_finished(self, risks: list, error: str) -> None:
         """标题风险检测完成回调。"""
-        self.btn_title_check.setEnabled(True)
-        if error:
+        # 恢复按钮文字和连接
+        self.btn_title_check.setText("标题检测")
+        self.btn_title_check.setStyleSheet("")
+        try:
+            self.btn_title_check.clicked.disconnect()
+        except RuntimeError:
+            pass
+        self.btn_title_check.clicked.connect(self._on_title_risk_check)
+
+        if self._cancel_requested:
+            self.lbl_status.setText("检测已取消，已完成部分结果")
+        elif error:
             self.lbl_status.setText("标题检测失败")
             self._notice(self, "标题风险检测失败", error, level="error")
-            return
-
-        # 只更新标题风险状态，不影响图片风险
-        risk_map = {r.product_id: r for r in risks}
-        for pid, card in self._cards.items():
-            if pid in risk_map:
-                risk = risk_map[pid]
-                card.set_title_risk_data(risk.labels, risk.result)
-            else:
-                card.set_title_risk_data([])
-
-        self.lbl_status.setText(f"标题检测完成，发现 {len(risks)} 个风险商品")
-        if risks:
-            self._notice(
-                self, "标题风险检测完成",
-                f"共检测 {len(self._products)} 个商品，发现 {len(risks)} 个风险商品。",
-            )
         else:
-            self._notice(self, "标题风险检测完成", "未发现风险商品。")
+            # 更新标题风险状态
+            risk_map = {r.product_id: r for r in risks}
+            snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
+            for pid, card in self._cards.items():
+                if pid not in snapshot_ids:
+                    continue
+                if pid in risk_map:
+                    r = risk_map[pid]
+                    card.set_title_risk_data(r.risk, r.reason)
+            risk_count = sum(1 for r in risks if r.risk != "none")
+            self.lbl_status.setText(f"检测完成" if not self._cancel_requested else "检测已取消，已完成部分结果")
+            if risk_count > 0:
+                self._notice(self, "标题风险检测完成", f"共检测 {len(risks)} 个商品，发现 {risk_count} 个风险商品。")
+            else:
+                self._notice(self, "标题风险检测完成", "未发现风险商品。")
+
+        self._exit_detecting()
+
+    # ------------------------------------------------------------------
+    # 图片检测
+    # ------------------------------------------------------------------
 
     def _on_image_risk_check(self) -> None:
-        """图片风险检测按钮点击，弹出选择框。"""
+        """图片风险检测按钮点击。"""
         if self._image_risk_service is None:
-            self._notice(self, "提示", "图片风险检测尚未配置，请先在设置中绑定视觉API。", level="warning")
+            self._notice(self, "提示", "图片风险检测尚未配置，请先在设置中绑定图片检测API。", level="warning")
             return
-        if not self._products:
-            self._notice(self, "提示", "没有可检测的商品。")
+        if self._detecting_active:
             return
-        if self._image_risk_thread is not None and self._image_risk_thread.isRunning():
-            self._notice(self, "提示", "图片风险检测正在进行中，请稍候。", level="warning")
+        result = self._show_detect_confirm("图片")
+        if result is None:
             return
+        targets, _ = result
+        self._start_image_risk_check(targets)
 
-        # 弹出选择框
-        selected_count = len(self._selected_ids)
-        total_count = len([p for p in self._products if self._states.get(p.product_id) == KEEP])
+    def _start_image_risk_check(self, targets: list[CandidateProduct]) -> None:
+        """启动图片风险检测。"""
+        self._enter_detecting()
+        self.lbl_status.setText("图片检测中")
+        self.btn_infringement_check.setText("取消图片检测")
+        self.btn_infringement_check.setEnabled(True)
+        self.btn_infringement_check.setStyleSheet("background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;border-radius:6px;")
+        self.btn_infringement_check.clicked.disconnect()
+        self.btn_infringement_check.clicked.connect(self._cancel_current_detect)
 
-        popup = _ImageRiskCheckPopup(selected_count, total_count, self)
-        popup.checkRequested.connect(self._start_image_risk_check)
-        popup.show()
+        products = [{"id": p.product_id, "main_image": p.main_image} for p in targets]
+        self._cancel_requested = False
 
-    def _start_image_risk_check(self, scope: str) -> None:
-        """启动图片风险检测。scope: 'selected' 或 'all' 或 'refresh_selected'。"""
-        force_refresh = False
-        if scope == "refresh_selected":
-            force_refresh = True
-            products = [
-                {"id": p.product_id, "main_image": p.main_image}
-                for p in self._products
-                if p.product_id in self._selected_ids
-            ]
-        elif scope == "selected" and self._selected_ids:
-            products = [
-                {"id": p.product_id, "main_image": p.main_image}
-                for p in self._products
-                if p.product_id in self._selected_ids
-            ]
-        else:
-            products = [
-                {"id": p.product_id, "main_image": p.main_image}
-                for p in self._products
-                if self._states.get(p.product_id) == KEEP
-            ]
-
-        if not products:
-            self._notice(self, "提示", "没有可检测的商品。")
-            return
-
-        self.lbl_status.setText("图片风险检测中...")
-        self.btn_infringement_check.setEnabled(False)
-
-        # 启动后台线程
         self._image_risk_thread = QThread(self)
-        self._image_risk_worker = _ImageRiskWorker(self._image_risk_service, products, force_refresh=force_refresh)
+        self._image_risk_worker = _ImageRiskWorker(
+            self._image_risk_service, products, force_refresh=False,
+            cancel_requested=lambda: self._cancel_requested,
+        )
         self._image_risk_worker.moveToThread(self._image_risk_thread)
         self._image_risk_thread.started.connect(self._image_risk_worker.run)
         self._image_risk_worker.finished.connect(self._on_image_risk_finished)
         self._image_risk_worker.finished.connect(self._image_risk_thread.quit)
         self._image_risk_thread.finished.connect(self._image_risk_worker.deleteLater)
         self._image_risk_thread.finished.connect(self._image_risk_thread.deleteLater)
-        self._image_risk_thread.finished.connect(
-            lambda: setattr(self, '_image_risk_thread', None)
-        )
+        self._image_risk_thread.finished.connect(lambda: setattr(self, '_image_risk_thread', None))
         self._image_risk_thread.start()
 
     def _on_image_risk_finished(self, risks: list, stats: dict, error: str) -> None:
         """图片风险检测完成回调。"""
-        self.btn_infringement_check.setEnabled(True)
+        # 恢复按钮文字和连接
+        self.btn_infringement_check.setText("图片检测")
+        self.btn_infringement_check.setStyleSheet("")
+        try:
+            self.btn_infringement_check.clicked.disconnect()
+        except RuntimeError:
+            pass
+        self.btn_infringement_check.clicked.connect(self._on_image_risk_check)
+
+        if self._cancel_requested:
+            self.lbl_status.setText("检测已取消，已完成部分结果")
+        elif error:
+            self.lbl_status.setText("图片检测失败")
+            self._notice(self, "图片风险检测失败", error, level="error")
+        else:
+            # 更新图片风险状态
+            all_checked = stats.get("all_checked", [])
+            checked_map = {r.product_id: r for r in all_checked}
+            snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
+            for pid, card in self._cards.items():
+                if pid not in snapshot_ids:
+                    continue
+                if pid in checked_map:
+                    item = checked_map[pid]
+                    card.set_image_risk_data(item.risk, item.reason)
+            risk_count = stats.get("risk_count", 0)
+            failed = stats.get("failed_count", 0)
+            if failed > 0:
+                self.lbl_status.setText(f"图片检测完成，{risk_count} 个风险，{failed} 个失败")
+            else:
+                self.lbl_status.setText(f"检测完成")
+            if risk_count > 0:
+                self._notice(self, "图片风险检测完成", f"共处理 {stats.get('requested_count', 0)} 个商品，发现 {risk_count} 个风险商品。")
+            else:
+                self._notice(self, "图片风险检测完成", "未发现风险商品。")
+
+        self._exit_detecting()
+
+    # ------------------------------------------------------------------
+    # 全部检测（标题 + 图片顺序执行）
+    # ------------------------------------------------------------------
+
+    def _on_detect_all(self) -> None:
+        """全部检测按钮点击：先标题检测，完成后图片检测。"""
+        if self._title_risk_service is None:
+            self._notice(self, "提示", "标题风险检测尚未配置，请先在设置中绑定文字API。", level="warning")
+            return
+        if self._image_risk_service is None:
+            self._notice(self, "提示", "图片风险检测尚未配置，请先在设置中绑定图片检测API。", level="warning")
+            return
+        if self._detecting_active:
+            return
+        result = self._show_detect_confirm("标题 + 图片")
+        if result is None:
+            return
+        targets, _ = result
+        self._detect_all_targets = targets
+        self._detect_all_phase = "title"
+        self._start_title_risk_check_for_all(targets)
+
+    def _start_title_risk_check_for_all(self, targets: list[CandidateProduct]) -> None:
+        """全部检测的标题阶段。"""
+        self._enter_detecting()
+        self.lbl_status.setText("全部检测｜正在检测标题")
+        self.btn_detect_all.setText("取消全部检测")
+        self.btn_detect_all.setEnabled(True)
+        self.btn_detect_all.setStyleSheet("background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;border-radius:6px;")
+        self.btn_detect_all.clicked.disconnect()
+        self.btn_detect_all.clicked.connect(self._cancel_current_detect)
+
+        titles = [{"id": p.product_id, "title": p.title} for p in targets]
+        self._cancel_requested = False
+
+        self._title_risk_thread = QThread(self)
+        self._title_risk_worker = _TitleRiskWorker(self._title_risk_service, titles, cancel_requested=lambda: self._cancel_requested)
+        self._title_risk_worker.moveToThread(self._title_risk_thread)
+        self._title_risk_thread.started.connect(self._title_risk_worker.run)
+        self._title_risk_worker.finished.connect(self._on_detect_all_title_finished)
+        self._title_risk_worker.finished.connect(self._title_risk_thread.quit)
+        self._title_risk_thread.finished.connect(self._title_risk_worker.deleteLater)
+        self._title_risk_thread.finished.connect(self._title_risk_thread.deleteLater)
+        self._title_risk_thread.finished.connect(lambda: setattr(self, '_title_risk_thread', None))
+        self._title_risk_thread.start()
+
+    def _on_detect_all_title_finished(self, risks: list, error: str) -> None:
+        """全部检测的标题阶段完成。"""
+        if error:
+            self.lbl_status.setText("标题检测失败")
+            self._notice(self, "标题风险检测失败", error, level="error")
+            self._restore_detect_all_button()
+            self._exit_detecting()
+            return
+
+        # 更新标题风险
+        risk_map = {r.product_id: r for r in risks}
+        snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
+        for pid, card in self._cards.items():
+            if pid not in snapshot_ids:
+                continue
+            if pid in risk_map:
+                r = risk_map[pid]
+                card.set_title_risk_data(r.risk, r.reason)
+
+        # 检查取消
+        if self._cancel_requested:
+            self.lbl_status.setText("检测已取消，已完成部分结果")
+            self._restore_detect_all_button()
+            self._exit_detecting()
+            return
+
+        # 继续图片检测阶段
+        self._detect_all_phase = "image"
+        self.lbl_status.setText("全部检测｜正在检测图片")
+        targets = self._detect_all_targets or []
+        products = [{"id": p.product_id, "main_image": p.main_image} for p in targets]
+
+        self._image_risk_thread = QThread(self)
+        self._image_risk_worker = _ImageRiskWorker(
+            self._image_risk_service, products, force_refresh=False,
+            cancel_requested=lambda: self._cancel_requested,
+        )
+        self._image_risk_worker.moveToThread(self._image_risk_thread)
+        self._image_risk_thread.started.connect(self._image_risk_worker.run)
+        self._image_risk_worker.finished.connect(self._on_detect_all_image_finished)
+        self._image_risk_worker.finished.connect(self._image_risk_thread.quit)
+        self._image_risk_thread.finished.connect(self._image_risk_worker.deleteLater)
+        self._image_risk_thread.finished.connect(self._image_risk_thread.deleteLater)
+        self._image_risk_thread.finished.connect(lambda: setattr(self, '_image_risk_thread', None))
+        self._image_risk_thread.start()
+
+    def _on_detect_all_image_finished(self, risks: list, stats: dict, error: str) -> None:
+        """全部检测的图片阶段完成。"""
         if error:
             self.lbl_status.setText("图片检测失败")
             self._notice(self, "图片风险检测失败", error, level="error")
-            return
-
-        # 根据本次实际检测的结果更新图片风险状态（不影响标题风险）
-        # all_checked 包含本次通过 API 成功检测的所有商品（含风险和安全）
-        all_checked = stats.get("all_checked", [])
-        checked_map = {r.product_id: r for r in all_checked}
-        for pid, card in self._cards.items():
-            if pid in checked_map:
-                item = checked_map[pid]
-                if item.has_risk and item.display_label:
-                    card.set_image_risk_data([item.display_label])
-                else:
-                    # 本次成功检测为安全 → 清除旧图片风险标签
-                    card.set_image_risk_data([])
-
-        requested = stats.get("requested_count", 0)
-        risk_count = stats.get("risk_count", 0)
-        failed = stats.get("failed_count", 0)
-        if failed > 0:
-            self.lbl_status.setText(f"图片检测完成，{risk_count} 个需复核，{failed} 个失败")
-            self._notice(
-                self, "图片风险检测完成",
-                f"共处理 {requested} 个商品，发现 {risk_count} 个需复核商品，{failed} 个检测失败。",
-                level="warning",
-            )
-        elif risk_count > 0:
-            self.lbl_status.setText(f"图片检测完成，发现 {risk_count} 个需复核商品")
-            self._notice(
-                self, "图片风险检测完成",
-                f"共处理 {requested} 个商品，发现 {risk_count} 个需复核商品。",
-            )
         else:
-            self.lbl_status.setText(f"图片检测完成，共处理 {requested} 个商品")
-            self._notice(
-                self, "图片风险检测完成",
-                f"共处理 {requested} 个商品，未发现需复核商品。",
-            )
+            all_checked = stats.get("all_checked", [])
+            checked_map = {r.product_id: r for r in all_checked}
+            snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
+            for pid, card in self._cards.items():
+                if pid not in snapshot_ids:
+                    continue
+                if pid in checked_map:
+                    item = checked_map[pid]
+                    card.set_image_risk_data(item.risk, item.reason)
+
+        if self._cancel_requested:
+            self.lbl_status.setText("检测已取消，已完成部分结果")
+        else:
+            self.lbl_status.setText("检测完成")
+
+        self._restore_detect_all_button()
+        self._exit_detecting()
+
+    def _restore_detect_all_button(self) -> None:
+        """恢复全部检测按钮状态。"""
+        self.btn_detect_all.setText("全部检测")
+        self.btn_detect_all.setStyleSheet("")
+        try:
+            self.btn_detect_all.clicked.disconnect()
+        except RuntimeError:
+            pass
+        self.btn_detect_all.clicked.connect(self._on_detect_all)
 
 
 # ── AI 风险检测 Worker ──────────────────────────────────────────
@@ -1465,14 +1753,19 @@ class _TitleRiskWorker(QObject):
 
     finished = Signal(list, str)  # (risks, error)
 
-    def __init__(self, service, titles: list) -> None:
+    def __init__(self, service, titles: list, *, cancel_requested: callable | None = None) -> None:
         super().__init__()
         self._service = service
         self._titles = titles
+        self._cancel_requested = cancel_requested
 
     @Slot()
     def run(self) -> None:
         try:
+            # 标题检测是一次性批量请求，取消在请求发送前检查
+            if self._cancel_requested and self._cancel_requested():
+                self.finished.emit([], "")
+                return
             risks = self._service.scan(self._titles)
             self.finished.emit(risks, "")
         except Exception as exc:
@@ -1484,16 +1777,21 @@ class _ImageRiskWorker(QObject):
 
     finished = Signal(list, dict, str)  # (risky_items, stats_dict, error)
 
-    def __init__(self, service, products: list, *, force_refresh: bool = False) -> None:
+    def __init__(self, service, products: list, *, force_refresh: bool = False,
+                 cancel_requested: callable | None = None) -> None:
         super().__init__()
         self._service = service
         self._products = products
         self._force_refresh = force_refresh
+        self._cancel_requested = cancel_requested
 
     @Slot()
     def run(self) -> None:
         try:
-            risky_items, stats_obj, all_checked = self._service.scan_batch(self._products, force_refresh=self._force_refresh)
+            risky_items, stats_obj, all_checked = self._service.scan_batch(
+                self._products, force_refresh=self._force_refresh,
+                cancel_requested=self._cancel_requested,
+            )
             stats = {
                 "requested_count": stats_obj.requested_count,
                 "cached_count": stats_obj.cached_count,
@@ -1505,46 +1803,3 @@ class _ImageRiskWorker(QObject):
             self.finished.emit(risky_items, stats, "")
         except Exception as exc:
             self.finished.emit([], {"requested_count": 0, "cached_count": 0, "checked_count": 0, "risk_count": 0, "failed_count": 0, "all_checked": []}, str(exc))
-
-
-# ── 图片风险检测选择弹窗 ──────────────────────────────────────────
-
-
-class _ImageRiskCheckPopup(QWidget):
-    """图片风险检测范围选择弹窗。"""
-
-    checkRequested = Signal(str)  # 'selected' 或 'all' 或 'refresh_selected'
-
-    def __init__(self, selected_count: int, total_count: int, parent: QWidget | None = None) -> None:
-        super().__init__(parent, Qt.WindowType.Popup)
-        self.setFixedSize(320, 230)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
-
-        title = QLabel("选择检测范围")
-        title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        layout.addWidget(title)
-
-        if selected_count > 0:
-            btn_selected = QPushButton(f"检测已选商品（{selected_count}个）")
-            btn_selected.clicked.connect(lambda: self._on_click("selected"))
-            layout.addWidget(btn_selected)
-
-        btn_all = QPushButton(f"检测全部商品（{total_count}个）")
-        btn_all.clicked.connect(lambda: self._on_click("all"))
-        layout.addWidget(btn_all)
-
-        if selected_count > 0:
-            btn_refresh = QPushButton(f"重新检测已选商品（{selected_count}个）")
-            btn_refresh.clicked.connect(lambda: self._on_click("refresh_selected"))
-            layout.addWidget(btn_refresh)
-
-        btn_cancel = QPushButton("取消")
-        btn_cancel.clicked.connect(self.close)
-        layout.addWidget(btn_cancel)
-
-    def _on_click(self, scope: str) -> None:
-        self.checkRequested.emit(scope)
-        self.close()

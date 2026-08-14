@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from profit_accounting_26.application import AppContext, ApiProfile, ApiProfileStore, LOCAL_REESTIMATE, SettingsService, VISUAL_AI
+from profit_accounting_26.application import AppContext, ApiProfile, ApiProfileStore, IMAGE_RISK, LOCAL_REESTIMATE, SettingsService, VISUAL_AI
 from profit_accounting_26.application.api_profile_store import PROVIDER_PRESETS
 from profit_accounting_26.domain.models import Forwarder
 from profit_accounting_26.domain.rules import (
@@ -117,6 +117,7 @@ class SettingsPage(QWidget):
         self.btn_add_api = f(QPushButton, "btnAddApiConfig")
         self.visual_binding = f(QComboBox, "cmbVisionApiConfig")
         self.local_binding = f(QComboBox, "cmbPartialEstimateApiConfig")
+        self.image_risk_binding = f(QComboBox, "cmbImageRiskApiConfig")
         self.api_profile_name = f(QLineEdit, "txtApiProfileName")
         self.api_provider = f(QComboBox, "cmbApiProvider")
         self.vision_endpoint = f(QLineEdit, "txtApiEndpoint")
@@ -292,6 +293,8 @@ class SettingsPage(QWidget):
             self.visual_binding.currentIndexChanged.connect(lambda _index: self._mark_dirty())
         if self.local_binding:
             self.local_binding.currentIndexChanged.connect(lambda _index: self._mark_dirty())
+        if self.image_risk_binding:
+            self.image_risk_binding.currentIndexChanged.connect(lambda _index: self._mark_dirty())
 
     def _setup_forwarder_table(self) -> None:
         if self.forwarder_table is None:
@@ -508,8 +511,8 @@ class SettingsPage(QWidget):
         public = self.context.api_profile_store.load_public()
         profiles = [item for item in public["profiles"] if isinstance(item, dict)]
         bindings = public["button_bindings"]
-        # 视觉识图 / 局部文字重估 下拉框保留"新建配置"
-        for combo in (self.visual_binding, self.local_binding):
+        # 视觉识图 / 局部文字重估 / 图片检测 下拉框保留"新建配置"
+        for combo in (self.visual_binding, self.local_binding, self.image_risk_binding):
             if combo is None:
                 continue
             combo.blockSignals(True)
@@ -530,6 +533,8 @@ class SettingsPage(QWidget):
             self.visual_binding.setCurrentIndex(max(0, self.visual_binding.findData(bindings.get(VISUAL_AI))))
         if self.local_binding:
             self.local_binding.setCurrentIndex(max(0, self.local_binding.findData(bindings.get(LOCAL_REESTIMATE))))
+        if self.image_risk_binding:
+            self.image_risk_binding.setCurrentIndex(max(0, self.image_risk_binding.findData(bindings.get(IMAGE_RISK))))
 
     def _new_api_profile(self) -> None:
         """新建配置：清空输入字段，进入新建模式。"""
@@ -640,11 +645,14 @@ class SettingsPage(QWidget):
         # 检查是否被视觉识图或局部文字重估使用
         visual_id = str(self.visual_binding.currentData() or "") if self.visual_binding else ""
         local_id = str(self.local_binding.currentData() or "") if self.local_binding else ""
+        image_risk_id = str(self.image_risk_binding.currentData() or "") if self.image_risk_binding else ""
         in_use = []
         if visual_id == profile_id:
-            in_use.append("视觉识图/整体识别")
+            in_use.append("AI识图")
         if local_id == profile_id:
-            in_use.append("局部文字重估")
+            in_use.append("文字AI")
+        if image_risk_id == profile_id:
+            in_use.append("图片检测")
         msg = f"确定永久删除配置「{display_name}」及其 API Key 吗？"
         if in_use:
             msg += f"\n\n该配置正在被以下功能使用：{', '.join(in_use)}\n删除后将清空对应绑定，需重新选择配置。"
@@ -1110,15 +1118,17 @@ class SettingsPage(QWidget):
         pending_data_dir = ApplicationPaths.configured_data_dir()
         if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
             SettingsService.save_copy(self.settings, pending_data_dir / "settings.json")
-        # Persist visual/local binding selections to ApiProfileStore.
+        # Persist visual/local/image_risk binding selections to ApiProfileStore.
         visual_id = str(self.visual_binding.currentData() or "") if self.visual_binding else ""
         local_id = str(self.local_binding.currentData() or "") if self.local_binding else ""
+        image_risk_id = str(self.image_risk_binding.currentData() or "") if self.image_risk_binding else ""
         binding_stores = [self.context.api_profile_store]
         if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
             binding_stores.append(ApiProfileStore(pending_data_dir))
         for store in binding_stores:
             store.bind(VISUAL_AI, visual_id or None)
             store.bind(LOCAL_REESTIMATE, local_id or None)
+            store.bind(IMAGE_RISK, image_risk_id or None)
         self.dirty = False
         self.dirtyChanged.emit(False)
         self.settingsSaved.emit()

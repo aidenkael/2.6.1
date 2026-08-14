@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """图片品牌/IP风险检测服务。
 
-复用主软件视觉识别绑定的视觉 API Profile（VISUAL_AI）。
-不新增 API 配置、不新增设置页面、不修改 RecognitionService。
+使用独立的图片检测 API binding（IMAGE_RISK）。
+不修改 RecognitionService。
+
+风险三档：none / platform / infringement。
 """
 
 from __future__ import annotations
@@ -16,7 +18,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from profit_accounting_26.application.api_profile_store import ApiProfileStore, VISUAL_AI
+from profit_accounting_26.application.api_profile_store import ApiProfileStore, IMAGE_RISK
+from profit_accounting_26.application.qwen_request_params import qwen_extra_body_params
 from profit_accounting_26.application.recognition_service import (
     RecognitionResponseError,
     RecognitionService,
@@ -25,10 +28,13 @@ from profit_accounting_26.application.recognition_service import (
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "product-collector-image-risk-v1"
+PROMPT_VERSION = "product-collector-image-risk-v2"
 
 # 内部批处理大小（用户不可见）
 BATCH_SIZE = 10
+
+# 合法风险值
+_VALID_RISKS = frozenset({"none", "platform", "infringement"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,9 +43,8 @@ class ImageRiskItem:
 
     product_id: str
     main_image: str        # 检测时的主图 URL
-    has_risk: bool         # 是否检测到需要人工确认的视觉元素
-    labels: list[str]      # 内部细分类：品牌Logo/品牌文字/品牌纹样/角色IP/球队组织标志
-    display_label: str     # UI 显示标签：品牌/IP复核
+    risk: str              # "none" | "platform" | "infringement"
+    reason: str            # 简短中文原因
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,42 +59,52 @@ class ImageRiskScanStats:
 
 
 def _build_image_prompt() -> str:
-    """构建图片品牌/IP检测 Prompt。"""
+    """构建图片风险检测 Prompt。"""
     return (
-        "你是商品图片品牌/IP风险识别助手。\n\n"
-        "你的任务是识别图片中值得人工确认的明显视觉元素。\n"
-        "注意：目标不是判断'侵权'，因为软件不知道用户是否已取得授权。\n\n"
-        "请识别以下类型的视觉元素（如果存在）：\n"
-        "- 清晰品牌 Logo\n"
-        "- 清晰品牌名称或商标文字\n"
-        "- 明显 Monogram / 重复品牌纹样\n"
-        "- 明显品牌经典标识性图案\n"
-        "- 动漫角色\n"
-        "- 影视角色\n"
-        "- 游戏角色\n"
-        "- 明显人物/IP形象\n"
-        "- 球队标志\n"
-        "- 大学/组织标志\n"
-        "- 其他明显需要授权确认的视觉元素\n\n"
-        "严格限制误判：\n"
-        "- 普通颜色相似不能判断\n"
-        "- 普通商品造型相似不能判断\n"
-        "- 普通设计风格相似不能判断\n"
-        "- 普通几何纹样不能因为'像某品牌'就标记\n"
-        "- 无法确认的模糊图案不要强判\n"
-        "- 不输出'已侵权''侵权''违法'等法律结论\n\n"
-        "严格 JSON 格式返回，每张图一个结果：\n"
-        '{"results": [{"id": "商品id", "has_risk": true, "internal_labels": ["品牌Logo"], "detail": "Nike Swoosh Logo"}]}\n\n'
-        "每张送检图片都必须有一个对应的结果条目。\n"
-        "无风险的图片 has_risk 设为 false。\n"
-        "internal_labels 可选值：品牌Logo、品牌文字、品牌纹样、角色IP、球队/组织标志\n"
+        "你是商品图片风险识别助手。\n\n"
+        "定位：弱视觉模型完成'明显风险快筛'。\n"
+        "只能依据图片明确可见内容。\n\n"
+        "infringement 风险：\n"
+        "- 清晰 Logo；\n"
+        "- 品牌文字；\n"
+        "- 明显 Monogram / 品牌重复纹样；\n"
+        "- 明显经典品牌标志；\n"
+        "- 动漫/影视/游戏 IP；\n"
+        "- 明星/人物肖像；\n"
+        "- 球队、大学、组织 Logo；\n"
+        "- 其它明显需授权视觉元素。\n\n"
+        "platform 风险：\n"
+        "- 明显枪支/武器/高危刀具/爆炸物；\n"
+        "- 烟草/电子烟/毒品/吸毒工具；\n"
+        "- 明显色情成人内容；\n"
+        "- 赌博；\n"
+        "- 明显政治敏感；\n"
+        "- 极端主义/仇恨/恐怖主义；\n"
+        "- 明显宗教敏感元素；\n"
+        "- 明显危险品/禁售品；\n"
+        "- 其它仅凭图片已能比较明确确认的平台风险。\n\n"
+        "严格防误杀：\n"
+        "- 普通颜色相似 -> none\n"
+        "- 普通商品造型相似 -> none\n"
+        "- 普通设计风格相似 -> none\n"
+        "- 普通几何纹样 -> none\n"
+        "- 模糊 Logo -> none\n"
+        "- '有点像某品牌' -> none\n"
+        "- 必须靠猜测才能成立 -> none\n\n"
+        "输出格式（严格 JSON）：\n"
+        '{"results": [{"id": "商品id", "risk": "none | platform | infringement", "reason": "简短中文原因"}]}\n\n'
+        "每张实际送检图片必须返回对应 id。\n"
+        "不输出置信度、风险分、人工复核等级、Markdown、额外说明。\n"
+        "reason 一句话即可，none 可以空 reason。\n"
+        "品牌/IP原因：优先常用中文名 + 英文原名。\n"
+        "不输出'确定侵权''违法'等法律结论。"
     )
 
 
 class ImageRiskScanService:
-    """图片品牌/IP风险检测服务。
+    """图片风险检测服务。
 
-    复用 VISUAL_AI 绑定的视觉 API Profile。
+    使用 IMAGE_RISK 绑定的 API Profile。
     内存缓存：以 (product_id, main_image_url) 为键，本次运行期间有效。
     """
 
@@ -118,14 +133,17 @@ class ImageRiskScanService:
         products: list[dict[str, str]],
         *,
         force_refresh: bool = False,
-    ) -> tuple[list[ImageRiskItem], ImageRiskScanStats]:
+        cancel_requested: callable | None = None,
+    ) -> tuple[list[ImageRiskItem], ImageRiskScanStats, list[ImageRiskItem]]:
         """批量检测图片风险。
 
         products: [{"id": "product_id", "main_image": "url"}, ...]
         force_refresh: True 时忽略运行期缓存，强制重新检测；新结果覆盖旧缓存。
-        返回: (risky_items, stats)
-        - risky_items: has_risk=True 的结果列表（含缓存）
-        - stats: 检测统计信息，保证 requested_count = cached_count + checked_count + failed_count
+        cancel_requested: 可选 callable，返回 True 时停止发送后续批次。
+        返回: (risky_items, stats, all_checked_items)
+        - risky_items: risk != "none" 的结果列表（含缓存）
+        - stats: 检测统计信息
+        - all_checked_items: 本次通过 API 成功检测的所有商品（含安全）
         """
         if not products:
             return [], ImageRiskScanStats(0, 0, 0, 0, 0), []
@@ -143,7 +161,7 @@ class ImageRiskScanService:
                 cached = self.get_cached(pid, img)
                 if cached is not None:
                     cached_count += 1
-                    if cached.has_risk:
+                    if cached.risk != "none":
                         cached_risky.append(cached)
                     continue
             to_scan.append(p)
@@ -162,25 +180,26 @@ class ImageRiskScanService:
 
         # 分批处理
         all_risky: list[ImageRiskItem] = list(cached_risky)
-        all_checked: list[ImageRiskItem] = []  # 本次通过 API 成功检测的所有商品（含安全）
+        all_checked: list[ImageRiskItem] = []
         checked_count = 0
         failed_count = 0
         for i in range(0, len(to_scan), BATCH_SIZE):
+            # 取消检查：当前批自然完成后不再发送下一批
+            if cancel_requested is not None and cancel_requested():
+                break
             batch = to_scan[i:i + BATCH_SIZE]
             try:
                 batch_results, batch_download_failed = self._scan_single_batch(batch)
                 checked_count += len(batch_results)
-                # 未下载的商品 + AI 漏返回的商品都算失败
                 batch_failed = batch_download_failed + (len(batch) - batch_download_failed - len(batch_results))
                 failed_count += batch_failed
                 all_checked.extend(batch_results)
                 for item in batch_results:
                     self._set_cached(item.product_id, item.main_image, item)
-                    if item.has_risk:
+                    if item.risk != "none":
                         all_risky.append(item)
             except Exception as exc:
                 logger.warning("图片风险检测批次失败: %s", exc)
-                # 整批异常：所有商品计入失败（含下载阶段已失败的，但不重复计数）
                 failed_count += len(batch)
 
         stats = ImageRiskScanStats(
@@ -199,9 +218,9 @@ class ImageRiskScanService:
         - results: 成功解析的结果（已去重）
         - download_failed_count: 本批次图片下载失败的商品数量
         """
-        bound = self.profile_store.bound_profile(VISUAL_AI)
+        bound = self.profile_store.bound_profile(IMAGE_RISK)
         if bound is None:
-            raise RecognitionUnavailableError("图片风险检测尚未绑定视觉API配置，请先在设置中配置。")
+            raise RecognitionUnavailableError("图片风险检测尚未绑定图片检测API，请先在设置中配置。")
         profile, api_key = bound
         endpoint = self._endpoint(profile.api_url)
         if not endpoint or not api_key.strip() or not profile.model_name.strip():
@@ -240,6 +259,8 @@ class ImageRiskScanService:
             "temperature": 0,
             "messages": [{"role": "user", "content": content}],
         }
+        body.update(qwen_extra_body_params(profile.provider, profile.model_name))
+
         request = Request(
             endpoint,
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
@@ -305,23 +326,18 @@ class ImageRiskScanService:
                 continue
             pid = str(item.get("id") or "").strip()
             if not pid or pid not in id_to_url:
-                # 未知 id：忽略，不计入结果
                 continue
             if pid in seen_ids:
-                # 重复返回：只取第一个，跳过后续
                 continue
             seen_ids.add(pid)
-            has_risk = bool(item.get("has_risk"))
-            internal_labels = [
-                str(lb).strip()
-                for lb in (item.get("internal_labels") or [])
-                if str(lb).strip()
-            ]
+            risk = str(item.get("risk") or "").strip().lower()
+            if risk not in _VALID_RISKS:
+                risk = "none"
+            reason = str(item.get("reason") or "").strip()
             results.append(ImageRiskItem(
                 product_id=pid,
                 main_image=id_to_url[pid],
-                has_risk=has_risk,
-                labels=internal_labels,
-                display_label="品牌/IP复核" if has_risk else "",
+                risk=risk,
+                reason=reason,
             ))
         return results
