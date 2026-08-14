@@ -125,6 +125,43 @@ class TestImageRiskScanService:
         assert stats.risk_count == 1
         assert stats.failed_count == 0
 
+    def test_missing_image_counts_as_failed(self):
+        """缺图商品计入 failed_count，不发送 API、不写安全缓存。"""
+        profile_store = MagicMock()
+        service = ImageRiskScanService(profile_store)
+
+        scanned_ids: list[str] = []
+
+        def mock_scan_batch(batch):
+            scanned_ids.extend(str(p.get("id")) for p in batch)
+            return [
+                ImageRiskItem("1", "https://img.example/1.jpg", "none", ""),
+                ImageRiskItem("3", "https://img.example/3.jpg", "none", ""),
+            ], 0
+
+        service._scan_single_batch = mock_scan_batch
+
+        products = [
+            {"id": "1", "main_image": "https://img.example/1.jpg"},
+            {"id": "2", "main_image": ""},  # 缺图
+            {"id": "3", "main_image": "https://img.example/3.jpg"},
+        ]
+        results, stats, all_checked = service.scan_batch(products)
+
+        # 3 个商品都在本次检测范围
+        assert stats.requested_count == 3
+        # 缺图计入失败
+        assert stats.failed_count == 1
+        assert stats.checked_count == 2
+        # 缺图商品不进入 API 请求
+        assert "2" not in scanned_ids
+        # 缺图商品不写安全缓存
+        assert service.get_cached("2", "") is None
+        # 不为缺图商品生成 platform/infringement/none 结果
+        assert len(all_checked) == 2
+        assert all(r.product_id != "2" for r in all_checked)
+        assert all(r.product_id != "2" for r in results)
+
     def test_parse_results_valid(self):
         """正常解析图片风险结果。"""
         image_items = [

@@ -440,15 +440,14 @@ class ProductCard(QFrame):
 
         在 resizeEvent() 和 _refresh_risk_display() 后调用，
         确保 Overlay 始终位于对应区域内。
+        高度由 setMaximumHeight(约两行) 约束，不 setFixedHeight，
+        每次 setText 后 adjustSize 都能按当前文字重新计算高度。
         """
         # 标题风险 Overlay：覆盖在标题区域内部，最大宽度 90%
         title_geo = self.lbl_title.geometry()
         max_w = int(title_geo.width() * 0.9)
         self.lbl_title_risk.setMaximumWidth(max_w)
         self.lbl_title_risk.adjustSize()
-        # 确保 Overlay 不跑出标题区域
-        overlay_h = min(self.lbl_title_risk.height(), title_geo.height() - 4)
-        self.lbl_title_risk.setFixedHeight(overlay_h) if overlay_h > 0 else None
         self.lbl_title_risk.move(
             title_geo.left() + 4,
             title_geo.bottom() - self.lbl_title_risk.height() - 2,
@@ -458,9 +457,6 @@ class ProductCard(QFrame):
         max_img_w = int(img_geo.width() * 0.9)
         self.lbl_image_risk.setMaximumWidth(max_img_w)
         self.lbl_image_risk.adjustSize()
-        # 确保 Overlay 不跑出图片区域
-        overlay_img_h = min(self.lbl_image_risk.height(), img_geo.height() - 8)
-        self.lbl_image_risk.setFixedHeight(overlay_img_h) if overlay_img_h > 0 else None
         self.lbl_image_risk.move(
             img_geo.left() + 4,
             img_geo.bottom() - self.lbl_image_risk.height() - 4,
@@ -784,6 +780,8 @@ class ProductCollectionPage(QWidget):
         self._cancel_requested = False
         # 检测快照：本次检测对象冻结列表
         self._detect_snapshot: list[CandidateProduct] | None = None
+        # 全部检测：标题阶段失败数量（供最终状态合并显示）
+        self._detect_all_title_failed = 0
 
         # 容器尺寸变化时重排卡片
         self._container.installEventFilter(self)
@@ -1552,12 +1550,20 @@ class ProductCollectionPage(QWidget):
                     r = risk_map[pid]
                     card.set_title_risk_data(r.risk, r.reason)
             risk_count = sum(1 for r in risks if r.risk != "none")
+            # 缺失/非法结果统计为失败（返回结果数 < 送检数）
+            title_failed = len(snapshot_ids - set(risk_map))
             # 根据取消状态显示不同消息
             if self._cancel_requested:
                 self.lbl_status.setText("检测已取消，已完成部分结果")
             else:
-                self.lbl_status.setText("检测完成")
-                if risk_count > 0:
+                if title_failed > 0:
+                    self.lbl_status.setText(f"标题检测完成，{title_failed} 个失败")
+                else:
+                    self.lbl_status.setText("检测完成")
+                if title_failed > 0:
+                    self._notice(self, "标题风险检测完成",
+                                 f"共处理 {len(snapshot_ids)} 个商品，{title_failed} 个失败，发现 {risk_count} 个风险商品。")
+                elif risk_count > 0:
                     self._notice(self, "标题风险检测完成", f"共检测 {len(risks)} 个商品，发现 {risk_count} 个风险商品。")
                 else:
                     self._notice(self, "标题风险检测完成", "未发现风险商品。")
@@ -1670,6 +1676,7 @@ class ProductCollectionPage(QWidget):
         targets, _ = result
         self._detect_all_targets = targets
         self._detect_all_phase = "title"
+        self._detect_all_title_failed = 0
         self._start_title_risk_check_for_all(targets)
 
     def _start_title_risk_check_for_all(self, targets: list[CandidateProduct]) -> None:
@@ -1714,6 +1721,8 @@ class ProductCollectionPage(QWidget):
             if pid in risk_map:
                 r = risk_map[pid]
                 card.set_title_risk_data(r.risk, r.reason)
+        # 缺失/非法结果统计为失败（不中止，继续图片检测）
+        self._detect_all_title_failed = len(snapshot_ids - set(risk_map))
 
         # 检查取消
         if self._cancel_requested:
@@ -1760,13 +1769,20 @@ class ProductCollectionPage(QWidget):
                     card.set_image_risk_data(item.risk, item.reason)
 
             failed = stats.get("failed_count", 0)
-            # 根据取消状态和失败数量显示不同消息
+            # 根据取消状态和失败数量显示不同消息（标题失败 + 图片失败合并为一条）
             if self._cancel_requested:
                 self.lbl_status.setText("检测已取消，已完成部分结果")
-            elif failed > 0:
-                self.lbl_status.setText(f"检测完成，图片检测失败 {failed} 个")
             else:
-                self.lbl_status.setText("检测完成")
+                title_failed = getattr(self, "_detect_all_title_failed", 0)
+                parts = []
+                if title_failed > 0:
+                    parts.append(f"标题失败 {title_failed} 个")
+                if failed > 0:
+                    parts.append(f"图片失败 {failed} 个")
+                if parts:
+                    self.lbl_status.setText("检测完成，" + "，".join(parts))
+                else:
+                    self.lbl_status.setText("检测完成")
 
         self._restore_detect_all_button()
         self._exit_detecting()

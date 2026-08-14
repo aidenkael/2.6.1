@@ -1187,6 +1187,25 @@ class TestOverlayGeometry(_PageCase):
         self.assertGreaterEqual(overlay_geo.left(), img_geo.left())
         self.assertLessEqual(overlay_geo.right(), img_geo.right() + 10)
 
+    def test_overlay_height_not_locked_by_short_text(self):
+        """先短 reason 后长 reason，第二次高度应重新计算，不被第一次锁死。"""
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        # 先设置短 reason
+        card.set_title_risk_data("platform", "短原因")
+        card._layout_risk_overlays()
+        h_short = card.lbl_title_risk.height()
+        # 再设置明显更长的 reason，应能重新计算为两行
+        card.set_title_risk_data(
+            "platform",
+            "这是一段明显更长的原因描述，用来验证第二次设置文字后高度能重新计算，不会被第一次短文本的高度固定限制，最多两行显示",
+        )
+        card._layout_risk_overlays()
+        h_long = card.lbl_title_risk.height()
+        self.assertGreater(h_long, h_short)
+        # 最大高度仍受约两行约束
+        self.assertLessEqual(h_long, 40)
+
 
 class TestForceRefreshClearsRisk(_PageCase):
     """测试重新检测后旧图片风险标签被正确清除。"""
@@ -1320,6 +1339,79 @@ class TestInvalidRiskPreservesExistingState(_PageCase):
         # 原有风险应保留
         self.assertIsNotNone(card._title_risk_data)
         self.assertEqual(card._title_risk_data["risk"], "platform")
+
+
+class TestTitleFailedCount(_PageCase):
+    """测试标题检测缺失/非法结果统计为失败。"""
+
+    def test_title_missing_results_count_as_failed(self):
+        """3 个 targets 只返回 2 个有效结果时 failed_count=1，状态体现失败。"""
+        self.page.load_results(_products(3))
+        cards = {pid: self.page._cards[pid] for pid in ("1", "2", "3")}
+        # 预置商品 3 原有风险（缺失结果时应保持）
+        cards["3"].set_title_risk_data("platform", "原有风险")
+        # 模拟检测开始（3 个 targets）
+        targets = [self.page._products[0], self.page._products[1], self.page._products[2]]
+        self.page._enter_detecting(targets)
+        # 模拟检测完成，只返回 2 个有效结果（id=3 缺失）
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+        risks = [
+            TitleRiskItem("1", "platform", "带电商品"),
+            TitleRiskItem("2", "none", ""),
+        ]
+        self.page._on_title_risk_finished(risks, "")
+        # 成功 2 个正常写回
+        self.assertEqual(cards["1"]._title_risk_data["risk"], "platform")
+        self.assertIsNone(cards["2"]._title_risk_data)
+        # 缺失商品原风险保持，不生成 none
+        self.assertEqual(cards["3"]._title_risk_data["risk"], "platform")
+        self.assertEqual(cards["3"]._title_risk_data["reason"], "原有风险")
+        # 不得显示为完全成功
+        status = self.page.lbl_status.text()
+        self.assertIn("失败", status)
+        self.assertIn("1", status)
+        self.assertNotEqual(status, "检测完成")
+
+    def test_detect_all_title_failed_counted_and_continues(self):
+        """全部检测：标题阶段缺失结果计入失败，且不中止继续图片阶段。"""
+        self.page.load_results(_products(3))
+        targets = [self.page._products[0], self.page._products[1], self.page._products[2]]
+        self.page._enter_detecting(targets)
+        self.page._detect_all_targets = targets
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+        risks = [
+            TitleRiskItem("1", "platform", "带电"),
+            TitleRiskItem("2", "none", ""),
+        ]
+        with patch("profit_accounting_26.product_collector.ui.product_collection_page.QThread"), patch(
+            "profit_accounting_26.product_collector.ui.product_collection_page._ImageRiskWorker"
+        ):
+            self.page._on_detect_all_title_finished(risks, "")
+        # 3 个 target 只返回 2 个 -> 失败 1 个
+        self.assertEqual(self.page._detect_all_title_failed, 1)
+        # 不中止：继续图片检测阶段
+        self.assertEqual(self.page._detect_all_phase, "image")
+        self.assertIn("图片", self.page.lbl_status.text())
+
+    def test_detect_all_combines_title_and_image_failed(self):
+        """全部检测最终状态：标题失败与图片失败合并为一条状态。"""
+        self.page.load_results(_products(3))
+        targets = [self.page._products[0], self.page._products[1], self.page._products[2]]
+        self.page._enter_detecting(targets)
+        self.page._detect_all_targets = targets
+        self.page._detect_all_title_failed = 2
+        # 模拟图片阶段完成，3 个失败
+        from profit_accounting_26.product_collector.image_risk_scan import ImageRiskItem
+        all_checked = [ImageRiskItem("1", "https://img.example/1.jpg", "none", "")]
+        stats = {
+            "requested_count": 3, "cached_count": 0, "checked_count": 1,
+            "risk_count": 0, "failed_count": 3, "all_checked": all_checked,
+        }
+        self.page._on_detect_all_image_finished([], stats, "")
+        status = self.page.lbl_status.text()
+        self.assertIn("检测完成", status)
+        self.assertIn("标题失败 2 个", status)
+        self.assertIn("图片失败 3 个", status)
 
 
 if __name__ == "__main__":

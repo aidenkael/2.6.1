@@ -153,10 +153,16 @@ class ImageRiskScanService:
         to_scan: list[dict[str, str]] = []
         cached_risky: list[ImageRiskItem] = []
         cached_count = 0
+        failed_count = 0
         for p in products:
             pid = str(p.get("id") or "").strip()
             img = str(p.get("main_image") or "").strip()
-            if not pid or not img:
+            if not pid:
+                # 无 id 无法归属到卡片，跳过不计
+                continue
+            if not img:
+                # 缺图：计入失败，不发送 API、不写缓存
+                failed_count += 1
                 continue
             if not force_refresh:
                 cached = self.get_cached(pid, img)
@@ -167,7 +173,7 @@ class ImageRiskScanService:
                     continue
             to_scan.append(p)
 
-        requested_count = cached_count + len(to_scan)
+        requested_count = cached_count + failed_count + len(to_scan)
 
         if not to_scan:
             stats = ImageRiskScanStats(
@@ -175,7 +181,7 @@ class ImageRiskScanService:
                 cached_count=cached_count,
                 checked_count=0,
                 risk_count=len(cached_risky),
-                failed_count=0,
+                failed_count=failed_count,
             )
             return cached_risky, stats, []
 
@@ -183,7 +189,6 @@ class ImageRiskScanService:
         all_risky: list[ImageRiskItem] = list(cached_risky)
         all_checked: list[ImageRiskItem] = []
         checked_count = 0
-        failed_count = 0
         for i in range(0, len(to_scan), BATCH_SIZE):
             # 取消检查：当前批自然完成后不再发送下一批
             if cancel_requested is not None and cancel_requested():
