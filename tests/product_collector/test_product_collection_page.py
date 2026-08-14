@@ -1203,8 +1203,8 @@ class TestOverlayGeometry(_PageCase):
         card._layout_risk_overlays()
         h_long = card.lbl_title_risk.height()
         self.assertGreater(h_long, h_short)
-        # 最大高度仍受约两行约束
-        self.assertLessEqual(h_long, 40)
+        # 最大高度仍受约三行约束（本轮从两行轻量增加到三行）
+        self.assertLessEqual(h_long, 56)
 
 
 class TestForceRefreshClearsRisk(_PageCase):
@@ -1412,6 +1412,236 @@ class TestTitleFailedCount(_PageCase):
         self.assertIn("检测完成", status)
         self.assertIn("标题失败 2 个", status)
         self.assertIn("图片失败 3 个", status)
+
+
+class TestRound2ClearAndSelect(_PageCase):
+    """R 项：右键取消全选 / 清空本次 / 长期设置不受影响。"""
+
+    def test_select_all_right_click_clears_selection(self):
+        """全部选择按钮右键取消全部选择。"""
+        self.page.load_results(_products(3))
+        self.page.select_all_visible()
+        self.assertEqual(self.page.selected_count(), 3)
+        event = QMouseEvent(
+            QEvent.Type.MouseButtonPress, QPointF(2, 2),
+            Qt.MouseButton.RightButton, Qt.MouseButton.RightButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        self.assertTrue(self.page.eventFilter(self.page.btn_select_all, event))
+        self.assertEqual(self.page.selected_count(), 0)
+
+    def test_select_all_button_has_tooltip(self):
+        """全部选择按钮带有左键/右键说明 Tooltip。"""
+        tip = self.page.btn_select_all.toolTip()
+        self.assertIn("全部选择", tip)
+        self.assertIn("取消全部选择", tip)
+
+    def test_clear_all_resets_runtime_state(self):
+        """清空本次：商品/卡片/选择/KEEP-REMOVED/检测状态全部清除。"""
+        from unittest.mock import Mock
+
+        self.page.load_results(_products(3))
+        self.page.select_all_visible()
+        self.page._states["1"] = "REMOVED"
+        self.page._detect_snapshot = list(self.page._products)
+        fake_service = Mock()
+        self.page._image_risk_service = fake_service
+        self.page._cards["1"].set_title_risk_data("platform", "带电")
+        self.page._clear_all_results()
+        # 运行期数据全部清空
+        self.assertEqual(self.page._products, [])
+        self.assertEqual(self.page._cards, {})
+        self.assertEqual(self.page._states, {})
+        self.assertEqual(self.page._selected_ids, set())
+        self.assertIsNone(self.page._detect_snapshot)
+        self.assertFalse(self.page._showing_removed)
+        # 图片检测运行期缓存被清理
+        fake_service.clear_cache.assert_called_once()
+        # 状态区回到空态计数
+        self.assertIn("商品 0", self.page.lbl_status.text())
+
+    def test_clear_all_preserves_long_term_config(self):
+        """清空本次不影响 API Profile store / 搜索词 / 检测服务等长期配置。"""
+        from unittest.mock import Mock
+
+        store = Mock()
+        self.page.set_api_profile_store(store)
+        self.page.txt_cn.setText("测试搜索词")
+        self.page.load_results(_products(2))
+        self.page._clear_all_results()
+        # 长期配置保留
+        self.assertIs(self.page._api_profile_store, store)
+        self.assertEqual(self.page.txt_cn.text(), "测试搜索词")
+        self.assertIsNotNone(self.page._title_risk_service)
+        self.assertIsNotNone(self.page._image_risk_service)
+
+    def test_clear_all_blocked_while_detecting(self):
+        """检测进行中禁止清空本次。"""
+        self.page.load_results(_products(2))
+        self.page._enter_detecting(list(self.page._products))
+        self.assertFalse(self.page.btn_clear_all.isEnabled())
+        self.page._exit_detecting()
+        self.assertTrue(self.page.btn_clear_all.isEnabled())
+
+
+class TestRound2RiskSorting(_PageCase):
+    """R 项：风险置顶排序 / 稳定顺序 / 保持选择 / 已移除视图不乱序。"""
+
+    def test_visible_cards_preserve_original_order_without_risk(self):
+        """无风险时保持原始采集顺序。"""
+        self.page.load_results(_products(3))
+        order = [c.product.product_id for c in self.page._visible_cards()]
+        self.assertEqual(order, ["1", "2", "3"])
+
+    def test_risk_sort_infringement_platform_none(self):
+        """排序：infringement > platform > none。"""
+        self.page.load_results(_products(3))
+        self.page._cards["1"].set_title_risk_data("platform", "带电")
+        self.page._cards["2"].set_title_risk_data("infringement", "品牌IP")
+        # 商品 3 无风险
+        self.page._sort_risk_pinned()
+        order = [c.product.product_id for c in self.page._visible_cards()]
+        self.assertEqual(order, ["2", "1", "3"])
+
+    def test_same_rank_keeps_collection_order(self):
+        """同等级商品保持原始采集顺序。"""
+        self.page.load_results(_products(4))
+        # 商品 1、4 都是 platform，采集顺序 1 在前
+        self.page._cards["1"].set_title_risk_data("platform", "a")
+        self.page._cards["4"].set_title_risk_data("platform", "b")
+        self.page._sort_risk_pinned()
+        order = [c.product.product_id for c in self.page._visible_cards()]
+        self.assertEqual(order, ["1", "4", "2", "3"])
+
+    def test_composite_risk_takes_highest(self):
+        """标题 + 图片综合风险取最高等级。"""
+        self.page.load_results(_products(2))
+        c1 = self.page._cards["1"]
+        c2 = self.page._cards["2"]
+        # 商品 1：标题 platform + 图片 infringement -> infringement
+        c1.set_title_risk_data("platform", "带电")
+        c1.set_image_risk_data("infringement", "品牌IP")
+        # 商品 2：标题 infringement + 图片 none -> infringement
+        c2.set_title_risk_data("infringement", "Logo")
+        c2.set_image_risk_data("none")
+        self.assertEqual(self.page._card_risk_rank(c1), 2)
+        self.assertEqual(self.page._card_risk_rank(c2), 2)
+        # 商品 1 仅 platform -> 1
+        c1.set_image_risk_data("none")
+        self.assertEqual(self.page._card_risk_rank(c1), 1)
+
+    def test_title_redetect_none_clears_only_title_risk(self):
+        """标题重新检测为 none 只清标题风险，图片风险保留（走完成回调）。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        card.set_title_risk_data("platform", "旧标题风险")
+        card.set_image_risk_data("infringement", "品牌IP")
+        self.page._enter_detecting([self.page._products[0]])
+        self.page._on_title_risk_finished(
+            [TitleRiskItem("1", "none", "")], "",
+        )
+        self.assertIsNone(card._title_risk_data)
+        self.assertIsNotNone(card._image_risk_data)
+        self.assertEqual(card._image_risk_data["risk"], "infringement")
+
+    def test_sort_preserves_selection(self):
+        """排序后 selected 集合与卡片选中框状态不变。"""
+        self.page.load_results(_products(3))
+        self.page._cards["2"].set_title_risk_data("infringement", "品牌IP")
+        self.page.set_selection("1", True)
+        self.page.set_selection("2", True)
+        self.page._sort_risk_pinned()
+        self.assertEqual(self.page._selected_ids, {"1", "2"})
+        self.assertTrue(self.page._cards["1"].selected)
+        self.assertTrue(self.page._cards["2"].selected)
+        # KEEP/REMOVED 不变
+        self.assertEqual(self.page._states["1"], "KEEP")
+        self.assertEqual(self.page._states["2"], "KEEP")
+
+    def test_removed_view_keeps_original_order(self):
+        """已移除页面不参与风险排序，保持原顺序。"""
+        self.page.load_results(_products(3))
+        for pid in ("1", "2", "3"):
+            self.page._states[pid] = "REMOVED"
+        self.page._cards["2"].set_title_risk_data("infringement", "品牌IP")
+        self.page._showing_removed = True
+        order = [c.product.product_id for c in self.page._visible_cards()]
+        self.assertEqual(order, ["1", "2", "3"])
+
+    def test_detect_all_sorts_only_once(self):
+        """全部检测只在标题+图片全部处理完后排序一次。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self.page.load_results(_products(2))
+        targets = [self.page._products[0], self.page._products[1]]
+        self.page._enter_detecting(targets)
+        self.page._detect_all_targets = targets
+        relayout_calls = []
+        orig_relayout = ProductCollectionPage._relayout_cards
+
+        def counting(self_obj):
+            relayout_calls.append(self_obj._detect_all_phase)
+            return orig_relayout(self_obj)
+
+        with patch.object(ProductCollectionPage, "_relayout_cards", counting):
+            # load_results 时已重排 1 次
+            base = len(relayout_calls)
+            # 标题阶段完成：不排序（同时避免真实线程启动，patch 掉 QThread/Worker）
+            with patch(
+                "profit_accounting_26.product_collector.ui.product_collection_page.QThread"
+            ), patch(
+                "profit_accounting_26.product_collector.ui.product_collection_page._ImageRiskWorker"
+            ):
+                self.page._on_detect_all_title_finished(
+                    [TitleRiskItem("1", "platform", "带电"),
+                     TitleRiskItem("2", "none", "")],
+                    "",
+                )
+                self.assertEqual(len(relayout_calls), base)
+            # 图片阶段完成：最终排序一次
+            from profit_accounting_26.product_collector.image_risk_scan import ImageRiskItem
+            all_checked = [
+                ImageRiskItem("1", "https://img.example/1.jpg", "none", ""),
+                ImageRiskItem("2", "https://img.example/2.jpg", "none", ""),
+            ]
+            stats = {
+                "requested_count": 2, "cached_count": 0, "checked_count": 2,
+                "risk_count": 0, "failed_count": 0, "all_checked": all_checked,
+            }
+            self.page._on_detect_all_image_finished([], stats, "")
+            self.assertEqual(len(relayout_calls), base + 1)
+
+    def test_sort_returns_scroll_to_top(self):
+        """排序完成后滚动条回到顶部。"""
+        self.page.load_results(_products(3))
+        bar = self.page.scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        self.page._cards["2"].set_title_risk_data("infringement", "品牌IP")
+        self.page._sort_risk_pinned()
+        self.assertEqual(bar.value(), 0)
+
+
+class TestRound2OverlayDetails(_PageCase):
+    """R 项：Overlay 三行高度限制与 Tooltip 完整原因。"""
+
+    def test_overlay_max_height_three_lines(self):
+        """标题/图片 Overlay 最大高度受约三行约束。"""
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        self.assertEqual(card.lbl_title_risk.maximumHeight(), 54)
+        self.assertEqual(card.lbl_image_risk.maximumHeight(), 54)
+
+    def test_overlay_tooltip_full_reason(self):
+        """Overlay 完整风险原因通过 Tooltip 展示。"""
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        long_reason = "这是一段很长的风险原因" * 10
+        card.set_title_risk_data("platform", long_reason)
+        card.set_image_risk_data("infringement", long_reason + "-img")
+        self.assertEqual(card.lbl_title_risk.toolTip(), long_reason)
+        self.assertEqual(card.lbl_image_risk.toolTip(), long_reason + "-img")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -25,6 +26,7 @@ from profit_accounting_26.application.recognition_service import (
     RecognitionService,
     RecognitionUnavailableError,
 )
+from profit_accounting_26.product_collector import product_risk_log
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +127,10 @@ class ImageRiskScanService:
         """查询运行期缓存。"""
         return self._cache.get((product_id, main_image))
 
+    def clear_cache(self) -> None:
+        """清空运行期内存缓存（“清空本次”时调用）。"""
+        self._cache.clear()
+
     def _set_cached(self, product_id: str, main_image: str, item: ImageRiskItem) -> None:
         """写入运行期缓存。"""
         self._cache[(product_id, main_image)] = item
@@ -174,6 +180,7 @@ class ImageRiskScanService:
             to_scan.append(p)
 
         requested_count = cached_count + failed_count + len(to_scan)
+        product_risk_log.image_scan_start(requested_count)
 
         if not to_scan:
             stats = ImageRiskScanStats(
@@ -183,19 +190,28 @@ class ImageRiskScanService:
                 risk_count=len(cached_risky),
                 failed_count=failed_count,
             )
+            product_risk_log.image_scan_finished(
+                total=requested_count, batches=0, checked=0, failed=failed_count, status="完成"
+            )
             return cached_risky, stats, []
 
         # 分批处理
         all_risky: list[ImageRiskItem] = list(cached_risky)
         all_checked: list[ImageRiskItem] = []
         checked_count = 0
+        total_batches = (len(to_scan) + BATCH_SIZE - 1) // BATCH_SIZE
+        cancelled = False
         for i in range(0, len(to_scan), BATCH_SIZE):
             # 取消检查：当前批自然完成后不再发送下一批
             if cancel_requested is not None and cancel_requested():
+                cancelled = True
+                product_risk_log.image_scan_cancelled()
                 break
             batch = to_scan[i:i + BATCH_SIZE]
+            batch_index = i // BATCH_SIZE + 1
+            product_risk_log.image_batch_started(batch_index, len(batch))
             try:
-                batch_results, batch_download_failed = self._scan_single_batch(batch)
+                batch_results, batch_download_failed = self._scan_single_batch(batch, batch_index=batch_index)
                 checked_count += len(batch_results)
                 batch_failed = batch_download_failed + (len(batch) - batch_download_failed - len(batch_results))
                 failed_count += batch_failed
@@ -215,9 +231,21 @@ class ImageRiskScanService:
             risk_count=len(all_risky),
             failed_count=failed_count,
         )
+        product_risk_log.image_scan_finished(
+            total=requested_count,
+            batches=total_batches,
+            checked=checked_count,
+            failed=failed_count,
+            status="取消" if cancelled else "完成",
+        )
         return all_risky, stats, all_checked
 
-    def _scan_single_batch(self, products: list[dict[str, str]]) -> tuple[list[ImageRiskItem], int]:
+    def _scan_single_batch(
+        self,
+        products: list[dict[str, str]],
+        *,
+        batch_index: int = 1,
+    ) -> tuple[list[ImageRiskItem], int]:
         """单批次图片风险检测。
 
         返回: (results, download_failed_count)
@@ -238,6 +266,7 @@ class ImageRiskScanService:
 
         image_items: list[tuple[str, str, bytes]] = []  # (product_id, url, data)
         download_failed_count = 0
+        _download_start = time.monotonic()
         for p in products:
             pid = str(p.get("id") or "").strip()
             img_url = str(p.get("main_image") or "").strip()
@@ -249,8 +278,19 @@ class ImageRiskScanService:
             except Exception as exc:
                 logger.warning("下载图片失败 %s: %s", img_url, exc)
                 download_failed_count += 1
+        download_ms = product_risk_log.elapsed_ms(_download_start)
 
         if not image_items:
+            product_risk_log.image_batch_finished(
+                batch_index=batch_index,
+                download_ms=download_ms,
+                download_failed=download_failed_count,
+                payload_bytes=0,
+                api_ms=0,
+                success=0,
+                failed=download_failed_count,
+                status="完成",
+            )
             return [], download_failed_count
 
         # 添加图片到 content（每张图前加 id 标记）
@@ -267,22 +307,69 @@ class ImageRiskScanService:
         }
         body.update(qwen_extra_body_params(profile.provider, profile.model_name))
 
+        payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
         request = Request(
             endpoint,
-            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            data=payload,
             headers={"Authorization": f"Bearer {api_key.strip()}", "Content-Type": "application/json"},
             method="POST",
         )
+        _api_start = time.monotonic()
         try:
             with urlopen(request, timeout=180) as response:  # noqa: S310
                 response_data = json.loads(response.read().decode("utf-8"))
+            api_ms = product_risk_log.elapsed_ms(_api_start)
         except HTTPError as exc:
+            product_risk_log.image_batch_finished(
+                batch_index=batch_index,
+                download_ms=download_ms,
+                download_failed=download_failed_count,
+                payload_bytes=len(payload),
+                api_ms=product_risk_log.elapsed_ms(_api_start),
+                success=0,
+                failed=len(products),
+                status="失败",
+                http_error=f"HTTP {exc.code}",
+            )
             raise RecognitionUnavailableError(f"图片风险检测请求失败（HTTP {exc.code}）。") from exc
         except TimeoutError as exc:
+            product_risk_log.image_batch_finished(
+                batch_index=batch_index,
+                download_ms=download_ms,
+                download_failed=download_failed_count,
+                payload_bytes=len(payload),
+                api_ms=product_risk_log.elapsed_ms(_api_start),
+                success=0,
+                failed=len(products),
+                status="超时",
+                timeout=True,
+            )
             raise RecognitionUnavailableError("图片风险检测超时，请稍后重试。") from exc
         except (URLError, OSError) as exc:
+            product_risk_log.image_batch_finished(
+                batch_index=batch_index,
+                download_ms=download_ms,
+                download_failed=download_failed_count,
+                payload_bytes=len(payload),
+                api_ms=product_risk_log.elapsed_ms(_api_start),
+                success=0,
+                failed=len(products),
+                status="失败",
+                http_error=str(exc)[:80],
+            )
             raise RecognitionUnavailableError(f"图片风险检测无法连接：{exc}") from exc
         except json.JSONDecodeError as exc:
+            product_risk_log.image_batch_finished(
+                batch_index=batch_index,
+                download_ms=download_ms,
+                download_failed=download_failed_count,
+                payload_bytes=len(payload),
+                api_ms=product_risk_log.elapsed_ms(_api_start),
+                success=0,
+                failed=len(products),
+                status="失败",
+                http_error="响应解析失败",
+            )
             raise RecognitionResponseError("图片风险检测服务返回了无法解析的响应。") from exc
 
         # 解析响应
@@ -295,9 +382,30 @@ class ImageRiskScanService:
                     text = text[:-3].strip()
             data = json.loads(text)
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            product_risk_log.image_batch_finished(
+                batch_index=batch_index,
+                download_ms=download_ms,
+                download_failed=download_failed_count,
+                payload_bytes=len(payload),
+                api_ms=product_risk_log.elapsed_ms(_api_start),
+                success=0,
+                failed=len(products),
+                status="失败",
+                http_error="返回格式无效",
+            )
             raise RecognitionResponseError("图片风险检测返回格式无效。") from exc
 
         results = self._parse_results(data, image_items)
+        product_risk_log.image_batch_finished(
+            batch_index=batch_index,
+            download_ms=download_ms,
+            download_failed=download_failed_count,
+            payload_bytes=len(payload),
+            api_ms=product_risk_log.elapsed_ms(_api_start),
+            success=len(results),
+            failed=len(products) - len(results),
+            status="完成",
+        )
         return results, download_failed_count
 
     @staticmethod

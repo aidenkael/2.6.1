@@ -256,6 +256,22 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
         </spacer>
        </item>
        <item>
+        <widget class="QPushButton" name="btnNavProductCollection">
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>42</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>采  商品采集</string>
+         </property>
+         <property name="navItem" stdset="0">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
         <widget class="QPushButton" name="btnNavCalculation">
          <property name="minimumSize">
           <size>
@@ -270,22 +286,6 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
           <bool>true</bool>
          </property>
          <property name="navActive" stdset="0">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="btnNavProductCollection">
-         <property name="minimumSize">
-          <size>
-           <width>0</width>
-           <height>42</height>
-          </size>
-         </property>
-         <property name="text">
-          <string>采  商品采集</string>
-         </property>
-         <property name="navItem" stdset="0">
           <bool>true</bool>
          </property>
         </widget>
@@ -2653,7 +2653,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                               <double>1.000000000000000</double>
                              </property>
                              <property name="value">
-                              <double>47.000000000000000</double>
+                              <double>0.000000000000000</double>
                              </property>
                             </widget>
                            </item>
@@ -2768,7 +2768,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                               <double>1.000000000000000</double>
                              </property>
                              <property name="value">
-                              <double>32.000000000000000</double>
+                              <double>0.000000000000000</double>
                              </property>
                             </widget>
                            </item>
@@ -2883,7 +2883,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                               <double>1.000000000000000</double>
                              </property>
                              <property name="value">
-                              <double>17.000000000000000</double>
+                              <double>0.000000000000000</double>
                              </property>
                             </widget>
                            </item>
@@ -2977,7 +2977,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                               <double>1.000000000000000</double>
                              </property>
                              <property name="value">
-                              <double>720.000000000000000</double>
+                              <double>0.000000000000000</double>
                              </property>
                             </widget>
                            </item>
@@ -3190,7 +3190,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                               <double>1.000000000000000</double>
                              </property>
                              <property name="value">
-                              <double>49.000000000000000</double>
+                              <double>0.000000000000000</double>
                              </property>
                              <property name="preview" stdset="0">
                               <bool>true</bool>
@@ -3314,7 +3314,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                               <double>1.000000000000000</double>
                              </property>
                              <property name="value">
-                              <double>34.000000000000000</double>
+                              <double>0.000000000000000</double>
                              </property>
                              <property name="preview" stdset="0">
                               <bool>true</bool>
@@ -3438,7 +3438,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                               <double>1.000000000000000</double>
                              </property>
                              <property name="value">
-                              <double>19.000000000000000</double>
+                              <double>0.000000000000000</double>
                              </property>
                              <property name="preview" stdset="0">
                               <bool>true</bool>
@@ -3541,7 +3541,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                               <double>1.000000000000000</double>
                              </property>
                              <property name="value">
-                              <double>820.000000000000000</double>
+                              <double>0.000000000000000</double>
                              </property>
                              <property name="preview" stdset="0">
                               <bool>true</bool>
