@@ -3,6 +3,8 @@
 
 复用主软件"按修正重估"绑定的文字 API Profile（LOCAL_REESTIMATE）。
 不新增 API 配置、不新增设置页面、不修改 LocalReestimateService。
+
+风险三档：none / platform / infringement。
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from profit_accounting_26.application.api_profile_store import ApiProfileStore, LOCAL_REESTIMATE
+from profit_accounting_26.application.qwen_request_params import qwen_extra_body_params
 from profit_accounting_26.application.recognition_service import (
     RecognitionResponseError,
     RecognitionService,
@@ -23,7 +26,10 @@ from profit_accounting_26.application.recognition_service import (
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "product-collector-title-risk-v1"
+PROMPT_VERSION = "product-collector-title-risk-v2"
+
+# 合法风险值
+_VALID_RISKS = frozenset({"none", "platform", "infringement"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,9 +37,8 @@ class TitleRiskItem:
     """单个商品的风险检测结果。"""
 
     product_id: str
-    result: str          # "禁止" | "人工复核"
-    labels: list[str]    # 中文风险标签，如 ["带电", "电池充电"]
-    evidence: list[str]  # 标题中的证据文字
+    risk: str          # "none" | "platform" | "infringement"
+    reason: str        # 简短中文原因
 
 
 def _build_prompt(titles: list[dict[str, str]]) -> str:
@@ -43,35 +48,52 @@ def _build_prompt(titles: list[dict[str, str]]) -> str:
     """
     items_text = json.dumps(titles, ensure_ascii=False, indent=2)
     return (
-        "你是商品标题风险快筛器。\n\n"
-        "只能依据标题明确文字判断。\n"
-        "禁止根据品类常识、市场经验、商品通常具有的属性或可能性进行脑补。\n"
-        "证据不足时不要报风险。\n\n"
-        "这不是完整选品审核：\n"
-        "- 不判断市场、利润、尺寸、重量；\n"
-        "- 不改写标题；\n"
-        "- 不判断图片侵权；\n"
-        "- 不做联网查询。\n\n"
-        "重点识别：\n"
-        "1. 带电 / 电动 / USB供电 / 插电 / LED / 电热 / 电机\n"
-        "2. 电池 / 充电 / 锂电\n"
-        "3. 带磁 / 磁铁 / 磁吸 / 强磁\n"
-        "4. 食品 / 饮料 / 零食 / 可食用 / 入口类\n"
-        "5. 明确儿童或婴幼儿玩具\n"
-        "6. 液体 / 喷雾 / 胶水 / 香水 / 精油 / 粉末等高风险形态\n"
-        "7. 标题本身明确提示可能涉及认证要求的商品\n"
-        "8. 其他标题中明确出现的明显禁止或高风险因素\n\n"
-        "儿童规则：\n"
-        "- Kids / Baby / Children 单独出现不能直接判风险。\n"
-        "- 儿童毛巾、收纳、发饰等普通通用生活用品不能因为使用人群文字被误杀。\n"
-        "- 明确儿童玩具、婴儿玩具、电动儿童玩具等才进入风险。\n"
-        "- 解压、捏捏乐、慢回弹、桌面解压等边界商品优先'人工复核'，不要直接判禁止。\n\n"
-        "判断等级：\n"
-        "- 禁止\n"
-        "- 人工复核\n\n"
-        "通过商品不要输出。\n\n"
-        "严格 JSON，格式如下：\n"
-        '{"risks": [{"id": "商品id", "result": "人工复核", "labels": ["带电"], "evidence": ["USB Rechargeable"]}]}\n\n'
+        "你是商品标题风险快筛器。使用完整标题上下文判断。\n\n"
+        "核心原则：\n"
+        "- 禁止简单关键词机械触发。\n"
+        "- 只能依据标题明确出现的信息。\n"
+        "- 不根据'这种商品通常……'脑补。\n"
+        "- Kids/Baby/Children 单独出现不能判断违规。\n"
+        "- Magnetic 必须结合整个商品语义。\n"
+        "- Medical/Therapy 必须结合完整标题判断。\n"
+        "- 普通生活用品不能因面向儿童就误杀。\n"
+        "- 普通风格词不是侵权证据。\n"
+        "- 不联网。\n"
+        "- 不判断物流/利润/重量/尺寸。\n"
+        "- 不改写标题。\n"
+        "- 不做法律定论。\n"
+        "- 模糊情况返回 none。\n\n"
+        "重点 platform 风险：\n"
+        "- 明确武器、高危刀具、爆炸物；\n"
+        "- 烟草、电子烟、毒品；\n"
+        "- 食品饮料；\n"
+        "- 明确药品/高风险医疗/治疗产品；\n"
+        "- 当前业务排除的液体、喷雾、胶水、香水、精油、危险粉末；\n"
+        "- 带电、电动、USB、充电、电池、锂电、LED、电热、电机；\n"
+        "- 明确磁铁/强磁/磁性核心商品；\n"
+        "- 色情成人；\n"
+        "- 赌博；\n"
+        "- 政治/极端/仇恨/恐怖主义；\n"
+        "- 其它明确禁售/当前业务明确排除商品。\n\n"
+        "儿童防误杀：\n"
+        "- Kids/Baby/Children ≠ 自动风险。\n"
+        "- 普通儿童毛巾、发饰、收纳、生活用品不能因此误杀。\n"
+        "- 明确儿童/婴儿玩具、高风险儿童用品才判断。\n"
+        "- 捏捏乐、慢回弹、桌面解压、挂件、小摆件等边界商品：没有明确违规证据时不要强判。\n\n"
+        "重点 infringement 风险：\n"
+        "- 明确品牌名称/商标；\n"
+        "- 影视、动漫、游戏 IP；\n"
+        "- 明星/名人周边；\n"
+        "- 球队、大学、组织；\n"
+        "- Replica / 仿 / 复制 / Inspired by 等直接关联具体品牌/IP。\n\n"
+        "输出格式（严格 JSON）：\n"
+        '{"results": [{"id": "商品id", "risk": "none | platform | infringement", "reason": "简短中文原因"}]}\n\n'
+        "每个送检商品都必须返回且只能返回一个对应结果，包括 risk=none 的商品，不得省略安全商品。\n"
+        "当同一个商品同时满足多种风险时，只返回一个最终 risk：infringement > platform > none。\n"
+        "每个送检商品必须保留 id。reason 一句话即可，none 可以空 reason。\n"
+        "品牌/IP原因：优先常用中文名 + 英文原名，例如：爱马仕（Hermès）、迪士尼（Disney）。\n"
+        "LV、Nike 等常用写法可以直接使用。\n"
+        "不输出'确定侵权''违法'等法律结论。\n\n"
         "以下是待检测商品标题列表：\n"
         + items_text
     )
@@ -81,6 +103,7 @@ class TitleRiskScanService:
     """标题风险批量检测服务。
 
     复用 LOCAL_REESTIMATE 绑定的文字 API Profile。
+    风险三档：none / platform / infringement。
     """
 
     PROMPT_VERSION = PROMPT_VERSION
@@ -96,7 +119,7 @@ class TitleRiskScanService:
         """批量检测标题风险。
 
         titles: [{"id": "product_id", "title": "English title"}, ...]
-        返回: [TitleRiskItem, ...]（只包含有风险的商品）
+        返回: [TitleRiskItem, ...]（包含所有返回结果，含 none）
         """
         if not titles:
             return []
@@ -118,6 +141,7 @@ class TitleRiskScanService:
         }
         if uses_openai_schema:
             body["response_format"] = {"type": "json_object"}
+        body.update(qwen_extra_body_params(profile.provider, profile.model_name))
 
         request = Request(
             endpoint,
@@ -155,25 +179,24 @@ class TitleRiskScanService:
         """解析 AI 返回的风险列表。"""
         if not isinstance(data, dict):
             return []
-        risks_raw = data.get("risks")
-        if not isinstance(risks_raw, list):
+        results_raw = data.get("results")
+        if not isinstance(results_raw, list):
             return []
         results: list[TitleRiskItem] = []
-        for item in risks_raw:
+        for item in results_raw:
             if not isinstance(item, dict):
                 continue
             pid = str(item.get("id") or "").strip()
             if not pid:
                 continue
-            result = str(item.get("result") or "").strip()
-            if result not in ("禁止", "人工复核"):
+            risk = str(item.get("risk") or "").strip().lower()
+            if risk not in _VALID_RISKS:
+                # 非法/未知 risk：跳过该条目，不生成 none，不清除已有风险状态
                 continue
-            labels = [str(lb).strip() for lb in (item.get("labels") or []) if str(lb).strip()]
-            evidence = [str(ev).strip() for ev in (item.get("evidence") or []) if str(ev).strip()]
+            reason = str(item.get("reason") or "").strip()
             results.append(TitleRiskItem(
                 product_id=pid,
-                result=result,
-                labels=labels,
-                evidence=evidence,
+                risk=risk,
+                reason=reason,
             ))
         return results

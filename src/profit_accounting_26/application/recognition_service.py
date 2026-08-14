@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 
 from profit_accounting_26.application.api_profile_store import ApiProfileStore, VISUAL_AI
+from profit_accounting_26.application.qwen_request_params import qwen_extra_body_params
 from profit_accounting_26.application.settings_service import SettingsService
 from profit_accounting_26.domain.models import AIObservation, PackagingProposal, PackagingScenario, PackagingState
 from profit_accounting_26.application.diagnostic_logger import DiagnosticOperation, DiagnosticLogger
@@ -549,7 +550,8 @@ confirmed_facts 是用户已经确认的数据，优先级最高，不得修改�
     def _request_payload(self, *, endpoint: str, api_key: str, model: str,
                           content: list[dict[str, Any]], timeout: int,
                           cancellation: RecognitionCancellation | None,
-                          response_format: dict[str, Any] | None = None) -> dict[str, Any]:
+                          response_format: dict[str, Any] | None = None,
+                          provider: str = "") -> dict[str, Any]:
         body = {
             "model": model,
             "temperature": 0,
@@ -557,6 +559,7 @@ confirmed_facts 是用户已经确认的数据，优先级最高，不得修改�
         }
         if response_format:
             body["response_format"] = response_format
+        body.update(qwen_extra_body_params(provider, model))
         request = Request(
             endpoint,
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
@@ -647,6 +650,7 @@ confirmed_facts 是用户已经确认的数据，优先级最高，不得修改�
                     }}
                     if uses_openai_schema else None
                 ),
+                provider=provider,
             )
             if diagnostic_operation:
                 # Persist the sanitized provider payload before parsing so parser

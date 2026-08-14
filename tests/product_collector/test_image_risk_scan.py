@@ -33,17 +33,11 @@ class TestBuildImagePrompt:
 
     def test_prompt_contains_key_terms(self):
         prompt = _build_image_prompt()
-        assert "品牌 Logo" in prompt
-        assert "动漫角色" in prompt
-        assert "影视角色" in prompt
-        assert "游戏角色" in prompt
-        assert "球队标志" in prompt
-        assert "品牌/IP复核" in prompt or "has_risk" in prompt
+        assert "platform" in prompt or "infringement" in prompt
 
     def test_prompt_contains_strict_rules(self):
         prompt = _build_image_prompt()
-        assert "误判" in prompt
-        assert "侵权" not in prompt or "不是判断" in prompt
+        assert "误判" in prompt or "误杀" in prompt
 
 
 class TestImageRiskScanService:
@@ -62,25 +56,24 @@ class TestImageRiskScanService:
         item = ImageRiskItem(
             product_id="1",
             main_image="https://example.com/pic.jpg",
-            has_risk=True,
-            labels=["品牌Logo"],
-            display_label="品牌/IP复核",
+            risk="infringement",
+            reason="品牌Logo",
         )
         service._set_cached("1", "https://example.com/pic.jpg", item)
         cached = service.get_cached("1", "https://example.com/pic.jpg")
         assert cached is not None
-        assert cached.has_risk is True
+        assert cached.risk == "infringement"
 
     def test_cache_key_includes_url(self):
         """缓存键包含 URL，不同图片不共享缓存。"""
         profile_store = MagicMock()
         service = ImageRiskScanService(profile_store)
-        item1 = ImageRiskItem("1", "https://example.com/pic1.jpg", True, [], "品牌/IP复核")
-        item2 = ImageRiskItem("1", "https://example.com/pic2.jpg", False, [], "")
+        item1 = ImageRiskItem("1", "https://example.com/pic1.jpg", "infringement", "品牌Logo")
+        item2 = ImageRiskItem("1", "https://example.com/pic2.jpg", "none", "")
         service._set_cached("1", "https://example.com/pic1.jpg", item1)
         service._set_cached("1", "https://example.com/pic2.jpg", item2)
-        assert service.get_cached("1", "https://example.com/pic1.jpg").has_risk is True
-        assert service.get_cached("1", "https://example.com/pic2.jpg").has_risk is False
+        assert service.get_cached("1", "https://example.com/pic1.jpg").risk == "infringement"
+        assert service.get_cached("1", "https://example.com/pic2.jpg").risk == "none"
 
     def test_api_not_configured(self):
         """API 无配置时应报错。"""
@@ -107,7 +100,7 @@ class TestImageRiskScanService:
         service = ImageRiskScanService(profile_store)
 
         # 预先缓存一个结果
-        item = ImageRiskItem("1", "https://example.com/pic1.jpg", True, ["品牌Logo"], "品牌/IP复核")
+        item = ImageRiskItem("1", "https://example.com/pic1.jpg", "infringement", "品牌Logo")
         service._set_cached("1", "https://example.com/pic1.jpg", item)
 
         products = [
@@ -119,18 +112,55 @@ class TestImageRiskScanService:
         call_count = [0]
         def mock_scan_batch(batch):
             call_count[0] += 1
-            return [ImageRiskItem("2", "https://example.com/pic2.jpg", False, [], "")], 0
+            return [ImageRiskItem("2", "https://example.com/pic2.jpg", "none", "")], 0
 
         service._scan_single_batch = mock_scan_batch
         results, stats, _all = service.scan_batch(products)
 
         assert call_count[0] == 1  # 只调用了一次
-        assert len(results) == 1  # 只有缓存的那个 has_risk=True
+        assert len(results) == 1  # 只有缓存的那个 risk != none
         assert stats.requested_count == 2
         assert stats.cached_count == 1
         assert stats.checked_count == 1
         assert stats.risk_count == 1
         assert stats.failed_count == 0
+
+    def test_missing_image_counts_as_failed(self):
+        """缺图商品计入 failed_count，不发送 API、不写安全缓存。"""
+        profile_store = MagicMock()
+        service = ImageRiskScanService(profile_store)
+
+        scanned_ids: list[str] = []
+
+        def mock_scan_batch(batch):
+            scanned_ids.extend(str(p.get("id")) for p in batch)
+            return [
+                ImageRiskItem("1", "https://img.example/1.jpg", "none", ""),
+                ImageRiskItem("3", "https://img.example/3.jpg", "none", ""),
+            ], 0
+
+        service._scan_single_batch = mock_scan_batch
+
+        products = [
+            {"id": "1", "main_image": "https://img.example/1.jpg"},
+            {"id": "2", "main_image": ""},  # 缺图
+            {"id": "3", "main_image": "https://img.example/3.jpg"},
+        ]
+        results, stats, all_checked = service.scan_batch(products)
+
+        # 3 个商品都在本次检测范围
+        assert stats.requested_count == 3
+        # 缺图计入失败
+        assert stats.failed_count == 1
+        assert stats.checked_count == 2
+        # 缺图商品不进入 API 请求
+        assert "2" not in scanned_ids
+        # 缺图商品不写安全缓存
+        assert service.get_cached("2", "") is None
+        # 不为缺图商品生成 platform/infringement/none 结果
+        assert len(all_checked) == 2
+        assert all(r.product_id != "2" for r in all_checked)
+        assert all(r.product_id != "2" for r in results)
 
     def test_parse_results_valid(self):
         """正常解析图片风险结果。"""
@@ -140,16 +170,16 @@ class TestImageRiskScanService:
         ]
         data = {
             "results": [
-                {"id": "1", "has_risk": True, "internal_labels": ["品牌Logo"], "detail": "Nike Swoosh"},
-                {"id": "2", "has_risk": False},  # 无风险不输出
+                {"id": "1", "risk": "infringement", "reason": "Nike Swoosh Logo"},
+                {"id": "2", "risk": "none", "reason": ""},
             ]
         }
         results = ImageRiskScanService._parse_results(data, image_items)
         assert len(results) == 2
         assert results[0].product_id == "1"
-        assert results[0].has_risk is True
-        assert results[0].labels == ["品牌Logo"]
-        assert results[0].display_label == "品牌/IP复核"
+        assert results[0].risk == "infringement"
+        assert results[0].reason == "Nike Swoosh Logo"
+        assert results[1].risk == "none"
 
     def test_parse_results_invalid_json(self):
         """非法 JSON 应返回空。"""
@@ -163,11 +193,72 @@ class TestImageRiskScanService:
         image_items = [("1", "https://example.com/pic.jpg", b"fake")]
         data = {
             "results": [
-                {"id": "999", "has_risk": True, "internal_labels": ["品牌Logo"]},  # 未知 id
+                {"id": "999", "risk": "infringement", "reason": "品牌Logo"},  # 未知 id
             ]
         }
         results = ImageRiskScanService._parse_results(data, image_items)
         assert len(results) == 0
+
+    def test_parse_results_invalid_risk_skipped(self):
+        """非法/未知 risk 值应跳过该条目，不生成 none。"""
+        image_items = [
+            ("1", "https://example.com/pic1.jpg", b"fake"),
+            ("2", "https://example.com/pic2.jpg", b"fake"),
+        ]
+        data = {
+            "results": [
+                {"id": "1", "risk": "invalid_value", "reason": ""},  # 跳过
+                {"id": "2", "risk": "platform", "reason": "ok"},
+            ]
+        }
+        results = ImageRiskScanService._parse_results(data, image_items)
+        assert len(results) == 1
+        assert results[0].product_id == "2"
+        assert results[0].risk == "platform"
+
+    def test_parse_results_invalid_risk_not_in_cache(self):
+        """非法 risk 不得写入安全缓存。"""
+        profile_store = MagicMock()
+        service = ImageRiskScanService(profile_store)
+
+        def mock_scan_batch(batch):
+            # 模拟 AI 返回非法 risk，应在 _parse_results 内跳过
+            # 这里模拟 _scan_single_batch 返回空结果（因为非法 risk 被跳过）
+            return [], 0
+
+        service._scan_single_batch = mock_scan_batch
+        products = [{"id": "1", "main_image": "https://example.com/pic.jpg"}]
+        results, stats, all_checked = service.scan_batch(products)
+
+        # 非法 risk 不进入缓存
+        assert service.get_cached("1", "https://example.com/pic.jpg") is None
+        assert len(all_checked) == 0
+
+
+class TestInvalidRiskPreservesExistingState:
+    """测试非法 risk 不清除已有风险状态。"""
+
+    def test_invalid_image_risk_preserves_existing(self):
+        """图片检测返回非法 risk 时，卡片原有风险状态不得清除。"""
+        profile_store = MagicMock()
+        service = ImageRiskScanService(profile_store)
+
+        # 预先缓存一个有风险的结果
+        old_item = ImageRiskItem("1", "https://example.com/pic.jpg", "infringement", "品牌Logo")
+        service._set_cached("1", "https://example.com/pic.jpg", old_item)
+
+        # 模拟 API 返回非法 risk（在 _parse_results 中被跳过）
+        def mock_scan_batch(batch):
+            return [], 0  # 非法结果被跳过，返回空
+
+        service._scan_single_batch = mock_scan_batch
+        products = [{"id": "1", "main_image": "https://example.com/pic.jpg"}]
+        results, stats, all_checked = service.scan_batch(products, force_refresh=True)
+
+        # 旧缓存应保留（因为新结果是非法的，不写入缓存）
+        cached = service.get_cached("1", "https://example.com/pic.jpg")
+        assert cached is not None
+        assert cached.risk == "infringement"
 
 
 class TestImageRiskScanServiceIntegration:
@@ -184,8 +275,8 @@ class TestImageRiskScanServiceIntegration:
 
         response_data = {
             "results": [
-                {"id": "1", "has_risk": True, "internal_labels": ["角色IP"], "detail": "Disney Character"},
-                {"id": "2", "has_risk": False},
+                {"id": "1", "risk": "infringement", "reason": "Disney Character"},
+                {"id": "2", "risk": "none", "reason": ""},
             ]
         }
         response_json = json.dumps({
@@ -219,8 +310,7 @@ class TestImageRiskScanServiceIntegration:
         assert stats.risk_count == 1
         assert len(results) == 1
         assert results[0].product_id == "1"
-        assert results[0].has_risk is True
-        assert "角色IP" in results[0].labels
+        assert results[0].risk == "infringement"
 
 
 class TestBatchSize:
@@ -239,12 +329,12 @@ class TestNoRiskCaching:
     """测试无风险图片的缓存行为。"""
 
     def test_no_risk_result_enters_cache(self):
-        """has_risk=false 的结果应进入运行期缓存。"""
+        """risk=none 的结果应进入运行期缓存。"""
         profile_store = MagicMock()
         service = ImageRiskScanService(profile_store)
 
         def mock_scan_batch(batch):
-            return [ImageRiskItem("1", "https://example.com/pic.jpg", False, [], "")], 0
+            return [ImageRiskItem("1", "https://example.com/pic.jpg", "none", "")], 0
 
         service._scan_single_batch = mock_scan_batch
         products = [{"id": "1", "main_image": "https://example.com/pic.jpg"}]
@@ -255,7 +345,7 @@ class TestNoRiskCaching:
         # 但应进入缓存
         cached = service.get_cached("1", "https://example.com/pic.jpg")
         assert cached is not None
-        assert cached.has_risk is False
+        assert cached.risk == "none"
 
     def test_same_normal_image_skips_api(self):
         """再次检测同一正常图片不应重复调用 API。"""
@@ -263,7 +353,7 @@ class TestNoRiskCaching:
         service = ImageRiskScanService(profile_store)
 
         # 预先缓存无风险结果
-        item = ImageRiskItem("1", "https://example.com/pic.jpg", False, [], "")
+        item = ImageRiskItem("1", "https://example.com/pic.jpg", "none", "")
         service._set_cached("1", "https://example.com/pic.jpg", item)
 
         call_count = [0]
@@ -286,7 +376,7 @@ class TestNoRiskCaching:
         service = ImageRiskScanService(profile_store)
 
         def mock_scan_batch(batch):
-            return [ImageRiskItem("1", "https://example.com/pic.jpg", True, ["品牌Logo"], "品牌/IP复核")], 0
+            return [ImageRiskItem("1", "https://example.com/pic.jpg", "infringement", "品牌Logo")], 0
 
         service._scan_single_batch = mock_scan_batch
         products = [{"id": "1", "main_image": "https://example.com/pic.jpg"}]
@@ -295,7 +385,7 @@ class TestNoRiskCaching:
         assert len(results) == 1
         cached = service.get_cached("1", "https://example.com/pic.jpg")
         assert cached is not None
-        assert cached.has_risk is True
+        assert cached.risk == "infringement"
 
 
 class TestImageRiskStats:
@@ -308,8 +398,8 @@ class TestImageRiskStats:
 
         def mock_scan_batch(batch):
             return [
-                ImageRiskItem("1", "https://example.com/p1.jpg", False, [], ""),
-                ImageRiskItem("2", "https://example.com/p2.jpg", False, [], ""),
+                ImageRiskItem("1", "https://example.com/p1.jpg", "none", ""),
+                ImageRiskItem("2", "https://example.com/p2.jpg", "none", ""),
             ], 0
 
         service._scan_single_batch = mock_scan_batch
@@ -337,8 +427,8 @@ class TestImageRiskStats:
                 # 第一批 10 个商品，AI 只返回了 8 个，2 个漏返回
                 results = [
                     ImageRiskItem(str(i), f"https://example.com/p{i}.jpg",
-                                 i == 1, ["角色IP"] if i == 1 else [],
-                                 "品牌/IP复核" if i == 1 else "")
+                                 "infringement" if i == 1 else "none",
+                                 "角色IP" if i == 1 else "")
                     for i in range(1, 9)
                 ]
                 return results, 0
@@ -366,12 +456,12 @@ class TestImageRiskStats:
 
         # 预先缓存 2 个（1 风险 + 1 无风险）
         service._set_cached("1", "https://example.com/p1.jpg",
-                           ImageRiskItem("1", "https://example.com/p1.jpg", True, ["品牌Logo"], "品牌/IP复核"))
+                           ImageRiskItem("1", "https://example.com/p1.jpg", "infringement", "品牌Logo"))
         service._set_cached("2", "https://example.com/p2.jpg",
-                           ImageRiskItem("2", "https://example.com/p2.jpg", False, [], ""))
+                           ImageRiskItem("2", "https://example.com/p2.jpg", "none", ""))
 
         def mock_scan_batch(batch):
-            return [ImageRiskItem("3", "https://example.com/p3.jpg", False, [], "")], 0
+            return [ImageRiskItem("3", "https://example.com/p3.jpg", "none", "")], 0
 
         service._scan_single_batch = mock_scan_batch
         products = [
@@ -399,7 +489,7 @@ class TestDownloadFailureStats:
 
         def mock_scan_batch(batch):
             # 10个商品中只有1个成功下载，9个下载失败
-            return [ImageRiskItem("1", "https://example.com/p1.jpg", True, ["品牌Logo"], "品牌/IP复核")], 9
+            return [ImageRiskItem("1", "https://example.com/p1.jpg", "infringement", "品牌Logo")], 9
 
         service._scan_single_batch = mock_scan_batch
         products = [{"id": str(i), "main_image": f"https://example.com/p{i}.jpg"} for i in range(1, 11)]
@@ -419,7 +509,7 @@ class TestDownloadFailureStats:
         service = ImageRiskScanService(profile_store)
 
         def mock_scan_batch(batch):
-            return [ImageRiskItem("1", "https://example.com/p1.jpg", True, ["角色IP"], "品牌/IP复核")], 1
+            return [ImageRiskItem("1", "https://example.com/p1.jpg", "infringement", "角色IP")], 1
 
         service._scan_single_batch = mock_scan_batch
         products = [
@@ -450,8 +540,8 @@ class TestAIMissedAndDuplicate:
         def mock_scan_batch(batch):
             # 3 个商品送检，但 AI 只返回了 2 个
             return [
-                ImageRiskItem("1", "https://example.com/p1.jpg", True, ["角色IP"], "品牌/IP复核"),
-                ImageRiskItem("2", "https://example.com/p2.jpg", False, [], ""),
+                ImageRiskItem("1", "https://example.com/p1.jpg", "infringement", "角色IP"),
+                ImageRiskItem("2", "https://example.com/p2.jpg", "none", ""),
             ], 0  # 下载都成功
 
         service._scan_single_batch = mock_scan_batch
@@ -474,8 +564,8 @@ class TestAIMissedAndDuplicate:
         ]
         data = {
             "results": [
-                {"id": "1", "has_risk": True, "internal_labels": ["角色IP"]},
-                {"id": "999", "has_risk": True, "internal_labels": ["品牌Logo"]},  # 未知 id
+                {"id": "1", "risk": "infringement", "reason": "角色IP"},
+                {"id": "999", "risk": "infringement", "reason": "品牌Logo"},  # 未知 id
             ]
         }
         results = ImageRiskScanService._parse_results(data, image_items)
@@ -489,13 +579,13 @@ class TestAIMissedAndDuplicate:
         ]
         data = {
             "results": [
-                {"id": "1", "has_risk": True, "internal_labels": ["角色IP"]},
-                {"id": "1", "has_risk": False},  # 重复
+                {"id": "1", "risk": "infringement", "reason": "角色IP"},
+                {"id": "1", "risk": "none", "reason": ""},  # 重复
             ]
         }
         results = ImageRiskScanService._parse_results(data, image_items)
         assert len(results) == 1
-        assert results[0].has_risk is True  # 取第一个
+        assert results[0].risk == "infringement"  # 取第一个
 
 
 class TestStatsInvariant:
@@ -508,12 +598,12 @@ class TestStatsInvariant:
 
         # 预先缓存 1 个
         service._set_cached("1", "https://example.com/p1.jpg",
-                           ImageRiskItem("1", "https://example.com/p1.jpg", True, ["品牌Logo"], "品牌/IP复核"))
+                           ImageRiskItem("1", "https://example.com/p1.jpg", "infringement", "品牌Logo"))
 
         def mock_scan_batch(batch):
             # 2个商品送检（id=2, id=3）
             # id=2 成功，id=3 下载失败
-            return [ImageRiskItem("2", "https://example.com/p2.jpg", False, [], "")], 1
+            return [ImageRiskItem("2", "https://example.com/p2.jpg", "none", "")], 1
 
         service._scan_single_batch = mock_scan_batch
         products = [
@@ -539,7 +629,7 @@ class TestForceRefresh:
         profile_store = MagicMock()
         service = ImageRiskScanService(profile_store)
         service._set_cached("1", "https://example.com/p1.jpg",
-                           ImageRiskItem("1", "https://example.com/p1.jpg", True, ["品牌Logo"], "品牌/IP复核"))
+                           ImageRiskItem("1", "https://example.com/p1.jpg", "infringement", "品牌Logo"))
 
         call_count = [0]
         def mock_scan_batch(batch):
@@ -559,12 +649,12 @@ class TestForceRefresh:
         profile_store = MagicMock()
         service = ImageRiskScanService(profile_store)
         service._set_cached("1", "https://example.com/p1.jpg",
-                           ImageRiskItem("1", "https://example.com/p1.jpg", True, ["品牌Logo"], "品牌/IP复核"))
+                           ImageRiskItem("1", "https://example.com/p1.jpg", "infringement", "品牌Logo"))
 
         call_count = [0]
         def mock_scan_batch(batch):
             call_count[0] += 1
-            return [ImageRiskItem("1", "https://example.com/p1.jpg", False, [], "")], 0
+            return [ImageRiskItem("1", "https://example.com/p1.jpg", "none", "")], 0
 
         service._scan_single_batch = mock_scan_batch
         products = [{"id": "1", "main_image": "https://example.com/p1.jpg"}]
@@ -580,11 +670,11 @@ class TestForceRefresh:
         service = ImageRiskScanService(profile_store)
         # 旧缓存：有风险
         service._set_cached("1", "https://example.com/p1.jpg",
-                           ImageRiskItem("1", "https://example.com/p1.jpg", True, ["品牌Logo"], "品牌/IP复核"))
+                           ImageRiskItem("1", "https://example.com/p1.jpg", "infringement", "品牌Logo"))
 
         def mock_scan_batch(batch):
             # 新结果：无风险
-            return [ImageRiskItem("1", "https://example.com/p1.jpg", False, [], "")], 0
+            return [ImageRiskItem("1", "https://example.com/p1.jpg", "none", "")], 0
 
         service._scan_single_batch = mock_scan_batch
         products = [{"id": "1", "main_image": "https://example.com/p1.jpg"}]
@@ -593,7 +683,7 @@ class TestForceRefresh:
         # 缓存已被新结果覆盖
         cached = service.get_cached("1", "https://example.com/p1.jpg")
         assert cached is not None
-        assert cached.has_risk is False
+        assert cached.risk == "none"
         # 无风险结果不进入 risky results
         assert len(results) == 0
 
@@ -606,7 +696,7 @@ class TestNoPersistence:
         profile_store = MagicMock()
         service = ImageRiskScanService(profile_store)
         service._set_cached("1", "https://example.com/p1.jpg",
-                           ImageRiskItem("1", "https://example.com/p1.jpg", True, ["品牌Logo"], "品牌/IP复核"))
+                           ImageRiskItem("1", "https://example.com/p1.jpg", "infringement", "品牌Logo"))
         # 只检查内存缓存存在，且没有文件创建逻辑
         assert len(service._cache) == 1
         assert service.get_cached("1", "https://example.com/p1.jpg") is not None
@@ -625,8 +715,8 @@ class TestAllChecked:
 
         def mock_scan_batch(batch):
             return [
-                ImageRiskItem("1", "https://example.com/p1.jpg", True, ["角色IP"], "品牌/IP复核"),
-                ImageRiskItem("2", "https://example.com/p2.jpg", False, [], ""),
+                ImageRiskItem("1", "https://example.com/p1.jpg", "infringement", "角色IP"),
+                ImageRiskItem("2", "https://example.com/p2.jpg", "none", ""),
             ], 0
 
         service._scan_single_batch = mock_scan_batch
@@ -638,15 +728,15 @@ class TestAllChecked:
 
         assert len(results) == 1  # 只有风险的
         assert len(all_checked) == 2  # 包含安全的
-        assert all_checked[0].has_risk is True
-        assert all_checked[1].has_risk is False
+        assert all_checked[0].risk == "infringement"
+        assert all_checked[1].risk == "none"
 
     def test_all_checked_empty_when_all_cached(self):
         """全部命中缓存时 all_checked 为空（无需更新 UI）。"""
         profile_store = MagicMock()
         service = ImageRiskScanService(profile_store)
         service._set_cached("1", "https://example.com/p1.jpg",
-                           ImageRiskItem("1", "https://example.com/p1.jpg", True, ["角色IP"], "品牌/IP复核"))
+                           ImageRiskItem("1", "https://example.com/p1.jpg", "infringement", "角色IP"))
         products = [{"id": "1", "main_image": "https://example.com/p1.jpg"}]
         results, stats, all_checked = service.scan_batch(products)
 
@@ -660,7 +750,7 @@ class TestAllChecked:
 
         def mock_scan_batch(batch):
             # 1个成功，2个下载失败
-            return [ImageRiskItem("1", "https://example.com/p1.jpg", False, [], "")], 2
+            return [ImageRiskItem("1", "https://example.com/p1.jpg", "none", "")], 2
 
         service._scan_single_batch = mock_scan_batch
         products = [

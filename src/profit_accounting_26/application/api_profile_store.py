@@ -8,6 +8,7 @@ from uuid import uuid4
 
 VISUAL_AI = "visual_ai"
 LOCAL_REESTIMATE = "local_reestimate"
+IMAGE_RISK = "image_risk"
 
 PROVIDER_PRESETS = {
     "DeepSeek": "https://api.deepseek.com/chat/completions",
@@ -56,7 +57,7 @@ class ApiProfileStore:
     def _empty_public() -> dict:
         return {
             "profiles": [],
-            "button_bindings": {VISUAL_AI: None, LOCAL_REESTIMATE: None},
+            "button_bindings": {VISUAL_AI: None, LOCAL_REESTIMATE: None, IMAGE_RISK: None},
         }
 
     def load_public(self) -> dict:
@@ -72,6 +73,7 @@ class ApiProfileStore:
         data.setdefault("button_bindings", {})
         data["button_bindings"].setdefault(VISUAL_AI, None)
         data["button_bindings"].setdefault(LOCAL_REESTIMATE, None)
+        data["button_bindings"].setdefault(IMAGE_RISK, None)
         return data
 
     def load_keys(self) -> dict[str, str]:
@@ -128,7 +130,7 @@ class ApiProfileStore:
         public["profiles"] = remaining
         bindings = public["button_bindings"]
         binding_cleared = False
-        for action in (VISUAL_AI, LOCAL_REESTIMATE):
+        for action in (VISUAL_AI, LOCAL_REESTIMATE, IMAGE_RISK):
             if bindings.get(action) == profile_id:
                 bindings[action] = None
                 binding_cleared = True
@@ -143,7 +145,7 @@ class ApiProfileStore:
         return existed
 
     def bind(self, action: str, profile_id: str | None) -> None:
-        if action not in {VISUAL_AI, LOCAL_REESTIMATE}:
+        if action not in {VISUAL_AI, LOCAL_REESTIMATE, IMAGE_RISK}:
             raise ValueError("未知 API 绑定")
         public = self.load_public()
         valid_ids = {str(item.get("profile_id")) for item in public["profiles"]}

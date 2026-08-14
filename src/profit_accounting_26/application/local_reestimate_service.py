@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from profit_accounting_26.application.api_profile_store import ApiProfileStore, LOCAL_REESTIMATE
+from profit_accounting_26.application.qwen_request_params import qwen_extra_body_params
 from profit_accounting_26.application.recognition_service import (
     RecognitionResponseError,
     RecognitionService,
@@ -146,6 +147,7 @@ class LocalReestimateService:
                 "type": "json_schema",
                 "json_schema": {"name": "corrected_shipment_v1", "strict": True, "schema": self.RESPONSE_SCHEMA},
             }
+        body.update(qwen_extra_body_params(profile.provider, profile.model_name))
         request = Request(
             endpoint,
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),

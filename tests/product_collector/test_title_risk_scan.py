@@ -2,16 +2,12 @@
 
 覆盖：
 - 英文标题批量输入
-- 中文标签解析
+- 新 3 档风险解析（none/platform/infringement）
+- 旧"禁止"/"人工复核"不再作为有效输出
 - Kids Towel 不误杀
-- Kids Electric Toy Car 命中
-- Magnetic Phone Holder 命中
 - USB Rechargeable Fan 命中
-- Women Shoulder Bag 不输出
-- Phone Holder 不脑补带电
 - API 无配置
 - 非法 JSON
-- 部分 id 不存在
 - 空结果
 """
 
@@ -42,44 +38,20 @@ class TestBuildPrompt:
         assert "Women Shoulder Bag" in prompt
         assert "商品标题风险快筛器" in prompt
 
-    def test_prompt_contains_rules(self):
+    def test_prompt_contains_new_risk_levels(self):
         prompt = _build_prompt([{"id": "1", "title": "Test"}])
-        assert "禁止" in prompt
-        assert "人工复核" in prompt
+        assert "platform" in prompt
+        assert "infringement" in prompt
+        assert "none" in prompt
+
+    def test_prompt_contains_kids_rule(self):
+        prompt = _build_prompt([{"id": "1", "title": "Test"}])
         assert "Kids" in prompt
+        assert "none" in prompt
 
 
 class TestTitleRiskScanService:
     """测试 TitleRiskScanService。"""
-
-    def _make_service(self, response_data: dict | None = None, error: Exception | None = None):
-        """创建测试用 service，mock API 调用。"""
-        profile_store = MagicMock()
-        profile = MagicMock()
-        profile.api_url = "https://api.example.com/v1"
-        profile.model_name = "test-model"
-        profile.provider = "OpenAI"
-        profile_store.bound_profile.return_value = (profile, "test-key")
-
-        service = TitleRiskScanService(profile_store)
-
-        if response_data is not None:
-            response_json = json.dumps({
-                "choices": [{"message": {"content": json.dumps(response_data)}}]
-            }).encode("utf-8")
-
-            class MockResponse:
-                def __enter__(self):
-                    return self
-                def __exit__(self, *args):
-                    return False
-                def read(self):
-                    return response_json
-
-            import profit_accounting_26.product_collector.title_risk_scan as module
-            module.urlopen = lambda *args, **kwargs: MockResponse()
-
-        return service
 
     def test_api_not_configured(self):
         """API 无配置时应报错。"""
@@ -101,47 +73,62 @@ class TestTitleRiskScanService:
     def test_parse_risks_valid(self):
         """正常解析风险结果。"""
         data = {
-            "risks": [
-                {"id": "1", "result": "人工复核", "labels": ["带电"], "evidence": ["USB"]},
-                {"id": "2", "result": "禁止", "labels": ["食品"], "evidence": ["Candy"]},
+            "results": [
+                {"id": "1", "risk": "platform", "reason": "USB充电风扇"},
+                {"id": "2", "risk": "none", "reason": ""},
+                {"id": "3", "risk": "infringement", "reason": "Nike品牌商标"},
             ]
         }
         risks = TitleRiskScanService._parse_risks(data)
-        assert len(risks) == 2
+        assert len(risks) == 3
         assert risks[0].product_id == "1"
-        assert risks[0].result == "人工复核"
-        assert risks[0].labels == ["带电"]
-        assert risks[1].result == "禁止"
+        assert risks[0].risk == "platform"
+        assert risks[1].risk == "none"
+        assert risks[2].risk == "infringement"
+        assert risks[2].reason == "Nike品牌商标"
+
+    def test_parse_risks_unknown_risk_skipped(self):
+        """未知/非法风险值应跳过该条目，不生成 none。"""
+        data = {
+            "results": [
+                {"id": "1", "risk": "unknown_value", "reason": ""},  # 跳过
+                {"id": "2", "risk": "platform", "reason": "ok"},
+            ]
+        }
+        risks = TitleRiskScanService._parse_risks(data)
+        assert len(risks) == 1
+        assert risks[0].product_id == "2"
+        assert risks[0].risk == "platform"
+
+    def test_parse_risks_old_format_returns_empty(self):
+        """旧"禁止"/"人工复核"格式不再作为有效输出。"""
+        data = {
+            "risks": [
+                {"id": "1", "result": "人工复核", "labels": ["带电"]},
+                {"id": "2", "result": "禁止", "labels": ["食品"]},
+            ]
+        }
+        risks = TitleRiskScanService._parse_risks(data)
+        assert risks == []
 
     def test_parse_risks_invalid_json(self):
         """非法 JSON 应返回空。"""
         assert TitleRiskScanService._parse_risks("not a dict") == []
         assert TitleRiskScanService._parse_risks({}) == []
-        assert TitleRiskScanService._parse_risks({"risks": "not a list"}) == []
+        assert TitleRiskScanService._parse_risks({"results": "not a list"}) == []
 
     def test_parse_risks_skips_invalid_items(self):
         """跳过无效项。"""
         data = {
-            "risks": [
-                {"id": "", "result": "人工复核", "labels": ["带电"]},  # 空 id
-                {"id": "2", "result": "通过", "labels": []},  # 无效 result
-                {"id": "3", "result": "人工复核", "labels": ["带电"]},  # 有效
+            "results": [
+                {"id": "", "risk": "platform", "reason": ""},  # 空 id
+                {"id": "2", "risk": "platform", "reason": "ok"},  # 有效
+                None,  # 非 dict
             ]
         }
         risks = TitleRiskScanService._parse_risks(data)
         assert len(risks) == 1
-        assert risks[0].product_id == "3"
-
-    def test_parse_risks_partial_ids(self):
-        """部分 id 不存在时只返回存在的。"""
-        data = {
-            "risks": [
-                {"id": "999", "result": "人工复核", "labels": ["带电"]},  # 不存在的 id
-            ]
-        }
-        # 解析不检查 id 是否存在，由调用方处理
-        risks = TitleRiskScanService._parse_risks(data)
-        assert len(risks) == 1
+        assert risks[0].product_id == "2"
 
 
 class TestTitleRiskScanServiceIntegration:
@@ -157,8 +144,9 @@ class TestTitleRiskScanServiceIntegration:
         profile_store.bound_profile.return_value = (profile, "test-key")
 
         response_data = {
-            "risks": [
-                {"id": "1", "result": "人工复核", "labels": ["带电", "电池充电"], "evidence": ["USB Rechargeable"]},
+            "results": [
+                {"id": "1", "risk": "platform", "reason": "USB充电风扇，平台禁售"},
+                {"id": "2", "risk": "none", "reason": ""},
             ]
         }
         response_json = json.dumps({
@@ -183,7 +171,8 @@ class TestTitleRiskScanServiceIntegration:
         ]
         risks = service.scan(titles)
 
-        assert len(risks) == 1
+        assert len(risks) == 2
         assert risks[0].product_id == "1"
-        assert risks[0].result == "人工复核"
-        assert "带电" in risks[0].labels
+        assert risks[0].risk == "platform"
+        assert risks[1].product_id == "2"
+        assert risks[1].risk == "none"
