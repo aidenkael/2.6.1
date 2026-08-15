@@ -2226,8 +2226,15 @@ class TestDetectFreezeBehavior(_PageCase):
             fail_fast,
         ):
             self._dblclick_at(card, QPointF(110, 110))
-            self._pump(200)
+            # 轮询等待搜图线程真正结束并清理，避免测试结束时线程仍在运行、
+            # 页面销毁运行中的 QThread 触发崩溃（Linux CI 上为 SIGBUS）。
+            for _ in range(60):
+                self._pump(50)
+                if self.page._image_search_thread is None:
+                    break
         self.assertEqual(received, [card._product.main_image])
+        self.assertIsNone(self.page._image_search_thread)
+        self.assertIsNone(self.page._image_search_worker)
 
     def test_buttons_disabled_while_detecting(self):
         """检测中：全选/移除/恢复/清空/重新采集等全部禁用。"""
@@ -2369,6 +2376,7 @@ class TestEtaStatus(_PageCase):
         self.assertEqual(text.count("约"), 1)
         # avg=60s, 剩余 2 批 -> 120s -> "约 2分"，外层不再重复拼接"约"
         self.assertIn("预计剩余约 2分", text)
+        self.page._exit_detecting()
 
     def test_eta_all_detect_single_yue(self):
         """全部检测阶段同样只有一个'约'。"""
@@ -2382,6 +2390,7 @@ class TestEtaStatus(_PageCase):
         text = self.page.lbl_status.text()
         self.assertNotIn("约 约", text)
         self.assertIn("预计本阶段剩余约 2分", text)
+        self.page._exit_detecting()
 
     def test_eta_cleared_after_last_batch(self):
         """最后一个批次完成：不再显示 ETA。"""
