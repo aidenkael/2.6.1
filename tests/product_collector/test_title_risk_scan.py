@@ -91,6 +91,17 @@ class TestPromptContractV3:
         assert "暴力" in prompt
         assert "自残" in prompt
 
+    def test_prompt_contains_religious_building(self):
+        """标题 Prompt 明确宗教建筑（mosque / church / temple）。"""
+        prompt = _build_prompt([{"id": "1", "title": "Test"}])
+        assert "明确宗教建筑" in prompt
+        assert "mosque" in prompt
+        assert "church" in prompt
+        assert "temple" in prompt
+        assert "普通建筑不能靠猜测判断宗教" in prompt
+        assert "Cross、Star 等单独词语不自动判宗教" in prompt
+        assert "证据不足 -> none" in prompt
+
     def test_prompt_collect_exclusion_uses_platform_and_prefix(self):
         """用户采集排除项仍输出 platform，reason 标记采集规则排除。"""
         prompt = _build_prompt([{"id": "1", "title": "Test"}])

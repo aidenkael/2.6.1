@@ -812,6 +812,7 @@ class TestPromptContractV3:
         assert "宗教人物" in prompt
         assert "宗教经文" in prompt
         assert "明确可识别即可判" in prompt
+        assert "宗教建筑" in prompt
 
     def test_prompt_contains_hate_semantics(self):
         """图片 Prompt 包含仇恨 / 歧视风险语义。"""
@@ -826,6 +827,19 @@ class TestPromptContractV3:
         assert "血腥" in prompt
         assert "自残" in prompt
         assert "开放性伤口" in prompt
+
+    def test_prompt_sensitive_flag_still_platform(self):
+        """敏感旗帜 / 国徽仍属于 platform 范围，不因印在商品上而豁免。"""
+        prompt = _build_image_prompt()
+        assert "敏感旗帜 / 国徽" in prompt
+        assert "仍应判 platform" in prompt
+        assert "自动豁免" in prompt
+
+    def test_prompt_no_absolute_flag_exemption(self):
+        """不允许再次出现'国旗 / 国徽只要装饰用途就不判'的绝对豁免语义。"""
+        prompt = _build_image_prompt()
+        assert "仅装饰性使用且无政治宣传语义，不判" not in prompt
+        assert "普通非敏感旗帜" in prompt
 
     def test_prompt_contains_halloween_guard(self):
         """图片 Prompt 包含 Halloween 防误杀语义。"""
