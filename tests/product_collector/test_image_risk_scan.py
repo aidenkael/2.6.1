@@ -779,6 +779,218 @@ def risk_log_dir(tmp_path):
         handler.close()
 
 
+class TestPromptContractV3:
+    """V3 图片 Prompt / request contract 测试。
+
+    只验证 Prompt contract、request contract、解析器与兼容性，
+    不做假 AI 准确率测试。
+    """
+
+    def test_prompt_version_is_v3(self):
+        """图片 PROMPT_VERSION 必须为 v3。"""
+        import profit_accounting_26.product_collector.image_risk_scan as module
+        assert module.PROMPT_VERSION == "product-collector-image-risk-v3"
+        assert ImageRiskScanService.PROMPT_VERSION == "product-collector-image-risk-v3"
+
+    def test_prompt_contains_adult_semantics(self):
+        """图片 Prompt 包含成人色情 / 性暗示风险语义。"""
+        prompt = _build_image_prompt()
+        assert "性暗示" in prompt
+        assert "性器官" in prompt
+        assert "儿童性感化" in prompt
+
+    def test_prompt_contains_political_semantics(self):
+        """图片 Prompt 包含政治人物 / 政治组织风险语义。"""
+        prompt = _build_image_prompt()
+        assert "政治人物" in prompt
+        assert "政党 / 政治组织" in prompt
+        assert "政治口号" in prompt
+
+    def test_prompt_contains_religion_semantics(self):
+        """图片 Prompt 包含明确宗教内容风险语义。"""
+        prompt = _build_image_prompt()
+        assert "宗教人物" in prompt
+        assert "宗教经文" in prompt
+        assert "明确可识别即可判" in prompt
+        assert "宗教建筑" in prompt
+
+    def test_prompt_contains_hate_semantics(self):
+        """图片 Prompt 包含仇恨 / 歧视风险语义。"""
+        prompt = _build_image_prompt()
+        assert "仇恨" in prompt
+        assert "歧视" in prompt
+        assert "白人至上" in prompt
+
+    def test_prompt_contains_violence_semantics(self):
+        """图片 Prompt 包含严重暴力 / 血腥 / 自残风险语义。"""
+        prompt = _build_image_prompt()
+        assert "血腥" in prompt
+        assert "自残" in prompt
+        assert "开放性伤口" in prompt
+
+    def test_prompt_sensitive_flag_still_platform(self):
+        """敏感旗帜 / 国徽仍属于 platform 范围，不因印在商品上而豁免。"""
+        prompt = _build_image_prompt()
+        assert "敏感旗帜 / 国徽" in prompt
+        assert "仍应判 platform" in prompt
+        assert "自动豁免" in prompt
+
+    def test_prompt_no_absolute_flag_exemption(self):
+        """不允许再次出现'国旗 / 国徽只要装饰用途就不判'的绝对豁免语义。"""
+        prompt = _build_image_prompt()
+        assert "仅装饰性使用且无政治宣传语义，不判" not in prompt
+        assert "普通非敏感旗帜" in prompt
+
+    def test_prompt_contains_halloween_guard(self):
+        """图片 Prompt 包含 Halloween 防误杀语义。"""
+        prompt = _build_image_prompt()
+        assert "美国站 Halloween 防误杀" in prompt
+        assert "普通骷髅" in prompt
+        assert "普通南瓜" in prompt
+
+    def test_prompt_contains_88_context_guard(self):
+        """图片 Prompt 明确 88 不能脱离语境机械判断。"""
+        prompt = _build_image_prompt()
+        assert "14/88" in prompt
+        assert "88cm" in prompt
+        assert "普通含义绝不判风险" in prompt
+
+    def test_prompt_contains_packaging_brand_signal(self):
+        """图片 Prompt 包含明显品牌包装标识风险。"""
+        prompt = _build_image_prompt()
+        assert "包装 Logo" in prompt
+        assert "包装商标" in prompt
+        assert "独立包装名称" in prompt
+
+    def test_prompt_title_is_auxiliary_only(self):
+        """标题仅辅助、图片必须有视觉证据。"""
+        prompt = _build_image_prompt()
+        assert "辅助信息" in prompt
+        assert "视觉证据" in prompt
+        assert "不得仅凭标题判风险" in prompt
+
+    def test_prompt_contains_reason_prefixes(self):
+        """reason 三种前缀存在。"""
+        prompt = _build_image_prompt()
+        assert "SHEIN规则风险｜" in prompt
+        assert "采集规则排除｜" in prompt
+        assert "侵权风险｜" in prompt
+
+    def test_prompt_risk_enum_still_three(self):
+        """图片风险枚举仍只有 none/platform/infringement，无第四档。"""
+        prompt = _build_image_prompt()
+        assert "none | platform | infringement" in prompt
+        lowered = prompt.lower()
+        assert "review" not in lowered
+        assert "confidence" not in lowered
+        assert "risk_type" not in lowered
+
+    def test_batch_size_still_10(self):
+        """BATCH_SIZE 仍为 10。"""
+        assert BATCH_SIZE == 10
+        assert ImageRiskScanService.BATCH_SIZE == 10
+
+
+class TestImageRequestWithTitle:
+    """图片请求携带标题辅助上下文（request contract）。"""
+
+    @staticmethod
+    def _service_with_capture(monkeypatch):
+        """构造 service 并捕获实际请求 body。"""
+        profile_store = MagicMock()
+        profile = MagicMock()
+        profile.api_url = "https://api.example.com/v1"
+        profile.model_name = "test-model"
+        profile.provider = "OpenAI"
+        profile_store.bound_profile.return_value = (profile, "test-key")
+
+        captured: dict = {}
+        response_data = {"results": [{"id": "1", "risk": "none", "reason": ""}]}
+        response_json = json.dumps({
+            "choices": [{"message": {"content": json.dumps(response_data)}}]
+        }).encode("utf-8")
+
+        class MockResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return response_json
+
+        import profit_accounting_26.product_collector.image_risk_scan as module
+
+        def fake_urlopen(request, **kwargs):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return MockResponse()
+
+        monkeypatch.setattr(module, "urlopen", fake_urlopen)
+        service = ImageRiskScanService(profile_store)
+        monkeypatch.setattr(service, "_download_image", lambda url: b"fake-image-data")
+        return service, captured
+
+    @staticmethod
+    def _texts(body):
+        content = body["messages"][0]["content"]
+        return [c["text"] for c in content if c.get("type") == "text"]
+
+    def test_request_contains_id_title_image(self, monkeypatch):
+        """图片请求实际带 id、title、image。"""
+        service, captured = self._service_with_capture(monkeypatch)
+        products = [
+            {"id": "1", "title": "Disney Halloween Bag", "main_image": "https://example.com/1.jpg"}
+        ]
+        service.scan_batch(products)
+        text_all = "\n".join(self._texts(captured["body"]))
+        assert "商品ID: 1" in text_all
+        assert "商品标题: Disney Halloween Bag" in text_all
+        content = captured["body"]["messages"][0]["content"]
+        assert any(c.get("type") == "image_url" for c in content)
+
+    def test_empty_title_omits_title_text(self, monkeypatch):
+        """title 为空时请求不携带标题文本，图片检测仍正常运行。"""
+        service, captured = self._service_with_capture(monkeypatch)
+        products = [{"id": "1", "title": "", "main_image": "https://example.com/1.jpg"}]
+        risky, stats, _all = service.scan_batch(products)
+        assert stats.failed_count == 0
+        assert stats.checked_count == 1
+        text_all = "\n".join(self._texts(captured["body"]))
+        assert "商品ID: 1" in text_all
+        assert "商品标题:" not in text_all
+
+    def test_missing_title_key_still_works(self, monkeypatch):
+        """旧调用不提供 title 键时不崩溃。"""
+        service, captured = self._service_with_capture(monkeypatch)
+        products = [{"id": "1", "main_image": "https://example.com/1.jpg"}]
+        risky, stats, _all = service.scan_batch(products)
+        assert stats.failed_count == 0
+        assert stats.checked_count == 1
+        text_all = "\n".join(self._texts(captured["body"]))
+        assert "商品标题:" not in text_all
+
+    def test_cache_key_ignores_title(self):
+        """缓存 key 仍为 (product_id, main_image)，标题变化不影响缓存命中。"""
+        profile_store = MagicMock()
+        service = ImageRiskScanService(profile_store)
+        service._set_cached("1", "https://example.com/1.jpg",
+                            ImageRiskItem("1", "https://example.com/1.jpg", "none", ""))
+        call_count = [0]
+
+        def mock_scan_batch(batch, **kwargs):
+            call_count[0] += 1
+            return [], 0
+
+        service._scan_single_batch = mock_scan_batch
+        # 带 title 的请求应命中与无 title 时相同的缓存键
+        products = [{"id": "1", "title": "Any Title", "main_image": "https://example.com/1.jpg"}]
+        results, stats, _all = service.scan_batch(products)
+        assert call_count[0] == 0
+        assert stats.cached_count == 1
+        assert len(results) == 0
+
+
 class TestImageRiskLogStatus:
     """任务 3/4：图片取消日志、最终状态规则、实际执行批次数。"""
 

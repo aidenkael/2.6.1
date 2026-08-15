@@ -30,7 +30,7 @@ from profit_accounting_26.product_collector import product_risk_log
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "product-collector-image-risk-v2"
+PROMPT_VERSION = "product-collector-image-risk-v3"
 
 # 内部批处理大小（用户不可见）
 BATCH_SIZE = 10
@@ -76,26 +76,129 @@ def _build_image_prompt() -> str:
     return (
         "你是商品图片风险识别助手。\n\n"
         "定位：弱视觉模型完成'明显风险快筛'。\n"
-        "只能依据图片明确可见内容。\n\n"
-        "infringement 风险：\n"
+        "只能依据图片明确可见内容判断；无法从图片确认的风险一律 none。\n\n"
+        "商品标题只作为理解图片的辅助信息。\n"
+        "图片风险必须有明确视觉证据；\n"
+        "如果标题存在风险词但图片没有对应视觉证据，图片检测不得仅凭标题判风险。\n\n"
+        "风险三档（每张图片只返回一个最终 risk）：\n"
+        "- infringement：明显品牌 / IP / 商标；\n"
+        "- platform：明显平台风险或内部采集排除项；\n"
+        "- none：无法明确确认。\n"
+        "优先级：infringement > platform > none。\n\n"
+        "一、侵权风险（infringement）：\n"
         "- 清晰 Logo；\n"
-        "- 品牌文字；\n"
+        "- 品牌文字、商标文字；\n"
         "- 明显 Monogram / 品牌重复纹样；\n"
-        "- 明显经典品牌标志；\n"
-        "- 动漫/影视/游戏 IP；\n"
-        "- 明星/人物肖像；\n"
+        "- 品牌经典标志；\n"
+        "- 动漫 / 影视 / 游戏 IP；\n"
+        "- 明星 / 名人肖像；\n"
         "- 球队、大学、组织 Logo；\n"
-        "- 其它明显需授权视觉元素。\n\n"
-        "platform 风险：\n"
-        "- 明显枪支/武器/高危刀具/爆炸物；\n"
-        "- 烟草/电子烟/毒品/吸毒工具；\n"
-        "- 明显色情成人内容；\n"
+        "- 其它明显需授权视觉元素。\n"
+        "即使模型不知道品牌具体名称，只要图片中存在明显作为品牌使用的：\n"
+        "- 独立包装名称；\n"
+        "- 包装 Logo；\n"
+        "- 包装商标；\n"
+        "- 明确品牌标识；\n"
+        "也应提示侵权风险线索。\n"
+        "普通装饰文字、说明文字不能因此自动报侵权。\n\n"
+        "二、平台风险（platform，需明确图片证据）：\n\n"
+        "1. 明显禁售实物：\n"
+        "- 枪支、高危刀具、明显攻击性武器、爆炸物；\n"
+        "- 毒品、吸毒工具；\n"
+        "- 烟草、电子烟；\n"
         "- 赌博；\n"
-        "- 明显政治敏感；\n"
-        "- 极端主义/仇恨/恐怖主义；\n"
-        "- 明显宗教敏感元素；\n"
-        "- 明显危险品/禁售品；\n"
-        "- 其它仅凭图片已能比较明确确认的平台风险。\n\n"
+        "- 明显危险品；\n"
+        "- 其它仅凭图片即可明确确认的平台禁售内容。\n\n"
+        "2. 成人色情 / 性暗示：\n"
+        "- 性器官暴露；\n"
+        "- 性行为；\n"
+        "- 明显成人色情；\n"
+        "- 成人用品明显生殖器仿真造型；\n"
+        "- 明显性挑逗姿势；\n"
+        "- 敏感部位特写；\n"
+        "- 裙底等明显不当拍摄角度；\n"
+        "- 裁切突出乳沟、臀部、裆部等；\n"
+        "- 明显色情 / 性暗示文字；\n"
+        "- 人物 + 床 / 浴缸等场景共同形成明显性暗示；\n"
+        "- 儿童成人化、儿童性感化、儿童性暗示。\n"
+        "防误杀：普通泳装不等于自动风险；普通人体模特不等于自动风险；床单独出现不等于自动风险；浴缸单独出现不等于自动风险。\n"
+        "必须结合人物、姿势、暴露、构图和上下文综合判断。\n"
+        "防误杀补充：普通按摩器材、普通健身用品即使标题或图片含'成人'字样也不判；\n"
+        "必须图片本身明确呈现性暗示构图才算。\n\n"
+        "3. 政治敏感（需明确可识别的具体政治语义）：\n"
+        "- 政治人物；\n"
+        "- 政党 / 政治组织；\n"
+        "- 政治口号、政治宣传文字；\n"
+        "- 政治符号、政治徽章；\n"
+        "- 敏感旗帜 / 国徽；\n"
+        "- 战争宣传、美化侵略；\n"
+        "- 煽动政治仇恨；\n"
+        "- 政治边界争议地图；\n"
+        "- 纳粹等政治极端主义内容。\n"
+        "防误杀：普通人物不等于政治人物；普通红蓝配色不等于政治；普通世界地图不等于自动风险。\n"
+        "普通颜色组合、抽象旗帜风图案不能自动判政治风险；普通非敏感旗帜的装饰性使用，不因为'看起来像国旗'就报警。\n"
+        "但图片中可明确识别为敏感旗帜、国徽、政治组织标识或具有明确政治语义时，仍应判 platform；\n"
+        "不得因为印在手机壳、贴纸、衣服或其它商品上就自动豁免。\n"
+        "必须能明确识别具体政治语义。\n\n"
+        "4. 宗教（明确可识别即可判）：\n"
+        "- 明确宗教象征符号；\n"
+        "- 宗教人物；\n"
+        "- 宗教经文、宗教书籍、宗教文字；\n"
+        "- 宗教建筑；\n"
+        "- 明确宗教主题商品；\n"
+        "- 宗教亵渎、宗教恶搞、宗教侮辱 / 低俗化。\n"
+        "防误杀：普通十字形几何结构不能只靠形状猜；普通星形不等于自动宗教符号；普通建筑不等于自动宗教建筑；模糊文字不等于经文；无法确认具体含义 -> none。\n"
+        "重点是'明确可识别'。\n"
+        "宗教主题商品（如宗教题材装饰画、宗教法器造型摆件、经文复制品）判 platform；\n"
+        "普通几何装饰（六边形、圆点、普通花纹）不判。\n\n"
+        "5. 仇恨 / 歧视 / 极端主义：\n"
+        "- 纳粹 / 新纳粹；\n"
+        "- 白人至上主义；\n"
+        "- 仇恨组织独有标志；\n"
+        "- 仇恨手势、仇恨文字；\n"
+        "- 恐怖主义、极端主义宣传；\n"
+        "- 对种族、肤色、民族、族裔进行明确丑化或贬低；\n"
+        "- 因宗教、年龄、性别、性取向、性别认同、残疾等个人特征宣扬歧视。\n"
+        "特殊数字：88、14/88 只在明确仇恨 / 纳粹 / 白人至上语境下判风险。\n"
+        "88cm、型号 88、年份 / 编号 88 等普通含义绝不判风险。\n\n"
+        "6. 暴力 / 血腥 / 自残：\n"
+        "- 明显鲜血；\n"
+        "- 开放性伤口；\n"
+        "- 断肢、肢解；\n"
+        "- 虐杀、严重人身伤害；\n"
+        "- 自残、自杀；\n"
+        "- 动物虐待；\n"
+        "- 明显展示严重伤害结果。\n"
+        "普通 Halloween 恐怖风本身不是风险。\n\n"
+        "7. 用户内部采集排除项（用户采集策略明确排除，非平台禁售）：\n"
+        "- 带电、电池、USB、LED、磁性；\n"
+        "- 液体、喷雾、胶水；\n"
+        "- 香水 / 精油、粉末等。\n"
+        "识别为 platform，reason 前缀'采集规则排除｜'。\n\n"
+        "三、美国站 Halloween 防误杀：\n"
+        "以下元素本身默认不是风险：\n"
+        "- Halloween；\n"
+        "- 普通骷髅 / 骨架、普通幽灵、普通南瓜；\n"
+        "- 普通女巫、普通僵尸；\n"
+        "- 普通恐怖节日装饰、普通卡通恐怖风。\n"
+        "不要把沙特 / 中东地区专属禁忌（骷髅、恶魔之眼等）机械套用到美国站。\n"
+        "只有 Halloween 商品同时出现明确的：品牌 / IP、政治、宗教、仇恨 / 极端主义、严重血腥伤害、色情 / 性暗示、武器 / 禁售品时，才提示风险。\n"
+        "典型：普通 Skeleton decoration -> none；普通 Ghost decoration -> none；普通 Zombie prop -> none；\n"
+        "明显带大量血迹、开放伤口、断肢效果 -> platform；明显高危刀具 -> platform；\n"
+        "Disney / Marvel / 游戏角色等明确 IP -> infringement。\n\n"
+        "儿童内容：普通儿童服装、玩具、卡通形象不判；\n"
+        "儿童成人化、儿童性感化、儿童性暗示必须有明确图片证据才判。\n\n"
+        "四、reason 规范：\n"
+        "reason 保持简短一句话，按风险来源使用固定前缀：\n"
+        "- SHEIN 平台风险：SHEIN规则风险｜……\n"
+        "- 内部采集策略：采集规则排除｜……\n"
+        "- IP / 品牌：侵权风险｜……\n"
+        "示例：\n"
+        "SHEIN规则风险｜图片出现明显高危刀具\n"
+        "SHEIN规则风险｜存在明显开放性伤口和大量血迹\n"
+        "采集规则排除｜商品明显为LED带电产品\n"
+        "侵权风险｜图片出现明显迪士尼（Disney）角色元素\n"
+        "risk=none 时 reason 可以为空。\n\n"
         "严格防误杀：\n"
         "- 普通颜色相似 -> none\n"
         "- 普通商品造型相似 -> none\n"
@@ -103,7 +206,8 @@ def _build_image_prompt() -> str:
         "- 普通几何纹样 -> none\n"
         "- 模糊 Logo -> none\n"
         "- '有点像某品牌' -> none\n"
-        "- 必须靠猜测才能成立 -> none\n\n"
+        "- 必须靠猜测才能成立 -> none\n"
+        "- 无法确认 -> none\n\n"
         "输出格式（严格 JSON）：\n"
         '{"results": [{"id": "商品id", "risk": "none | platform | infringement", "reason": "简短中文原因"}]}\n\n'
         "每张实际送检图片必须返回对应 id。\n"
@@ -155,7 +259,8 @@ class ImageRiskScanService:
     ) -> tuple[list[ImageRiskItem], ImageRiskScanStats, list[ImageRiskItem]]:
         """批量检测图片风险。
 
-        products: [{"id": "product_id", "main_image": "url"}, ...]
+        products: [{"id": "product_id", "title": "可选", "main_image": "url"}, ...]
+        title 仅作为理解图片的辅助上下文，缺失或空字符串时图片检测仍正常运行。
         force_refresh: True 时忽略运行期缓存，强制重新检测；新结果覆盖旧缓存。
         cancel_requested: 可选 callable，返回 True 时停止发送后续批次。
         返回: (risky_items, stats, all_checked_items)
@@ -285,6 +390,7 @@ class ImageRiskScanService:
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
 
         image_items: list[tuple[str, str, bytes]] = []  # (product_id, url, data)
+        title_map: dict[str, str] = {}  # product_id -> title（辅助上下文，可为空）
         download_failed_count = 0
         _download_start = time.monotonic()
         for p in products:
@@ -292,6 +398,7 @@ class ImageRiskScanService:
             img_url = str(p.get("main_image") or "").strip()
             if not pid or not img_url:
                 continue
+            title_map[pid] = str(p.get("title") or "").strip()
             try:
                 img_data = self._download_image(img_url)
                 image_items.append((pid, img_url, img_data))
@@ -313,9 +420,13 @@ class ImageRiskScanService:
             )
             return [], download_failed_count
 
-        # 添加图片到 content（每张图前加 id 标记）
+        # 添加图片到 content（每张图前加 id 标记与可选标题辅助上下文）
         for pid, _url, img_data in image_items:
-            content.append({"type": "text", "text": f"商品ID: {pid}"})
+            text = f"商品ID: {pid}"
+            title = title_map.get(pid, "")
+            if title:
+                text += f"\n商品标题: {title}"
+            content.append({"type": "text", "text": text})
             b64 = base64.b64encode(img_data).decode("ascii")
             content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
 
