@@ -223,52 +223,35 @@ class MainWindowBinder:
             btn_change.clicked.connect(self.change_data_directory)
 
     def change_data_directory(self) -> None:
+        """切换数据目录：只写 location.json，重启后生效，不复制/合并/覆盖任何数据。
+
+        - 用户选择目标文件夹 → 写入 location.json；
+        - 提示“重启后切换”，当前进程继续使用旧目录；
+        - 不自动 copy settings / API / 数据库 / 图片，不合并历史与校准数据。
+        """
         selected = QFileDialog.getExistingDirectory(
             self.window, "选择新的数据目录", str(self.context.paths.data_dir)
         )
         if not selected:
             return
-        from profit_accounting_26.application.settings_migration import sync_user_config
         from profit_accounting_26.shared import ApplicationPaths
-        from profit_accounting_26.storage import SQLiteStore
 
-        # 1) 先解析并创建目标目录；此时不写 location.json。
         target = Path(selected).expanduser().resolve()
-        target.mkdir(parents=True, exist_ok=True)
-        target_store = SQLiteStore(target / self.context.paths.database_path.name)
-        try:
-            summary = sync_user_config(
-                self.context.paths.data_dir,
-                target,
-                source_store=self.context.store,
-                target_store=target_store,
-            )
-        except Exception as exc:
-            # 2) 同步失败：location.json 保持原 data_dir，明确提示，不进入半迁移目录。
-            QMessageBox.critical(
-                self.window,
-                "数据目录切换失败",
-                f"配置同步失败，已保持原数据目录：\n{self.context.paths.data_dir}\n\n原因：{exc}",
+        if target == self.context.paths.data_dir.resolve():
+            QMessageBox.information(
+                self.window, "数据目录未变化", "该目录就是当前数据目录。"
             )
             return
-        # 3) 同步全部成功后才提交 location.json。
         ApplicationPaths.save_data_dir(target)
-        synced = "、".join(summary.copied_files) or "（无配置文件）"
-        notes = []
-        if summary.copied_package_files:
-            notes.append(f"校准包文件 {summary.copied_package_files} 个")
-        if summary.calibration_registry_migrated:
-            notes.append("校准版本注册表已同步")
-        elif summary.calibration_registry_skipped_reason:
-            notes.append(f"校准版本注册表未同步：{summary.calibration_registry_skipped_reason}")
         QMessageBox.information(
             self.window,
             "数据目录已设置",
-            f"新数据目录：{target}\n"
-            f"已同步配置：{synced}\n"
-            f"{'；'.join(notes)}\n"
-            "历史记录与图片不会迁移；软件重启后数据目录生效。",
+            f"新数据目录：{target}\n\n"
+            "数据目录将在重启后切换。\n"
+            "不会自动合并或覆盖两个目录中的已有数据。\n\n"
+            f"当前会话继续使用：{self.context.paths.data_dir}",
         )
+        # 目录标签保持显示当前真实运行目录，不把尚未生效的新目录伪装成当前目录。
         if getattr(self, "lbl_data_dir", None):
             self.lbl_data_dir.setText(str(self.context.paths.data_dir))
 

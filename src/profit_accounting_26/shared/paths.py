@@ -59,14 +59,9 @@ class ApplicationPaths:
         return target
 
     @classmethod
-    def default(cls) -> "ApplicationPaths":
-        override = os.environ.get("PROFIT_ACCOUNTING_DATA_DIR")
-        configured = cls.configured_data_dir()
-        base = (
-            Path(override).expanduser()
-            if override
-            else configured or Path.home() / "ProfitAccounting26Data"
-        )
+    def from_data_dir(cls, base: str | Path) -> "ApplicationPaths":
+        """由数据目录构造全部子路径（settings / sqlite / images / exports / calibration）。"""
+        base = Path(base)
         return cls(
             data_dir=base,
             database_path=base / "profit_accounting_26.sqlite3",
@@ -75,6 +70,34 @@ class ApplicationPaths:
             exports_dir=base / "exports",
             calibration_packages_dir=base / "calibration_packages",
         )
+
+    @classmethod
+    def default(cls) -> "ApplicationPaths":
+        """开发/测试/工具注入通道：PROFIT_ACCOUNTING_DATA_DIR > location.json > 默认目录。
+
+        正式桌面 UI 启动必须走 :meth:`ui_default`，避免环境变量悄悄覆盖用户
+        在 location.json 中明确选择的数据目录。
+        """
+        override = os.environ.get("PROFIT_ACCOUNTING_DATA_DIR")
+        configured = cls.configured_data_dir()
+        base = (
+            Path(override).expanduser()
+            if override
+            else configured or Path.home() / "ProfitAccounting26Data"
+        )
+        return cls.from_data_dir(base)
+
+    @classmethod
+    def ui_default(cls) -> "ApplicationPaths | None":
+        """正式桌面 UI 启动目录：location.json 已存在时它是唯一权威（忽略环境变量）。
+
+        返回 ``None`` 表示首次运行——调用方必须在创建 AppContext 之前
+        引导用户选择数据目录并调用 :meth:`save_data_dir`。
+        """
+        configured = cls.configured_data_dir()
+        if configured is None:
+            return None
+        return cls.from_data_dir(configured)
 
     def ensure(self) -> None:
         for path in (

@@ -49,8 +49,13 @@ class AppContext:
     calibration_export_service: CalibrationFeedbackExporter
 
     @classmethod
-    def create_default(cls) -> "AppContext":
-        paths = ApplicationPaths.default()
+    def create_default(cls, paths: ApplicationPaths | None = None) -> "AppContext":
+        """创建完整应用上下文。
+
+        ``paths`` 未传时走 :meth:`ApplicationPaths.default`（环境变量优先，
+        供测试/工具注入临时目录）；正式 UI 启动层必须先解析好目录再显式传入。
+        """
+        paths = paths or ApplicationPaths.default()
         paths.ensure()
         store = SQLiteStore(paths.database_path)
         store.initialize()

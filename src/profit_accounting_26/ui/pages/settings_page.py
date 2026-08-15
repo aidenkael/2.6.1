@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from profit_accounting_26.application import AppContext, ApiProfile, ApiProfileStore, IMAGE_RISK, LOCAL_REESTIMATE, SettingsService, VISUAL_AI
+from profit_accounting_26.application import AppContext, ApiProfile, IMAGE_RISK, LOCAL_REESTIMATE, SettingsService, VISUAL_AI
 from profit_accounting_26.application.api_profile_store import PROVIDER_PRESETS
 from profit_accounting_26.domain.models import Forwarder
 from profit_accounting_26.domain.rules import (
@@ -56,7 +56,6 @@ from profit_accounting_26.domain.rules import (
     AdjustmentType,
     CompareOp,
 )
-from profit_accounting_26.shared import ApplicationPaths
 from profit_accounting_26.ui.ui_loader import load_settings_page
 from profit_accounting_26.ui.widgets import confirm_action
 
@@ -603,7 +602,16 @@ class SettingsPage(QWidget):
                 QLineEdit.EchoMode.Normal if visible else QLineEdit.EchoMode.Password
             )
 
+    def _guard_data_dir(self) -> bool:
+        """窄安全判断：持久化操作前确认当前数据目录可用。"""
+        if self.context.paths.data_dir.is_dir():
+            return True
+        QMessageBox.warning(self, "数据目录不可用", "当前数据目录不可用，请先设置有效的数据目录。")
+        return False
+
     def save_api_profile(self) -> None:
+        if not self._guard_data_dir():
+            return
         name = self.api_profile_name.text().strip() if self.api_profile_name else ""
         endpoint = self.vision_endpoint.text().strip() if self.vision_endpoint else ""
         model = self.vision_model.text().strip() if self.vision_model else ""
@@ -622,13 +630,9 @@ class SettingsPage(QWidget):
                 display_name=name, provider=provider,
                 api_url=endpoint, model_name=model,
             )
-        stores = [self.context.api_profile_store]
-        pending_data_dir = ApplicationPaths.configured_data_dir()
-        if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
-            stores.append(ApiProfileStore(pending_data_dir))
+        # 只写当前运行的数据目录；不再向 location.json 指向的另一目录镜像保存。
         key_text = self.vision_key.text() if self.vision_key else ""
-        for store in stores:
-            store.save_profile(profile, key_text)
+        self.context.api_profile_store.save_profile(profile, key_text)
         self._refresh_api_profiles()
         if self.api_profile_select:
             self.api_profile_select.setCurrentIndex(max(0, self.api_profile_select.findData(profile.profile_id)))
@@ -640,6 +644,8 @@ class SettingsPage(QWidget):
             return
         profile_id = str(self.api_profile_select.currentData() or "")
         if not profile_id:
+            return
+        if not self._guard_data_dir():
             return
         display_name = self.api_profile_select.currentText()
         # 检查是否被视觉识图或局部文字重估使用
@@ -659,12 +665,7 @@ class SettingsPage(QWidget):
         if not confirm_action(self, "删除配置", msg, confirm_text="删除", danger=True):
             return
         # 删除配置和 key（delete_profile 一次完成 profile/key/绑定 的真实持久化删除）
-        stores = [self.context.api_profile_store]
-        pending_data_dir = ApplicationPaths.configured_data_dir()
-        if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
-            stores.append(ApiProfileStore(pending_data_dir))
-        for store in stores:
-            store.delete_profile(profile_id)
+        self.context.api_profile_store.delete_profile(profile_id)
         self._refresh_api_profiles()
         self._new_api_profile()
 
@@ -830,6 +831,8 @@ class SettingsPage(QWidget):
         except ValueError as exc:
             QMessageBox.warning(self, "无法保存", str(exc))
             return False
+        if not self._guard_data_dir():
+            return False
         latest = self.context.settings_service.load()
         enabled_ids = [item["id"] for item in forwarders if item["enabled"] and not item["archived"]]
         selected = latest.get("selected_forwarder_id")
@@ -838,9 +841,6 @@ class SettingsPage(QWidget):
         latest["forwarders"] = forwarders
         latest["selected_forwarder_id"] = selected
         self.context.settings_service.save(latest)
-        pending_data_dir = ApplicationPaths.configured_data_dir()
-        if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
-            SettingsService.save_copy(latest, pending_data_dir / "settings.json")
         self.settings = latest
         self.forwardersSaved.emit()
         self._update_forwarder_counts()
@@ -1057,6 +1057,8 @@ class SettingsPage(QWidget):
 
         若 selected_profit_rule_id 失效则重选第一个启用规则或清空。
         """
+        if not self._guard_data_dir():
+            return
         latest = self.context.settings_service.load()
         enabled_rule_ids = [
             str(item.get("id"))
@@ -1069,9 +1071,6 @@ class SettingsPage(QWidget):
         latest["profit_rules"] = self.rules_data
         latest["selected_profit_rule_id"] = selected_rule
         self.context.settings_service.save(latest)
-        pending_data_dir = ApplicationPaths.configured_data_dir()
-        if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
-            SettingsService.save_copy(latest, pending_data_dir / "settings.json")
         self.settings = latest
         self.refresh_rule_list()
         # 最窄刷新机制：主页面货代卡与利润规则下拉立即同步，不改动脏状态
@@ -1082,6 +1081,8 @@ class SettingsPage(QWidget):
     # ------------------------------------------------------------------
 
     def save_settings(self) -> None:
+        if not self._guard_data_dir():
+            return
         latest = self.context.settings_service.load()
 
         # 验证显示名称：去除首尾空格后 Unicode 可见字符 1-8 个
@@ -1112,23 +1113,14 @@ class SettingsPage(QWidget):
         latest.pop("vision_api_key", None)
         self.settings = latest
         self.context.settings_service.save(self.settings)
-        # A directory switch applies after restart.  Until then this page is
-        # backed by the old directory, so mirror subsequent API/config saves to
-        # the already-selected directory as well.
-        pending_data_dir = ApplicationPaths.configured_data_dir()
-        if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
-            SettingsService.save_copy(self.settings, pending_data_dir / "settings.json")
-        # Persist visual/local/image_risk binding selections to ApiProfileStore.
+        # 只写当前运行的数据目录：数据目录切换在重启后生效，本进程不再向
+        # location.json 指向的另一目录镜像保存任何 API 配置或绑定。
         visual_id = str(self.visual_binding.currentData() or "") if self.visual_binding else ""
         local_id = str(self.local_binding.currentData() or "") if self.local_binding else ""
         image_risk_id = str(self.image_risk_binding.currentData() or "") if self.image_risk_binding else ""
-        binding_stores = [self.context.api_profile_store]
-        if pending_data_dir is not None and pending_data_dir.resolve() != self.context.paths.data_dir.resolve():
-            binding_stores.append(ApiProfileStore(pending_data_dir))
-        for store in binding_stores:
-            store.bind(VISUAL_AI, visual_id or None)
-            store.bind(LOCAL_REESTIMATE, local_id or None)
-            store.bind(IMAGE_RISK, image_risk_id or None)
+        self.context.api_profile_store.bind(VISUAL_AI, visual_id or None)
+        self.context.api_profile_store.bind(LOCAL_REESTIMATE, local_id or None)
+        self.context.api_profile_store.bind(IMAGE_RISK, image_risk_id or None)
         self.dirty = False
         self.dirtyChanged.emit(False)
         self.settingsSaved.emit()
