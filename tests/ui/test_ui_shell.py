@@ -11,8 +11,7 @@ from profit_accounting_26.ui.app import NAV_ITEMS, build_window
 def test_three_navigation_items_are_visible_in_fixed_order(qapp, tmp_path, monkeypatch):
     # qapp 来自 tests/conftest.py 会话级 fixture；build_window() 复用
     # QApplication.instance()，整个测试会话只存在一个 QApplication。
-    # 隔离数据目录：create_default 会初始化包含 images 表的新库，避免依赖真实用户数据目录。
-    monkeypatch.setenv("PROFIT_ACCOUNTING_DATA_DIR", str(tmp_path))
+    # 隔离数据目录：显式注入临时目录，避免走 location.json（正式 UI 启动路径）。
     # Product Collector 集成后导航为 4 项
     assert NAV_ITEMS == [
         "商品采集",
@@ -20,7 +19,7 @@ def test_three_navigation_items_are_visible_in_fixed_order(qapp, tmp_path, monke
         "历史记录管理",
         "设置",
     ]
-    app, window = build_window()
+    app, window = build_window(data_dir=tmp_path)
     # 标题来自冻结 main_window.ui 的 windowTitle（运行时为 2.6.1），不硬编码旧版本
     assert window.windowTitle() == "微智能利润管理软件 2.6.1"
     window.close()
