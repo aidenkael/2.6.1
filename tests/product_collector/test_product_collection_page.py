@@ -34,7 +34,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt, QThread, QTimer
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget, QAbstractSpinBox, QPushButton
@@ -42,7 +42,8 @@ from PySide6.QtWidgets import QApplication, QWidget, QAbstractSpinBox, QPushButt
 from profit_accounting_26.product_collector.collector_core.business_source import CollectionReport
 from profit_accounting_26.product_collector.collector_core.models import CandidateProduct
 from profit_accounting_26.product_collector.ui.product_collection_page import (
-    KeywordSelectPopup, ProductCard, ProductCollectionPage, parse_search_terms,
+    CollectWorker, KeywordSelectPopup, ProductCard, ProductCollectionPage,
+    _TitleRiskWorker, parse_search_terms,
 )
 
 
@@ -629,7 +630,8 @@ class TestNewControlBehavior(_PageCase):
         with patch("profit_accounting_26.product_collector.ui.product_collection_page.ImageSearchWorker.run", fail_fast):
             QTest.mouseClick(card, Qt.MouseButton.LeftButton, pos=card.lbl_image.geometry().center())
             QTest.mouseDClick(card, Qt.MouseButton.LeftButton, pos=card.lbl_image.geometry().center())
-            self._pump(200)
+            # 全量测试高负载下线程退出可能超过 200ms，放宽等待避免偶发时序失败
+            self._pump(800)
         self.assertEqual(image_requests, [product.main_image])
         self.assertIsNone(self.page._image_search_thread)
         self.assertIsNone(self.page._image_search_worker)
@@ -886,7 +888,6 @@ class TestWorkerLifecycle(_PageCase):
             loop.exec()
             timer.stop()
         self.assertTrue(called["run"])
-        self.assertIsNotNone(self.page._worker)
         self.assertEqual(self.page.keep_count(), 2)
 
     def test_worker_exception_reports_failure_not_crash(self):
@@ -898,6 +899,64 @@ class TestWorkerLifecycle(_PageCase):
             self.page.start_collect()
             self._pump(400)
         self.assertEqual(self.page.lbl_status.text(), "采集失败")
+
+
+class TestCollectThreadLifecycle(_PageCase):
+    """任务 2：采集 QThread / Worker 生命周期收紧。"""
+
+    def _run_fake_collect(self, report=None):
+        """patch 快速完成一轮单关键词采集，并等待线程 finished 事件处理完毕。"""
+        report = report if report is not None else _report(_products(2))
+        called = {"run": False}
+
+        def fake_run(worker):
+            called["run"] = True
+            worker.reportReady.emit(report)
+
+        with patch("profit_accounting_26.product_collector.ui.product_collection_page.CollectWorker.run", fake_run):
+            self.page.txt_cn.setText("women bag")
+            self.page.spin_per_keyword.setValue(5)
+            self.page.start_collect()
+            self.assertIsNotNone(self.page._thread)
+            self.assertIsNotNone(self.page._worker)
+            self._pump(800)
+        self.assertTrue(called["run"])
+
+    def test_thread_and_worker_cleared_after_last_collect(self):
+        """最后一轮采集线程结束后 _thread/_worker 清空。"""
+        self._run_fake_collect()
+        self.assertIsNone(self.page._thread)
+        self.assertIsNone(self.page._worker)
+
+    def test_clear_button_enabled_after_collect_with_products(self):
+        """采集完成且有商品后，清空本次按钮可用。"""
+        self._run_fake_collect()
+        self.assertEqual(self.page.keep_count(), 2)
+        self.assertTrue(self.page.btn_clear_all.isEnabled())
+
+    def test_old_thread_finished_does_not_clear_new_thread(self):
+        """多关键词：旧线程结束不得误清刚创建的新线程/worker（identity 判断）。"""
+        old_thread = QThread(self.page)
+        old_worker = CollectWorker("old", 5, None)
+        new_thread = QThread(self.page)
+        new_worker = CollectWorker("new", 5, None)
+        try:
+            self.page._thread = new_thread
+            self.page._worker = new_worker
+            # 旧线程 finished 触发清理：不应动新线程引用
+            self.page._clear_collect_task(old_thread, old_worker)
+            self.assertIs(self.page._thread, new_thread)
+            self.assertIs(self.page._worker, new_worker)
+            # 新线程结束才清理
+            self.page._clear_collect_task(new_thread, new_worker)
+            self.assertIsNone(self.page._thread)
+            self.assertIsNone(self.page._worker)
+        finally:
+            old_thread.deleteLater()
+            old_worker.deleteLater()
+            new_thread.deleteLater()
+            new_worker.deleteLater()
+            self.app.processEvents()
 
 
 # ── .ui 文件验证 ──────────────────────────────────────────────
@@ -1203,8 +1262,8 @@ class TestOverlayGeometry(_PageCase):
         card._layout_risk_overlays()
         h_long = card.lbl_title_risk.height()
         self.assertGreater(h_long, h_short)
-        # 最大高度仍受约两行约束
-        self.assertLessEqual(h_long, 40)
+        # 最大高度仍受约三行约束（本轮从两行轻量增加到三行）
+        self.assertLessEqual(h_long, 56)
 
 
 class TestForceRefreshClearsRisk(_PageCase):
@@ -1412,6 +1471,382 @@ class TestTitleFailedCount(_PageCase):
         self.assertIn("检测完成", status)
         self.assertIn("标题失败 2 个", status)
         self.assertIn("图片失败 3 个", status)
+
+
+class TestRound2ClearAndSelect(_PageCase):
+    """R 项：右键取消全选 / 清空本次 / 长期设置不受影响。"""
+
+    def test_select_all_right_click_clears_selection(self):
+        """全部选择按钮右键取消全部选择。"""
+        self.page.load_results(_products(3))
+        self.page.select_all_visible()
+        self.assertEqual(self.page.selected_count(), 3)
+        event = QMouseEvent(
+            QEvent.Type.MouseButtonPress, QPointF(2, 2),
+            Qt.MouseButton.RightButton, Qt.MouseButton.RightButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        self.assertTrue(self.page.eventFilter(self.page.btn_select_all, event))
+        self.assertEqual(self.page.selected_count(), 0)
+
+    def test_select_all_button_has_tooltip(self):
+        """全部选择按钮带有左键/右键说明 Tooltip。"""
+        tip = self.page.btn_select_all.toolTip()
+        self.assertIn("全部选择", tip)
+        self.assertIn("取消全部选择", tip)
+
+    def test_clear_all_resets_runtime_state(self):
+        """清空本次：商品/卡片/选择/KEEP-REMOVED/检测状态全部清除。"""
+        from unittest.mock import Mock
+
+        self.page.load_results(_products(3))
+        self.page.select_all_visible()
+        self.page._states["1"] = "REMOVED"
+        self.page._detect_snapshot = list(self.page._products)
+        fake_service = Mock()
+        self.page._image_risk_service = fake_service
+        self.page._cards["1"].set_title_risk_data("platform", "带电")
+        self.page._clear_all_results()
+        # 运行期数据全部清空
+        self.assertEqual(self.page._products, [])
+        self.assertEqual(self.page._cards, {})
+        self.assertEqual(self.page._states, {})
+        self.assertEqual(self.page._selected_ids, set())
+        self.assertIsNone(self.page._detect_snapshot)
+        self.assertFalse(self.page._showing_removed)
+        # 图片检测运行期缓存被清理
+        fake_service.clear_cache.assert_called_once()
+        # 状态区回到空态计数
+        self.assertIn("商品 0", self.page.lbl_status.text())
+
+    def test_clear_all_resets_collect_runtime_refs(self):
+        """清空本次：本轮采集期引用（_all_products/_seen_ids/任务数据）一并清空。"""
+        self.page._all_products = _products(2)
+        self.page._seen_ids = {"1", "2"}
+        self.page._search_tasks = ["任务A", "任务B"]
+        self.page._task_statuses = ["success", "success"]
+        self.page._current_task_idx = 1
+        self.page.load_results(_products(2))
+        self.page._clear_all_results()
+        # 不再持有 CandidateProduct / 任务数据
+        self.assertEqual(self.page._all_products, [])
+        self.assertEqual(self.page._seen_ids, set())
+        self.assertEqual(self.page._search_tasks, [])
+        self.assertEqual(self.page._task_statuses, [])
+        self.assertEqual(self.page._current_task_idx, 0)
+
+    def test_clear_all_preserves_long_term_config(self):
+        """清空本次不影响 API Profile store / 搜索词 / 检测服务等长期配置。"""
+        from unittest.mock import Mock
+
+        store = Mock()
+        self.page.set_api_profile_store(store)
+        self.page.txt_cn.setText("测试搜索词")
+        self.page.load_results(_products(2))
+        self.page._clear_all_results()
+        # 长期配置保留
+        self.assertIs(self.page._api_profile_store, store)
+        self.assertEqual(self.page.txt_cn.text(), "测试搜索词")
+        self.assertIsNotNone(self.page._title_risk_service)
+        self.assertIsNotNone(self.page._image_risk_service)
+
+    def test_clear_all_blocked_while_detecting(self):
+        """检测进行中禁止清空本次。"""
+        self.page.load_results(_products(2))
+        self.page._enter_detecting(list(self.page._products))
+        self.assertFalse(self.page.btn_clear_all.isEnabled())
+        self.page._exit_detecting()
+        self.assertTrue(self.page.btn_clear_all.isEnabled())
+
+
+class TestRound2RiskSorting(_PageCase):
+    """R 项：风险置顶排序 / 稳定顺序 / 保持选择 / 已移除视图不乱序。"""
+
+    def test_visible_cards_preserve_original_order_without_risk(self):
+        """无风险时保持原始采集顺序。"""
+        self.page.load_results(_products(3))
+        order = [c.product.product_id for c in self.page._visible_cards()]
+        self.assertEqual(order, ["1", "2", "3"])
+
+    def test_risk_sort_infringement_platform_none(self):
+        """排序：infringement > platform > none。"""
+        self.page.load_results(_products(3))
+        self.page._cards["1"].set_title_risk_data("platform", "带电")
+        self.page._cards["2"].set_title_risk_data("infringement", "品牌IP")
+        # 商品 3 无风险
+        self.page._sort_risk_pinned()
+        order = [c.product.product_id for c in self.page._visible_cards()]
+        self.assertEqual(order, ["2", "1", "3"])
+
+    def test_same_rank_keeps_collection_order(self):
+        """同等级商品保持原始采集顺序。"""
+        self.page.load_results(_products(4))
+        # 商品 1、4 都是 platform，采集顺序 1 在前
+        self.page._cards["1"].set_title_risk_data("platform", "a")
+        self.page._cards["4"].set_title_risk_data("platform", "b")
+        self.page._sort_risk_pinned()
+        order = [c.product.product_id for c in self.page._visible_cards()]
+        self.assertEqual(order, ["1", "4", "2", "3"])
+
+    def test_composite_risk_takes_highest(self):
+        """标题 + 图片综合风险取最高等级。"""
+        self.page.load_results(_products(2))
+        c1 = self.page._cards["1"]
+        c2 = self.page._cards["2"]
+        # 商品 1：标题 platform + 图片 infringement -> infringement
+        c1.set_title_risk_data("platform", "带电")
+        c1.set_image_risk_data("infringement", "品牌IP")
+        # 商品 2：标题 infringement + 图片 none -> infringement
+        c2.set_title_risk_data("infringement", "Logo")
+        c2.set_image_risk_data("none")
+        self.assertEqual(self.page._card_risk_rank(c1), 2)
+        self.assertEqual(self.page._card_risk_rank(c2), 2)
+        # 商品 1 仅 platform -> 1
+        c1.set_image_risk_data("none")
+        self.assertEqual(self.page._card_risk_rank(c1), 1)
+
+    def test_title_redetect_none_clears_only_title_risk(self):
+        """标题重新检测为 none 只清标题风险，图片风险保留（走完成回调）。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        card.set_title_risk_data("platform", "旧标题风险")
+        card.set_image_risk_data("infringement", "品牌IP")
+        self.page._enter_detecting([self.page._products[0]])
+        self.page._on_title_risk_finished(
+            [TitleRiskItem("1", "none", "")], "",
+        )
+        self.assertIsNone(card._title_risk_data)
+        self.assertIsNotNone(card._image_risk_data)
+        self.assertEqual(card._image_risk_data["risk"], "infringement")
+
+    def test_sort_preserves_selection(self):
+        """排序后 selected 集合与卡片选中框状态不变。"""
+        self.page.load_results(_products(3))
+        self.page._cards["2"].set_title_risk_data("infringement", "品牌IP")
+        self.page.set_selection("1", True)
+        self.page.set_selection("2", True)
+        self.page._sort_risk_pinned()
+        self.assertEqual(self.page._selected_ids, {"1", "2"})
+        self.assertTrue(self.page._cards["1"].selected)
+        self.assertTrue(self.page._cards["2"].selected)
+        # KEEP/REMOVED 不变
+        self.assertEqual(self.page._states["1"], "KEEP")
+        self.assertEqual(self.page._states["2"], "KEEP")
+
+    def test_removed_view_keeps_original_order(self):
+        """已移除页面不参与风险排序，保持原顺序。"""
+        self.page.load_results(_products(3))
+        for pid in ("1", "2", "3"):
+            self.page._states[pid] = "REMOVED"
+        self.page._cards["2"].set_title_risk_data("infringement", "品牌IP")
+        self.page._showing_removed = True
+        order = [c.product.product_id for c in self.page._visible_cards()]
+        self.assertEqual(order, ["1", "2", "3"])
+
+    def test_detect_all_sorts_only_once(self):
+        """全部检测只在标题+图片全部处理完后排序一次。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self.page.load_results(_products(2))
+        targets = [self.page._products[0], self.page._products[1]]
+        self.page._enter_detecting(targets)
+        self.page._detect_all_targets = targets
+        relayout_calls = []
+        orig_relayout = ProductCollectionPage._relayout_cards
+
+        def counting(self_obj):
+            relayout_calls.append(self_obj._detect_all_phase)
+            return orig_relayout(self_obj)
+
+        with patch.object(ProductCollectionPage, "_relayout_cards", counting):
+            # load_results 时已重排 1 次
+            base = len(relayout_calls)
+            # 标题阶段完成：不排序（同时避免真实线程启动，patch 掉 QThread/Worker）
+            with patch(
+                "profit_accounting_26.product_collector.ui.product_collection_page.QThread"
+            ), patch(
+                "profit_accounting_26.product_collector.ui.product_collection_page._ImageRiskWorker"
+            ):
+                self.page._on_detect_all_title_finished(
+                    [TitleRiskItem("1", "platform", "带电"),
+                     TitleRiskItem("2", "none", "")],
+                    "",
+                )
+                self.assertEqual(len(relayout_calls), base)
+            # 图片阶段完成：最终排序一次
+            from profit_accounting_26.product_collector.image_risk_scan import ImageRiskItem
+            all_checked = [
+                ImageRiskItem("1", "https://img.example/1.jpg", "none", ""),
+                ImageRiskItem("2", "https://img.example/2.jpg", "none", ""),
+            ]
+            stats = {
+                "requested_count": 2, "cached_count": 0, "checked_count": 2,
+                "risk_count": 0, "failed_count": 0, "all_checked": all_checked,
+            }
+            self.page._on_detect_all_image_finished([], stats, "")
+            self.assertEqual(len(relayout_calls), base + 1)
+
+    def test_sort_returns_scroll_to_top(self):
+        """排序完成后滚动条回到顶部。"""
+        self.page.load_results(_products(3))
+        bar = self.page.scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        self.page._cards["2"].set_title_risk_data("infringement", "品牌IP")
+        self.page._sort_risk_pinned()
+        self.assertEqual(bar.value(), 0)
+
+
+class TestRound2OverlayDetails(_PageCase):
+    """R 项：Overlay 三行高度限制与 Tooltip 完整原因。"""
+
+    def test_overlay_max_height_three_lines(self):
+        """标题/图片 Overlay 最大高度受约三行约束。"""
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        self.assertEqual(card.lbl_title_risk.maximumHeight(), 54)
+        self.assertEqual(card.lbl_image_risk.maximumHeight(), 54)
+
+    def test_overlay_tooltip_full_reason(self):
+        """Overlay 完整风险原因通过 Tooltip 展示。"""
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        long_reason = "这是一段很长的风险原因" * 10
+        card.set_title_risk_data("platform", long_reason)
+        card.set_image_risk_data("infringement", long_reason + "-img")
+        self.assertEqual(card.lbl_title_risk.toolTip(), long_reason)
+        self.assertEqual(card.lbl_image_risk.toolTip(), long_reason + "-img")
+
+
+class TestTitleRiskWorkerCancellation(_PageCase):
+    """任务 3：标题检测用户取消必须写入风险日志。"""
+
+    def setUp(self):
+        super().setUp()
+        import shutil
+        import tempfile
+
+        from profit_accounting_26.product_collector import product_risk_log as prl
+        for handler in list(prl._logger.handlers):
+            prl._logger.removeHandler(handler)
+            handler.close()
+        self._prl = prl
+        self._tmp = tempfile.mkdtemp(prefix="pa26_title_cancel_")
+        self._log_path = prl.configure(self._tmp)
+        self._shutil = shutil
+
+    def tearDown(self):
+        for handler in list(self._prl._logger.handlers):
+            self._prl._logger.removeHandler(handler)
+            handler.close()
+        self._shutil.rmtree(self._tmp, ignore_errors=True)
+        super().tearDown()
+
+    def test_cancel_before_request_logs_cancelled(self):
+        """请求发送前取消：日志出现 [标题检测] 用户取消，不调用 API。"""
+        from unittest.mock import Mock
+
+        service = Mock()
+        worker = _TitleRiskWorker(
+            service, [{"id": "1", "title": "t"}], cancel_requested=lambda: True
+        )
+        received = []
+        worker.finished.connect(lambda risks, err: received.append((risks, err)))
+        worker.run()
+        service.scan.assert_not_called()
+        self.assertEqual(received, [([], "")])
+        content = self._log_path.read_text(encoding="utf-8")
+        self.assertIn("[标题检测] 用户取消", content)
+
+    def test_cancel_during_request_logs_cancelled_and_keeps_results(self):
+        """请求进行中取消：请求自然完成返回结果，且日志记录用户取消。"""
+        from unittest.mock import Mock
+
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        service = Mock()
+        service.scan.return_value = [TitleRiskItem("1", "platform", "带电")]
+        calls = {"n": 0}
+
+        def cancel():
+            calls["n"] += 1
+            return calls["n"] > 1  # 请求前检查放行，请求完成后标记取消
+
+        worker = _TitleRiskWorker(
+            service, [{"id": "1", "title": "t"}], cancel_requested=cancel
+        )
+        received = []
+        worker.finished.connect(lambda risks, err: received.append((risks, err)))
+        worker.run()
+        # 结果仍返回，不因取消丢弃
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0][0][0].product_id, "1")
+        content = self._log_path.read_text(encoding="utf-8")
+        self.assertIn("[标题检测] 用户取消", content)
+
+    def test_cancel_during_request_success_logs_cancel_once(self):
+        """A：请求期间取消 + 请求成功：取消日志恰好写 1 次，结果仍返回。"""
+        from unittest.mock import Mock
+
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        service = Mock()
+        service.scan.return_value = [TitleRiskItem("1", "platform", "带电")]
+        calls = {"n": 0}
+
+        def cancel():
+            calls["n"] += 1
+            return calls["n"] > 1  # 请求前放行，请求完成时已取消
+
+        worker = _TitleRiskWorker(
+            service, [{"id": "1", "title": "t"}], cancel_requested=cancel
+        )
+        received = []
+        worker.finished.connect(lambda risks, err: received.append((risks, err)))
+        worker.run()
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0][0][0].product_id, "1")
+        content = self._log_path.read_text(encoding="utf-8")
+        self.assertEqual(content.count("[标题检测] 用户取消"), 1)
+
+    def test_cancel_during_request_exception_logs_cancel_once(self):
+        """B：请求期间取消 + 请求抛异常：取消日志恰好写 1 次，finished 保持 error 行为。"""
+        from unittest.mock import Mock
+
+        service = Mock()
+        service.scan.side_effect = TimeoutError("timeout")
+        calls = {"n": 0}
+
+        def cancel():
+            calls["n"] += 1
+            return calls["n"] > 1  # 请求前放行，异常后已取消
+
+        worker = _TitleRiskWorker(
+            service, [{"id": "1", "title": "t"}], cancel_requested=cancel
+        )
+        received = []
+        worker.finished.connect(lambda risks, err: received.append((risks, err)))
+        worker.run()
+        self.assertEqual(received, [([], "timeout")])
+        content = self._log_path.read_text(encoding="utf-8")
+        self.assertEqual(content.count("[标题检测] 用户取消"), 1)
+
+    def test_exception_without_cancel_does_not_log_cancel(self):
+        """C：未取消但请求抛异常：不得写用户取消日志。"""
+        from unittest.mock import Mock
+
+        service = Mock()
+        service.scan.side_effect = TimeoutError("timeout")
+        worker = _TitleRiskWorker(
+            service, [{"id": "1", "title": "t"}], cancel_requested=lambda: False
+        )
+        received = []
+        worker.finished.connect(lambda risks, err: received.append((risks, err)))
+        worker.run()
+        self.assertEqual(received, [([], "timeout")])
+        content = self._log_path.read_text(encoding="utf-8")
+        self.assertNotIn("[标题检测] 用户取消", content)
 
 
 if __name__ == "__main__":

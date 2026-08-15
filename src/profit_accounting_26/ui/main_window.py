@@ -15,8 +15,8 @@ from profit_accounting_26.ui.theme import APP_STYLE
 from profit_accounting_26.product_collector import ProductCollectionPage
 # 保留 NAV_ITEMS 供 app.py 和测试导入
 NAV_ITEMS = [
-    "新商品测算",
     "商品采集",
+    "新商品测算",
     "历史记录管理",
     "设置",
 ]
@@ -108,4 +108,4 @@ class MainWindow(QMainWindow):
 
     def open_record(self, record_id: str) -> None:
         self.calculation_page.load_record_payload(record_id)
-        self.switch_page(0)
+        self.switch_page(NAV_ITEMS.index("新商品测算"))

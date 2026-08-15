@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from profit_accounting_26.application.api_profile_store import ApiProfileStore, LOCAL_REESTIMATE
+from profit_accounting_26.product_collector import product_risk_log
 from profit_accounting_26.application.qwen_request_params import qwen_extra_body_params
 from profit_accounting_26.application.recognition_service import (
     RecognitionResponseError,
@@ -132,6 +134,10 @@ class TitleRiskScanService:
         if not endpoint or not api_key.strip() or not profile.model_name.strip():
             raise RecognitionUnavailableError("标题风险检测API配置不完整。")
 
+        product_risk_log.title_scan_start(
+            profile.display_name, profile.provider, profile.model_name, len(titles)
+        )
+
         uses_openai_schema = str(getattr(profile, "provider", "") or "").strip().casefold() == "openai"
         prompt = _build_prompt(titles)
         body: dict[str, Any] = {
@@ -143,22 +149,53 @@ class TitleRiskScanService:
             body["response_format"] = {"type": "json_object"}
         body.update(qwen_extra_body_params(profile.provider, profile.model_name))
 
+        payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
         request = Request(
             endpoint,
-            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            data=payload,
             headers={"Authorization": f"Bearer {api_key.strip()}", "Content-Type": "application/json"},
             method="POST",
         )
+        _request_start = time.monotonic()
+        product_risk_log.title_request_started(len(payload))
         try:
             with urlopen(request, timeout=120) as response:  # noqa: S310
                 response_data = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
+            product_risk_log.title_request_finished(
+                duration_ms=product_risk_log.elapsed_ms(_request_start),
+                success=0,
+                missing=len(titles),
+                status="失败",
+                http_error=f"HTTP {exc.code}",
+            )
             raise RecognitionUnavailableError(f"标题风险检测请求失败（HTTP {exc.code}）。") from exc
         except TimeoutError as exc:
+            product_risk_log.title_request_finished(
+                duration_ms=product_risk_log.elapsed_ms(_request_start),
+                success=0,
+                missing=len(titles),
+                status="超时",
+                timeout=True,
+            )
             raise RecognitionUnavailableError("标题风险检测超时，请稍后重试。") from exc
         except (URLError, OSError) as exc:
+            product_risk_log.title_request_finished(
+                duration_ms=product_risk_log.elapsed_ms(_request_start),
+                success=0,
+                missing=len(titles),
+                status="失败",
+                http_error=str(exc)[:80],
+            )
             raise RecognitionUnavailableError(f"标题风险检测无法连接：{exc}") from exc
         except json.JSONDecodeError as exc:
+            product_risk_log.title_request_finished(
+                duration_ms=product_risk_log.elapsed_ms(_request_start),
+                success=0,
+                missing=len(titles),
+                status="失败",
+                http_error="响应解析失败",
+            )
             raise RecognitionResponseError("标题风险检测服务返回了无法解析的响应。") from exc
 
         try:
@@ -170,9 +207,28 @@ class TitleRiskScanService:
                     text = text[:-3].strip()
             data = json.loads(text)
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            product_risk_log.title_request_finished(
+                duration_ms=product_risk_log.elapsed_ms(_request_start),
+                success=0,
+                missing=len(titles),
+                status="失败",
+                http_error="返回格式无效",
+            )
             raise RecognitionResponseError("标题风险检测返回格式无效。") from exc
 
-        return self._parse_risks(data)
+        results = self._parse_risks(data)
+        # 日志统计按实际送检 id 集合去重：AI 返回重复 id / 未知 id 不夸大 success
+        expected_ids = {
+            str(t.get("id") or "").strip() for t in titles if str(t.get("id") or "").strip()
+        }
+        valid_returned_ids = {r.product_id for r in results if r.product_id in expected_ids}
+        product_risk_log.title_request_finished(
+            duration_ms=product_risk_log.elapsed_ms(_request_start),
+            success=len(valid_returned_ids),
+            missing=len(expected_ids - valid_returned_ids),
+            status="完成",
+        )
+        return results
 
     @staticmethod
     def _parse_risks(data: Any) -> list[TitleRiskItem]:

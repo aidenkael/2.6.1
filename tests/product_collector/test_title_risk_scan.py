@@ -176,3 +176,56 @@ class TestTitleRiskScanServiceIntegration:
         assert risks[0].risk == "platform"
         assert risks[1].product_id == "2"
         assert risks[1].risk == "none"
+
+    def test_scan_logs_success_missing_by_unique_expected_ids(self, monkeypatch, tmp_path):
+        """任务 5：重复 id / 未知 id 时 success/missing 按实际送检 id 集合统计。"""
+        from profit_accounting_26.product_collector import product_risk_log as prl
+
+        for handler in list(prl._logger.handlers):
+            prl._logger.removeHandler(handler)
+            handler.close()
+        log_path = prl.configure(tmp_path)
+        try:
+            profile_store = MagicMock()
+            profile = MagicMock()
+            profile.api_url = "https://api.example.com/v1"
+            profile.model_name = "test-model"
+            profile.provider = "OpenAI"
+            profile_store.bound_profile.return_value = (profile, "test-key")
+
+            # AI 返回：id=1 重复两次 + id=999（未知 id）
+            response_data = {
+                "results": [
+                    {"id": "1", "risk": "platform", "reason": "带电"},
+                    {"id": "1", "risk": "infringement", "reason": "重复 id"},
+                    {"id": "999", "risk": "platform", "reason": "未知 id"},
+                ]
+            }
+            response_json = json.dumps({
+                "choices": [{"message": {"content": json.dumps(response_data)}}]
+            }).encode("utf-8")
+
+            class MockResponse:
+                def __enter__(self):
+                    return self
+                def __exit__(self, *args):
+                    return False
+                def read(self):
+                    return response_json
+
+            import profit_accounting_26.product_collector.title_risk_scan as module
+            monkeypatch.setattr(module, "urlopen", lambda *args, **kwargs: MockResponse())
+
+            service = TitleRiskScanService(profile_store)
+            titles = [{"id": "1", "title": "A"}, {"id": "2", "title": "B"}]
+            risks = service.scan(titles)
+
+            # 业务结果不变：仍返回解析出的有效条目
+            assert len(risks) == 3
+            content = log_path.read_text(encoding="utf-8")
+            # 有效返回 id 唯一集合 = {"1"} -> success=1；expected {"1","2"} -> missing=1
+            assert "success=1 missing=1" in content
+        finally:
+            for handler in list(prl._logger.handlers):
+                prl._logger.removeHandler(handler)
+                handler.close()

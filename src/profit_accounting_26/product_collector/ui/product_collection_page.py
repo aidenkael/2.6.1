@@ -17,6 +17,7 @@ import base64
 import json
 import webbrowser
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, List
 from urllib.request import Request, urlopen
 
@@ -40,7 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import keyword_engine
+from .. import keyword_engine, product_risk_log
 from ..collector_core.business_source import CollectionReport
 from ..collector_core.models import CandidateProduct
 from .ui_loader import load_ui
@@ -89,6 +90,36 @@ QPushButton {
 }
 QPushButton:hover {
     background: #eef3fa;
+}
+QPushButton#btnTitleCheck, QPushButton#btnInfringementCheck {
+    background: #fff;
+    border: 1px solid #4a90d9;
+    color: #3a7bc8;
+}
+QPushButton#btnTitleCheck:hover, QPushButton#btnInfringementCheck:hover {
+    background: #eef3fa;
+}
+QPushButton#btnDetectAll {
+    background: #4a90d9;
+    color: #fff;
+    border: 1px solid #3a7bc8;
+}
+QPushButton#btnDetectAll:hover {
+    background: #3a7bc8;
+}
+QPushButton#btnClearAll {
+    background: #fff;
+    color: #5a6b7e;
+    border: 1px solid #d0d7e2;
+}
+QFrame#statusHintFrame {
+    background: #eef3fa;
+    border: 1px solid #dbe5f1;
+    border-radius: 6px;
+}
+QLabel#lblStatus {
+    background: transparent;
+    border: none;
 }
 QPushButton:disabled {
     color: #a5b0c0;
@@ -321,8 +352,8 @@ class ProductCard(QFrame):
         self.lbl_title_risk.setWordWrap(True)
         self.lbl_title_risk.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.lbl_title_risk.hide()
-        # 限制 Overlay 最大高度约为 2 行文字，防止长 reason 覆盖整个卡片
-        self.lbl_title_risk.setMaximumHeight(36)
+        # 限制 Overlay 最大高度约为 3 行文字，防止长 reason 覆盖整个卡片
+        self.lbl_title_risk.setMaximumHeight(54)
 
         # 图片风险 Overlay（绝对定位，不参与布局）
         self.lbl_image_risk = QLabel(self)
@@ -330,8 +361,8 @@ class ProductCard(QFrame):
         self.lbl_image_risk.setWordWrap(True)
         self.lbl_image_risk.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.lbl_image_risk.hide()
-        # 限制 Overlay 最大高度约为 2 行文字
-        self.lbl_image_risk.setMaximumHeight(36)
+        # 限制 Overlay 最大高度约为 3 行文字
+        self.lbl_image_risk.setMaximumHeight(54)
 
         # 标题风险和图片风险独立存储（新格式）
         self._title_risk_data: dict | None = None  # {"risk": "...", "reason": "..."}
@@ -443,18 +474,18 @@ class ProductCard(QFrame):
         高度由 setMaximumHeight(约两行) 约束，不 setFixedHeight，
         每次 setText 后 adjustSize 都能按当前文字重新计算高度。
         """
-        # 标题风险 Overlay：覆盖在标题区域内部，最大宽度 90%
+        # 标题风险 Overlay：覆盖在标题区域内部，最大宽度 96%
         title_geo = self.lbl_title.geometry()
-        max_w = int(title_geo.width() * 0.9)
+        max_w = int(title_geo.width() * 0.96)
         self.lbl_title_risk.setMaximumWidth(max_w)
         self.lbl_title_risk.adjustSize()
         self.lbl_title_risk.move(
             title_geo.left() + 4,
             title_geo.bottom() - self.lbl_title_risk.height() - 2,
         )
-        # 图片风险 Overlay：覆盖在图片区内部左下角，最大宽度 90%
+        # 图片风险 Overlay：覆盖在图片区内部左下角，最大宽度 96%
         img_geo = self.lbl_image.geometry()
-        max_img_w = int(img_geo.width() * 0.9)
+        max_img_w = int(img_geo.width() * 0.96)
         self.lbl_image_risk.setMaximumWidth(max_img_w)
         self.lbl_image_risk.adjustSize()
         self.lbl_image_risk.move(
@@ -681,8 +712,16 @@ class ProductCollectionPage(QWidget):
         self._load_ui()
 
     def set_log_dir(self, log_dir: str | None) -> None:
-        """注入日志目录（由宿主应用调用）。"""
+        """注入日志目录（由宿主应用调用）。
+
+        log_dir 形如 <数据目录>/product_collector；
+        同时配置独立商品风险检测日志（<数据目录>/logs/product_risk/product_risk.log）。
+        """
         self._log_dir = log_dir
+        if log_dir:
+            from .. import product_risk_log
+
+            product_risk_log.configure(Path(log_dir).parent)
 
     def set_api_profile_store(self, profile_store) -> None:
         """注入 API Profile Store（由宿主应用调用）。"""
@@ -731,6 +770,8 @@ class ProductCollectionPage(QWidget):
         self.btn_select_all = form.findChild(QWidget, "btnSelectAll")
         self.btn_view_removed = form.findChild(QWidget, "btnViewRemoved")
         self.btn_restore = form.findChild(QWidget, "btnRestoreSelected")
+        self.btn_clear_all = form.findChild(QWidget, "btnClearAll")
+        self.status_hint_frame = form.findChild(QWidget, "statusHintFrame")
         self.scroll = form.findChild(QScrollArea, "scrollProducts")
         self._container = form.findChild(QWidget, "productGridHost")
 
@@ -767,6 +808,7 @@ class ProductCollectionPage(QWidget):
         self.btn_select_all.clicked.connect(self.select_all_visible)
         self.btn_view_removed.clicked.connect(self._toggle_removed_view)
         self.btn_restore.clicked.connect(self._restore_selected)
+        self.btn_clear_all.clicked.connect(self._on_clear_all)
 
         # 标题检测 / 图片检测 / 全部检测
         self.btn_title_check.clicked.connect(self._on_title_risk_check)
@@ -787,6 +829,7 @@ class ProductCollectionPage(QWidget):
         self._container.installEventFilter(self)
         self.spin_target.installEventFilter(self)
         self.btn_random_idea.installEventFilter(self)
+        self.btn_select_all.installEventFilter(self)
         self._update_total_target()
 
     def eventFilter(self, obj, event):  # noqa: N802 (Qt 命名)
@@ -798,6 +841,12 @@ class ProductCollectionPage(QWidget):
             if event.button() == Qt.MouseButton.RightButton:
                 self.txt_cn.clear()
                 self.txt_en.clear()
+                event.accept()
+                return True
+        # 全部选择按钮：左键全选（clicked 信号），右键取消全部选择
+        if obj is self.btn_select_all and event.type() == QEvent.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.RightButton:
+                self.clear_selection()
                 event.accept()
                 return True
         return super().eventFilter(obj, event)
@@ -947,7 +996,7 @@ class ProductCollectionPage(QWidget):
         self._task_statuses = []
 
         self.btn_start.setEnabled(False)
-        self.lbl_status.setText("采集中…")
+        self.btn_start.setText("采集中…")
         self._update_task_status_label()
         self._start_next_task()
 
@@ -957,6 +1006,10 @@ class ProductCollectionPage(QWidget):
             idx = min(self._current_task_idx + 1, total)
             cn = self._search_tasks[self._current_task_idx].display_cn
             self.lbl_status.setText(f"正在执行 {idx}/{total}：{cn}")
+        else:
+            self.lbl_status.setText(
+                "<span style='color:#3a7bc8;font-weight:600;'>正在采集商品…</span>"
+            )
 
     def _start_next_task(self) -> None:
         if self._current_task_idx >= len(self._search_tasks):
@@ -964,19 +1017,39 @@ class ProductCollectionPage(QWidget):
             return
         task = self._search_tasks[self._current_task_idx]
 
-        self._thread = QThread(self)
-        self._worker = CollectWorker(
+        thread = QThread(self)
+        worker = CollectWorker(
             task.actual_query, task.target_count, self._collector,
             log_dir=self._log_dir,
         )
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.reportReady.connect(self._on_task_report)
-        self._worker.failed.connect(self._on_task_failed)
-        self._worker.reportReady.connect(self._thread.quit)
-        self._worker.failed.connect(self._thread.quit)
-        self._thread.finished.connect(self._thread.deleteLater)
-        self._thread.start()
+        self._thread = thread
+        self._worker = worker
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.reportReady.connect(self._on_task_report)
+        worker.failed.connect(self._on_task_failed)
+        worker.reportReady.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        # 通过默认参数捕获本次 thread/worker 身份，避免多关键词时
+        # 旧线程 finished 误清理刚创建的新线程/worker
+        thread.finished.connect(
+            lambda t=thread, w=worker: self._clear_collect_task(t, w)
+        )
+        thread.start()
+
+    def _clear_collect_task(self, finished_thread: QThread, finished_worker: CollectWorker) -> None:
+        """采集线程结束后安全清理。
+
+        worker / thread 正常 deleteLater；通过对象 identity 判断，
+        旧线程结束不会误清后续任务新建的线程/worker。
+        """
+        finished_worker.deleteLater()
+        finished_thread.deleteLater()
+        if self._thread is finished_thread:
+            self._thread = None
+        if self._worker is finished_worker:
+            self._worker = None
+        self._update_clear_button()
 
     def _on_task_report(self, report: CollectionReport) -> None:
         """按顺序累积，跨关键词 product_id 去重。"""
@@ -995,6 +1068,7 @@ class ProductCollectionPage(QWidget):
 
     def _finish_all_tasks(self) -> None:
         self.btn_start.setEnabled(True)
+        self.btn_start.setText("开始采集")
         products = self._all_products
         total_target = sum(t.target_count for t in self._search_tasks)
 
@@ -1129,7 +1203,7 @@ class ProductCollectionPage(QWidget):
         self._selected_ids = set()
         self._showing_removed = False
         self.btn_restore.setVisible(False)
-        self.btn_view_removed.setText(f"查看已移除（0）")
+        self._apply_removed_view_style()
 
         for product in self._products:
             card = ProductCard(product, self._network, self._fetch_images, self._container)
@@ -1141,6 +1215,7 @@ class ProductCollectionPage(QWidget):
         self._update_stats()
         self._update_selection_buttons()
         self._update_risk_buttons_state()
+        self._update_clear_button()
         self._relayout_cards()
 
     def _relayout_cards(self) -> None:
@@ -1164,15 +1239,46 @@ class ProductCollectionPage(QWidget):
 
     def _visible_cards(self) -> list[ProductCard]:
         if self._showing_removed:
+            # 已移除页面不参与风险排序，保持原顺序
             return [
                 c for pid, c in self._cards.items()
                 if self._states[pid] == REMOVED
             ]
-        return [
+        visible = [
             card
             for product_id, card in self._cards.items()
             if self._states[product_id] == KEEP
         ]
+        # 风险商品置顶：infringement > platform > none；
+        # 稳定排序 + self._cards 插入序（即原始采集顺序），同级不漂移
+        visible.sort(key=lambda card: -self._card_risk_rank(card))
+        return visible
+
+    def _card_risk_rank(self, card: ProductCard) -> int:
+        """综合风险等级：标题/图片任一 infringement → 2；任一 platform → 1；否则 0。
+
+        none 检测结果已由 set_*_risk_data 清除对应旧状态，
+        未返回/失败的商品保留旧状态，因此这里始终反映当前有效风险。
+        """
+        t = card._title_risk_data
+        i = card._image_risk_data
+        t_risk = t.get("risk") if t else "none"
+        i_risk = i.get("risk") if i else "none"
+        if "infringement" in (t_risk, i_risk):
+            return 2
+        if "platform" in (t_risk, i_risk):
+            return 1
+        return 0
+
+    def _sort_risk_pinned(self) -> None:
+        """检测全部结束后重排一次：风险商品置顶，滚动条回到顶部。
+
+        只改变卡片显示顺序，不修改 selected 集合与 KEEP/REMOVED 状态。
+        """
+        self._relayout_cards()
+        bar = self.scroll.verticalScrollBar()
+        if bar is not None:
+            bar.setValue(0)
 
     def _relayout_preserving_scroll(self) -> None:
         """重排卡片前保存滚动位置，布局完成后恢复，避免跳到页面底部。"""
@@ -1185,17 +1291,25 @@ class ProductCollectionPage(QWidget):
     # 已移除视图
     # ------------------------------------------------------------------
 
-    def _toggle_removed_view(self) -> None:
-        self._showing_removed = not self._showing_removed
-        self.clear_selection()
+    def _apply_removed_view_style(self) -> None:
+        """已移除视图：返回按钮文本与主蓝色样式；正常视图恢复中性样式。"""
         if self._showing_removed:
-            self.btn_view_removed.setText("返回商品视图")
-            self.btn_restore.setVisible(True)
+            self.btn_view_removed.setText("← 返回商品视图")
+            self.btn_view_removed.setProperty("primary", True)
         else:
             self.btn_view_removed.setText(
                 f"查看已移除（{self.removed_count()}）"
             )
-            self.btn_restore.setVisible(False)
+            self.btn_view_removed.setProperty("primary", False)
+        style = self.btn_view_removed.style()
+        style.unpolish(self.btn_view_removed)
+        style.polish(self.btn_view_removed)
+
+    def _toggle_removed_view(self) -> None:
+        self._showing_removed = not self._showing_removed
+        self.clear_selection()
+        self.btn_restore.setVisible(self._showing_removed)
+        self._apply_removed_view_style()
         self._update_stats()
         self._update_selection_buttons()
         self._relayout_cards()
@@ -1208,9 +1322,7 @@ class ProductCollectionPage(QWidget):
         self._finish_batch_action()
         self._showing_removed = False
         self.btn_restore.setVisible(False)
-        self.btn_view_removed.setText(
-            f"查看已移除（{self.removed_count()}）"
-        )
+        self._apply_removed_view_style()
         self._relayout_cards()
 
     # ------------------------------------------------------------------
@@ -1348,11 +1460,87 @@ class ProductCollectionPage(QWidget):
             self.lbl_total.setText(f"商品 {self.keep_count()}")
         self.lbl_selected.setText(f"已选 {self.selected_count()}")
         self.btn_view_removed.setEnabled(self.removed_count() > 0)
-        self.btn_view_removed.setText(
-            f"查看已移除（{self.removed_count()}）"
-            if not self._showing_removed
-            else "返回商品视图"
+        self._apply_removed_view_style()
+        self._update_status_hint()
+
+    def _update_status_hint(self) -> None:
+        """刷新中央状态提示区默认文本（工作/完成状态优先，选择变化后回到计数）。"""
+        if self._showing_removed:
+            self.lbl_status.setText(
+                "<span style='color:#C77600;font-weight:600;'>已移除商品视图</span>"
+                f" · 共 {self.removed_count()} 个 · 已选 {self.selected_count()} 个 · 可选择后恢复"
+            )
+        else:
+            self.lbl_status.setText(
+                f"商品 {self.keep_count()} · 已选 {self.selected_count()} · 已移除 {self.removed_count()}"
+            )
+
+    def _update_clear_button(self) -> None:
+        """清空本次按钮：有商品且非检测/采集中才可用。"""
+        collecting = self._thread is not None and self._thread.isRunning()
+        self.btn_clear_all.setEnabled(
+            bool(self._products) and not self._detecting_active and not collecting
         )
+
+    def _on_clear_all(self) -> None:
+        """清空本次按钮点击：进行中禁止执行，确认一次后清空。"""
+        collecting = self._thread is not None and self._thread.isRunning()
+        if collecting or self._detecting_active:
+            self._notice(self, "提示", "正在采集或风险检测中，暂不能清空本次。", level="warning")
+            return
+        if not self._products:
+            return
+        if self._confirm_clear_all():
+            self._clear_all_results()
+
+    def _confirm_clear_all(self) -> bool:
+        """弹出一次确认框：确定清空本次采集结果吗？"""
+        box = QMessageBox(self)
+        box.setWindowTitle("清空本次")
+        box.setText("确定清空本次采集结果吗？")
+        box.setIcon(QMessageBox.Icon.Warning)
+        btn_ok = box.addButton("确定清空", QMessageBox.ButtonRole.DestructiveRole)
+        btn_cancel = box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(btn_cancel)
+        box.exec()
+        return box.clickedButton() is btn_ok
+
+    def _clear_all_results(self) -> None:
+        """清空当前一轮采集产生的全部运行期数据。
+
+        清除：商品列表 / 卡片 / selected / KEEP-REMOVED / 标题与图片风险状态 /
+        图片检测运行期缓存 / 页面引用 / 检测统计与提示状态。
+        不清除：历史记录、API Profile、API Key、搜索词配置、汇率、
+        软件设置、29 美元补贴规则等长期数据。
+        """
+        for card in self._cards.values():
+            card.deleteLater()
+        self._cards = {}
+        self._products = []
+        self._states = {}
+        self._selected_ids = set()
+        self._showing_removed = False
+        self.btn_restore.setVisible(False)
+        # 本轮采集期运行引用：不再持有 CandidateProduct / 任务数据
+        self._all_products = []
+        self._seen_ids = set()
+        self._search_tasks = []
+        self._task_statuses = []
+        self._current_task_idx = 0
+        # 页面当前引用与检测状态
+        self._detect_snapshot = None
+        self._detect_all_targets = None
+        self._detect_all_phase = None
+        self._detect_all_title_failed = 0
+        # 图片检测运行期缓存（标题检测无运行期缓存）
+        if self._image_risk_service is not None:
+            self._image_risk_service.clear_cache()
+        self._apply_removed_view_style()
+        self._update_stats()
+        self._update_selection_buttons()
+        self._update_risk_buttons_state()
+        self._update_clear_button()
+        self._relayout_cards()
 
     # ------------------------------------------------------------------
     # AI 风险检测
@@ -1393,6 +1581,7 @@ class ProductCollectionPage(QWidget):
             self.btn_select_all, self.btn_keep_only, self.btn_remove_selected,
             self.btn_view_removed, self.btn_restore, self.btn_start,
             self.btn_title_check, self.btn_infringement_check, self.btn_detect_all,
+            self.btn_clear_all,
         ):
             if btn:
                 btn.setEnabled(False)
@@ -1411,6 +1600,7 @@ class ProductCollectionPage(QWidget):
         self._update_risk_buttons_state()
         self._update_selection_buttons()
         self.btn_start.setEnabled(True)
+        self._update_clear_button()
 
     # ------------------------------------------------------------------
     # 确认框
@@ -1499,7 +1689,9 @@ class ProductCollectionPage(QWidget):
     def _start_title_risk_check(self, targets: list[CandidateProduct]) -> None:
         """启动标题风险检测。"""
         self._enter_detecting(targets)
-        self.lbl_status.setText("标题检测中")
+        self.lbl_status.setText(
+            "<span style='color:#3a7bc8;font-weight:600;'>正在检测标题…</span>"
+        )
         self.btn_title_check.setText("取消标题检测")
         self.btn_title_check.setEnabled(True)
         self.btn_title_check.setStyleSheet("background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;border-radius:6px;")
@@ -1523,7 +1715,9 @@ class ProductCollectionPage(QWidget):
     def _cancel_current_detect(self) -> None:
         """协作式取消当前检测。"""
         self._cancel_requested = True
-        self.lbl_status.setText("正在取消检测...")
+        self.lbl_status.setText(
+            "<span style='color:#3a7bc8;font-weight:600;'>正在取消检测…</span>"
+        )
 
     def _on_title_risk_finished(self, risks: list, error: str) -> None:
         """标题风险检测完成回调。"""
@@ -1557,9 +1751,13 @@ class ProductCollectionPage(QWidget):
                 self.lbl_status.setText("检测已取消，已完成部分结果")
             else:
                 if title_failed > 0:
-                    self.lbl_status.setText(f"标题检测完成，{title_failed} 个失败")
+                    self.lbl_status.setText(
+                        "检测完成 · "
+                        f"<span style='color:#C62828;font-weight:600;'>失败 {title_failed} 个</span>"
+                        " · 风险商品已置顶"
+                    )
                 else:
-                    self.lbl_status.setText("检测完成")
+                    self.lbl_status.setText("检测完成 · 风险商品已置顶")
                 if title_failed > 0:
                     self._notice(self, "标题风险检测完成",
                                  f"共处理 {len(snapshot_ids)} 个商品，{title_failed} 个失败，发现 {risk_count} 个风险商品。")
@@ -1567,6 +1765,8 @@ class ProductCollectionPage(QWidget):
                     self._notice(self, "标题风险检测完成", f"共检测 {len(risks)} 个商品，发现 {risk_count} 个风险商品。")
                 else:
                     self._notice(self, "标题风险检测完成", "未发现风险商品。")
+            # 全部标题请求结束：写入成功结果后综合排序一次并回到顶部
+            self._sort_risk_pinned()
 
         self._exit_detecting()
 
@@ -1590,7 +1790,9 @@ class ProductCollectionPage(QWidget):
     def _start_image_risk_check(self, targets: list[CandidateProduct]) -> None:
         """启动图片风险检测。"""
         self._enter_detecting(targets)
-        self.lbl_status.setText("图片检测中")
+        self.lbl_status.setText(
+            "<span style='color:#3a7bc8;font-weight:600;'>正在检测图片…</span>"
+        )
         self.btn_infringement_check.setText("取消图片检测")
         self.btn_infringement_check.setEnabled(True)
         self.btn_infringement_check.setStyleSheet("background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;border-radius:6px;")
@@ -1646,13 +1848,19 @@ class ProductCollectionPage(QWidget):
                 self.lbl_status.setText("检测已取消，已完成部分结果")
             else:
                 if failed > 0:
-                    self.lbl_status.setText(f"图片检测完成，{risk_count} 个风险，{failed} 个失败")
+                    self.lbl_status.setText(
+                        "检测完成 · "
+                        f"<span style='color:#C62828;font-weight:600;'>失败 {failed} 个</span>"
+                        " · 风险商品已置顶"
+                    )
                 else:
-                    self.lbl_status.setText("检测完成")
+                    self.lbl_status.setText("检测完成 · 风险商品已置顶")
                 if risk_count > 0:
                     self._notice(self, "图片风险检测完成", f"共处理 {stats.get('requested_count', 0)} 个商品，发现 {risk_count} 个风险商品。")
                 else:
                     self._notice(self, "图片风险检测完成", "未发现风险商品。")
+            # 全部图片批次结束：写入成功结果后综合排序一次并回到顶部
+            self._sort_risk_pinned()
 
         self._exit_detecting()
 
@@ -1682,7 +1890,9 @@ class ProductCollectionPage(QWidget):
     def _start_title_risk_check_for_all(self, targets: list[CandidateProduct]) -> None:
         """全部检测的标题阶段。"""
         self._enter_detecting(targets)
-        self.lbl_status.setText("全部检测｜正在检测标题")
+        self.lbl_status.setText(
+            "<span style='color:#3a7bc8;font-weight:600;'>正在检测标题…</span>"
+        )
         self.btn_detect_all.setText("取消全部检测")
         self.btn_detect_all.setEnabled(True)
         self.btn_detect_all.setStyleSheet("background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;border-radius:6px;")
@@ -1733,7 +1943,9 @@ class ProductCollectionPage(QWidget):
 
         # 继续图片检测阶段
         self._detect_all_phase = "image"
-        self.lbl_status.setText("全部检测｜正在检测图片")
+        self.lbl_status.setText(
+            "<span style='color:#3a7bc8;font-weight:600;'>正在检测图片…</span>"
+        )
         targets = self._detect_all_targets or []
         products = [{"id": p.product_id, "main_image": p.main_image} for p in targets]
 
@@ -1779,10 +1991,10 @@ class ProductCollectionPage(QWidget):
                     parts.append(f"标题失败 {title_failed} 个")
                 if failed > 0:
                     parts.append(f"图片失败 {failed} 个")
-                if parts:
-                    self.lbl_status.setText("检测完成，" + "，".join(parts))
-                else:
-                    self.lbl_status.setText("检测完成")
+                parts.append("风险商品已置顶")
+                self.lbl_status.setText("检测完成 · " + " · ".join(parts))
+            # 两种结果全部处理完成：综合风险只排序一次并回到顶部
+            self._sort_risk_pinned()
 
         self._restore_detect_all_button()
         self._exit_detecting()
@@ -1814,14 +2026,31 @@ class _TitleRiskWorker(QObject):
 
     @Slot()
     def run(self) -> None:
+        cancelled_logged = False
+
+        def log_cancel_once() -> None:
+            """每次 worker 最多记录一次用户取消。"""
+            nonlocal cancelled_logged
+            if not cancelled_logged:
+                product_risk_log.title_scan_cancelled()
+                cancelled_logged = True
+
         try:
             # 标题检测是一次性批量请求，取消在请求发送前检查
             if self._cancel_requested and self._cancel_requested():
+                log_cancel_once()
                 self.finished.emit([], "")
                 return
             risks = self._service.scan(self._titles)
+            if self._cancel_requested and self._cancel_requested():
+                # 请求进行期间用户点击取消：请求自然完成，但取消行为必须记录
+                log_cancel_once()
             self.finished.emit(risks, "")
         except Exception as exc:
+            # 请求进行期间用户取消且请求异常（超时/HTTP/网络/解析等）：
+            # 取消日志同样不能丢，且只记录一次
+            if self._cancel_requested and self._cancel_requested():
+                log_cancel_once()
             self.finished.emit([], str(exc))
 
 

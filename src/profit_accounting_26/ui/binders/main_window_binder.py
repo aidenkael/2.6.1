@@ -37,8 +37,8 @@ from profit_accounting_26.ui.ui_loader import load_settings_page
 
 # 导航按钮 objectName 与页面 objectName 的映射（顺序固定）
 NAV_BINDINGS: list[tuple[str, str, str]] = [
-    ("btnNavCalculation", "pageCalculation", "新商品测算"),
     ("btnNavProductCollection", "pageProductCollection", "商品采集"),
+    ("btnNavCalculation", "pageCalculation", "新商品测算"),
     ("btnNavHistory", "pageHistory", "历史记录管理"),
     ("btnNavSettings", "pageSettingsHost", "设置"),
 ]
@@ -115,19 +115,42 @@ class MainWindowBinder:
                 self._nav_buttons.append(btn)
 
     def switch_page(self, index: int) -> None:
+        """切换到第 index 个导航页（索引按 NAV_BINDINGS 显示顺序）。
+
+        mainStack 物理顺序与导航显示顺序可能不同（pageCalculation 占位在挂载时
+        被替换为真实 CalculationPage），因此按导航项对应的页面实际索引切换。
+        """
         stack = self.window.findChild(QStackedWidget, "mainStack")
-        if not stack or not (0 <= index < stack.count()):
+        if not stack or not (0 <= index < len(NAV_BINDINGS)):
             return
-        stack.setCurrentIndex(index)
+        _btn_name, page_name, label = NAV_BINDINGS[index]
+        real_index = self._page_stack_index(stack, page_name)
+        if real_index < 0:
+            real_index = index
+        stack.setCurrentIndex(real_index)
         for idx, btn in enumerate(self._nav_buttons):
             btn.setChecked(idx == index)
         # 触发页面刷新
-        _btn_name, _page_name, label = NAV_BINDINGS[index]
         if label == "历史记录管理" and self.history_page:
             self.history_page.refresh()
         elif label == "设置" and self.settings_page and not getattr(self.settings_page, "dirty", False):
             if hasattr(self.settings_page, "load_settings"):
                 self.settings_page.load_settings()
+
+    def _page_stack_index(self, stack: QStackedWidget, page_name: str) -> int:
+        """导航项对应页面在 mainStack 中的实际索引。
+
+        pageCalculation 占位在挂载时被替换为真实 CalculationPage；
+        其余页面仍以占位 widget 形式挂在 stack 中。
+        """
+        if page_name == "pageCalculation" and self.calculation_page is not None:
+            idx = stack.indexOf(self.calculation_page)
+            if idx >= 0:
+                return idx
+        placeholder = self.window.findChild(QWidget, page_name)
+        if placeholder is not None:
+            return stack.indexOf(placeholder)
+        return -1
 
     def _mount_pages(self) -> None:
         """将现有页面 widget 挂载到 .ui 的页面占位中。"""

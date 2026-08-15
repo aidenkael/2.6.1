@@ -15,7 +15,7 @@ from PySide6.QtCore import QRect
 from PySide6.QtWidgets import QComboBox, QLabel, QLineEdit, QScrollArea, QWidget
 
 from profit_accounting_26.application import AppContext, SettingsService
-from profit_accounting_26.ui.main_window import MainWindow
+from profit_accounting_26.ui.main_window import MainWindow, NAV_ITEMS
 from profit_accounting_26.ui.pages import CalculationPage, HistoryPage
 from profit_accounting_26.ui.pages.calibration_feedback_dialog import CalibrationFeedbackDialog
 
@@ -122,7 +122,7 @@ class TestMainPageLayout:
         try:
             window.resize(1920, 1080)
             window.show()
-            window.switch_page(0)
+            window.switch_page(NAV_ITEMS.index("新商品测算"))
             qapp.processEvents()
             page = window.calculation_page
             root = page._root
