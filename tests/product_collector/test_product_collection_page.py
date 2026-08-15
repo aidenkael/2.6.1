@@ -630,7 +630,8 @@ class TestNewControlBehavior(_PageCase):
         with patch("profit_accounting_26.product_collector.ui.product_collection_page.ImageSearchWorker.run", fail_fast):
             QTest.mouseClick(card, Qt.MouseButton.LeftButton, pos=card.lbl_image.geometry().center())
             QTest.mouseDClick(card, Qt.MouseButton.LeftButton, pos=card.lbl_image.geometry().center())
-            self._pump(200)
+            # 全量测试高负载下线程退出可能超过 200ms，放宽等待避免偶发时序失败
+            self._pump(800)
         self.assertEqual(image_requests, [product.main_image])
         self.assertIsNone(self.page._image_search_thread)
         self.assertIsNone(self.page._image_search_worker)
@@ -1783,6 +1784,69 @@ class TestTitleRiskWorkerCancellation(_PageCase):
         self.assertEqual(received[0][0][0].product_id, "1")
         content = self._log_path.read_text(encoding="utf-8")
         self.assertIn("[标题检测] 用户取消", content)
+
+    def test_cancel_during_request_success_logs_cancel_once(self):
+        """A：请求期间取消 + 请求成功：取消日志恰好写 1 次，结果仍返回。"""
+        from unittest.mock import Mock
+
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        service = Mock()
+        service.scan.return_value = [TitleRiskItem("1", "platform", "带电")]
+        calls = {"n": 0}
+
+        def cancel():
+            calls["n"] += 1
+            return calls["n"] > 1  # 请求前放行，请求完成时已取消
+
+        worker = _TitleRiskWorker(
+            service, [{"id": "1", "title": "t"}], cancel_requested=cancel
+        )
+        received = []
+        worker.finished.connect(lambda risks, err: received.append((risks, err)))
+        worker.run()
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0][0][0].product_id, "1")
+        content = self._log_path.read_text(encoding="utf-8")
+        self.assertEqual(content.count("[标题检测] 用户取消"), 1)
+
+    def test_cancel_during_request_exception_logs_cancel_once(self):
+        """B：请求期间取消 + 请求抛异常：取消日志恰好写 1 次，finished 保持 error 行为。"""
+        from unittest.mock import Mock
+
+        service = Mock()
+        service.scan.side_effect = TimeoutError("timeout")
+        calls = {"n": 0}
+
+        def cancel():
+            calls["n"] += 1
+            return calls["n"] > 1  # 请求前放行，异常后已取消
+
+        worker = _TitleRiskWorker(
+            service, [{"id": "1", "title": "t"}], cancel_requested=cancel
+        )
+        received = []
+        worker.finished.connect(lambda risks, err: received.append((risks, err)))
+        worker.run()
+        self.assertEqual(received, [([], "timeout")])
+        content = self._log_path.read_text(encoding="utf-8")
+        self.assertEqual(content.count("[标题检测] 用户取消"), 1)
+
+    def test_exception_without_cancel_does_not_log_cancel(self):
+        """C：未取消但请求抛异常：不得写用户取消日志。"""
+        from unittest.mock import Mock
+
+        service = Mock()
+        service.scan.side_effect = TimeoutError("timeout")
+        worker = _TitleRiskWorker(
+            service, [{"id": "1", "title": "t"}], cancel_requested=lambda: False
+        )
+        received = []
+        worker.finished.connect(lambda risks, err: received.append((risks, err)))
+        worker.run()
+        self.assertEqual(received, [([], "timeout")])
+        content = self._log_path.read_text(encoding="utf-8")
+        self.assertNotIn("[标题检测] 用户取消", content)
 
 
 if __name__ == "__main__":

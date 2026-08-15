@@ -2026,18 +2026,31 @@ class _TitleRiskWorker(QObject):
 
     @Slot()
     def run(self) -> None:
+        cancelled_logged = False
+
+        def log_cancel_once() -> None:
+            """每次 worker 最多记录一次用户取消。"""
+            nonlocal cancelled_logged
+            if not cancelled_logged:
+                product_risk_log.title_scan_cancelled()
+                cancelled_logged = True
+
         try:
             # 标题检测是一次性批量请求，取消在请求发送前检查
             if self._cancel_requested and self._cancel_requested():
-                product_risk_log.title_scan_cancelled()
+                log_cancel_once()
                 self.finished.emit([], "")
                 return
             risks = self._service.scan(self._titles)
             if self._cancel_requested and self._cancel_requested():
                 # 请求进行期间用户点击取消：请求自然完成，但取消行为必须记录
-                product_risk_log.title_scan_cancelled()
+                log_cancel_once()
             self.finished.emit(risks, "")
         except Exception as exc:
+            # 请求进行期间用户取消且请求异常（超时/HTTP/网络/解析等）：
+            # 取消日志同样不能丢，且只记录一次
+            if self._cancel_requested and self._cancel_requested():
+                log_cancel_once()
             self.finished.emit([], str(exc))
 
 
