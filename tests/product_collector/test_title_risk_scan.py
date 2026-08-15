@@ -464,3 +464,29 @@ class TestTitleBatching:
         assert len(risks) == 20
         returned = {r.product_id for r in risks}
         assert "1" in returned and "20" in returned
+
+    def test_cancel_logs_actual_batch_count(self, monkeypatch, tmp_path):
+        """取消时专用日志批次数 = 实际执行批次数（不是计划批次数）。"""
+        from profit_accounting_26.product_collector import product_risk_log as prl
+
+        for handler in list(prl._logger.handlers):
+            prl._logger.removeHandler(handler)
+            handler.close()
+        log_path = prl.configure(tmp_path)
+        try:
+            service, _, call_count = self._service_with_failures(monkeypatch)
+            titles = [{"id": str(i), "title": f"商品{i}"} for i in range(1, 101)]  # 计划 5 批
+
+            def cancel_after_two():
+                return call_count[0] >= 2  # 执行 2 批后取消
+
+            risks = service.scan(titles, cancel_requested=cancel_after_two)
+            assert call_count[0] == 2
+            content = log_path.read_text(encoding="utf-8")
+            assert "批次数=2" in content
+            assert "status=取消" in content
+            assert "批次3开始" not in content
+        finally:
+            for handler in list(prl._logger.handlers):
+                prl._logger.removeHandler(handler)
+                handler.close()

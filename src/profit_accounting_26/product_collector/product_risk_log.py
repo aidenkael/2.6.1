@@ -122,6 +122,59 @@ def title_scan_cancelled() -> None:
     _logger.info("[标题检测] 用户取消")
 
 
+def title_batch_started(batch_index: int, batch_size: int) -> None:
+    """单批开始：批次编号 / 当前批数量。"""
+    _logger.info("[标题检测] 批次%d开始 本批数量=%d", batch_index, batch_size)
+
+
+def title_batch_finished(
+    *,
+    batch_index: int,
+    duration_ms: int,
+    success: int,
+    failed: int,
+    status: str,
+    timeout: bool = False,
+    http_error: str = "",
+) -> None:
+    """单批结束：耗时 / 成功失败数 / 状态 / 超时与 HTTP 摘要。"""
+    _logger.info(
+        "[标题检测] 批次%d结束 duration_ms=%d success=%d failed=%d status=%s"
+        " timeout=%s http_error=%s",
+        batch_index,
+        duration_ms,
+        success,
+        failed,
+        status,
+        timeout,
+        http_error,
+    )
+
+
+def title_scan_finished(
+    *,
+    total: int,
+    batches: int,
+    checked: int,
+    failed: int,
+    status: str,
+    timeout: bool = False,
+    http_error: str = "",
+) -> None:
+    """标题检测最终状态（batches 为实际执行批次数）。"""
+    _logger.info(
+        "[标题检测] 结束 总商品数=%d 批次数=%d checked=%d failed=%d status=%s"
+        " timeout=%s http_error=%s",
+        total,
+        batches,
+        checked,
+        failed,
+        status,
+        timeout,
+        http_error,
+    )
+
+
 # ----------------------------------------------------------------------
 # 图片检测
 # ----------------------------------------------------------------------

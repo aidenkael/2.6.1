@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -25,8 +24,6 @@ from profit_accounting_26.application.recognition_service import (
     RecognitionService,
     RecognitionUnavailableError,
 )
-
-logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "product-collector-title-risk-v3"
 
@@ -196,14 +193,15 @@ class TitleRiskScanService:
         all_results: list[TitleRiskItem] = []
         total_failed = 0
         cancelled = False
-        logger.info("[标题检测] 开始 总商品数=%d", len(titles))
+        executed_batches = 0
 
         for batch_index, start in enumerate(range(0, len(titles), BATCH_SIZE), start=1):
             batch = titles[start:start + BATCH_SIZE]
             if cancel_requested is not None and cancel_requested():
                 cancelled = True
                 break
-            logger.info("[标题检测] 批次%d开始 本批数量=%d", batch_index, len(batch))
+            executed_batches = batch_index
+            product_risk_log.title_batch_started(batch_index, len(batch))
             _batch_start = time.monotonic()
             batch_results: list[TitleRiskItem] = []
             batch_failed = 0
@@ -211,10 +209,12 @@ class TitleRiskScanService:
                 batch_results = self._request_single_batch(
                     batch, profile, api_key, endpoint, uses_openai_schema
                 )
-            except (RecognitionUnavailableError, RecognitionResponseError):
+            except (RecognitionUnavailableError, RecognitionResponseError) as exc:
                 # 单批失败不拖垮其它批：记录本批失败，继续下一批
                 batch_failed = len(batch)
+                batch_status = "超时" if "超时" in str(exc) else "失败"
             else:
+                batch_status = "完成"
                 expected_ids = {
                     str(t.get("id") or "").strip()
                     for t in batch
@@ -225,12 +225,13 @@ class TitleRiskScanService:
                 all_results.extend(batch_results)
             total_failed += batch_failed
             elapsed_ms = product_risk_log.elapsed_ms(_batch_start)
-            logger.info(
-                "[标题检测] 批次%d结束 duration_ms=%d success=%d failed=%d",
-                batch_index,
-                elapsed_ms,
-                len(batch_results),
-                batch_failed,
+            product_risk_log.title_batch_finished(
+                batch_index=batch_index,
+                duration_ms=elapsed_ms,
+                success=len(batch_results),
+                failed=batch_failed,
+                status=batch_status,
+                timeout=batch_status == "超时",
             )
             if on_batch is not None:
                 on_batch(batch_results, batch_failed, batch_index, total_batches, elapsed_ms)
@@ -241,13 +242,12 @@ class TitleRiskScanService:
             status = "部分失败"
         else:
             status = "完成"
-        logger.info(
-            "[标题检测] 结束 总商品数=%d 批次数=%d checked=%d failed=%d status=%s",
-            len(titles),
-            total_batches,
-            len(all_results),
-            total_failed,
-            status,
+        product_risk_log.title_scan_finished(
+            total=len(titles),
+            batches=executed_batches,
+            checked=len(all_results),
+            failed=total_failed,
+            status=status,
         )
         return all_results
 

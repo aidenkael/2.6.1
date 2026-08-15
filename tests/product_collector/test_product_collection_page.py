@@ -2355,6 +2355,34 @@ class TestEtaStatus(_PageCase):
         # avg=60s, 剩余 2 批 -> 120s -> 约 2分
         self.assertIn("2分", text)
 
+    def test_eta_text_has_single_yue(self):
+        """状态文字只保留一个'约'，不存在'约 约'。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self.page.load_results(_products(3))
+        self.page._enter_detecting(list(self.page._products))
+        self.page._on_title_batch_result(
+            [TitleRiskItem("1", "none", "")], 0, 1, 3, 60_000.0
+        )
+        text = self.page.lbl_status.text()
+        self.assertNotIn("约 约", text)
+        self.assertEqual(text.count("约"), 1)
+        # avg=60s, 剩余 2 批 -> 120s -> "约 2分"，外层不再重复拼接"约"
+        self.assertIn("预计剩余约 2分", text)
+
+    def test_eta_all_detect_single_yue(self):
+        """全部检测阶段同样只有一个'约'。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self.page.load_results(_products(3))
+        self.page._enter_detecting(list(self.page._products))
+        self.page._on_detect_all_title_batch_result(
+            [TitleRiskItem("1", "none", "")], 0, 1, 3, 60_000.0
+        )
+        text = self.page.lbl_status.text()
+        self.assertNotIn("约 约", text)
+        self.assertIn("预计本阶段剩余约 2分", text)
+
     def test_eta_cleared_after_last_batch(self):
         """最后一个批次完成：不再显示 ETA。"""
         from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem

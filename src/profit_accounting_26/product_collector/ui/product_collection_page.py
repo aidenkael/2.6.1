@@ -1615,7 +1615,8 @@ class ProductCollectionPage(QWidget):
             else:
                 avg = sum(self._batch_times) / len(self._batch_times)
                 remaining = max(total_batches - batch_index, 0)
-                parts.append(f"{eta_label}约 {self._format_eta(avg * remaining)}")
+                # _format_eta 已带“约”，外层不再重复拼接，避免“约 约”
+                parts.append(f"{eta_label}{self._format_eta(avg * remaining)}")
         self.lbl_status.setText("｜".join(parts))
 
     def _apply_batch(
