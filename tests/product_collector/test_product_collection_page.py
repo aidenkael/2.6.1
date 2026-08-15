@@ -1153,6 +1153,88 @@ class TestRefreshSelectedOnly(_PageCase):
         self.assertEqual(self.page._states, states_before)
 
 
+class TestImageCheckPassesTitle(_PageCase):
+    """图片检测调用点必须把商品标题一并传给 ImageRiskScanService。"""
+
+    def test_start_image_check_passes_title(self):
+        """_start_image_risk_check 构造的 products 含 id/title/main_image。"""
+        from unittest.mock import MagicMock
+
+        self.page.load_results(_products(2))
+        self.page._image_risk_service = MagicMock()
+        captured = {}
+
+        class FakeWorker:
+            def __init__(self, service, products, **kwargs):
+                captured["products"] = products
+
+            finished = MagicMock()
+
+            def moveToThread(self, thread):
+                pass
+
+            def run(self):
+                pass
+
+            def deleteLater(self):
+                pass
+
+        with patch(
+            "profit_accounting_26.product_collector.ui.product_collection_page.QThread"
+        ), patch(
+            "profit_accounting_26.product_collector.ui.product_collection_page._ImageRiskWorker",
+            FakeWorker,
+        ):
+            self.page._start_image_risk_check(self.page._products)
+
+        products = captured["products"]
+        self.assertEqual(len(products), 2)
+        self.assertEqual(products[0]["id"], "1")
+        self.assertEqual(products[0]["title"], "测试商品1")
+        self.assertEqual(products[0]["main_image"], "https://img.example/1.jpg")
+
+    def test_detect_all_image_stage_passes_title(self):
+        """全部检测的图片阶段构造的 products 也含 title。"""
+        from unittest.mock import MagicMock
+
+        self.page.load_results(_products(2))
+        self.page._image_risk_service = MagicMock()
+        targets = list(self.page._products)
+        self.page._detect_all_targets = targets
+        self.page._enter_detecting(targets)
+        self.page._detect_all_phase = "image"
+        captured = {}
+
+        class FakeWorker:
+            def __init__(self, service, products, **kwargs):
+                captured["products"] = products
+
+            finished = MagicMock()
+
+            def moveToThread(self, thread):
+                pass
+
+            def run(self):
+                pass
+
+            def deleteLater(self):
+                pass
+
+        with patch(
+            "profit_accounting_26.product_collector.ui.product_collection_page.QThread"
+        ), patch(
+            "profit_accounting_26.product_collector.ui.product_collection_page._ImageRiskWorker",
+            FakeWorker,
+        ):
+            self.page._on_detect_all_title_finished([], "")
+
+        products = captured["products"]
+        self.assertEqual(len(products), 2)
+        self.assertEqual(products[0]["id"], "1")
+        self.assertEqual(products[0]["title"], "测试商品1")
+        self.assertEqual(products[0]["main_image"], "https://img.example/1.jpg")
+
+
 class TestCancelPreservesResults(_PageCase):
     """测试取消后已完成结果保留。"""
 

@@ -50,6 +50,69 @@ class TestBuildPrompt:
         assert "none" in prompt
 
 
+class TestPromptContractV3:
+    """V3 标题 Prompt contract 测试。
+
+    只验证 Prompt contract 与解析器，不做假 AI 准确率测试。
+    """
+
+    def test_prompt_version_is_v3(self):
+        """标题 PROMPT_VERSION 必须为 v3。"""
+        import profit_accounting_26.product_collector.title_risk_scan as module
+        assert module.PROMPT_VERSION == "product-collector-title-risk-v3"
+        assert TitleRiskScanService.PROMPT_VERSION == "product-collector-title-risk-v3"
+
+    def test_prompt_keeps_full_context_rule(self):
+        """标题 Prompt 保留完整上下文判断规则。"""
+        prompt = _build_prompt([{"id": "1", "title": "Test"}])
+        assert "完整上下文" in prompt
+        assert "机械触发" in prompt
+        assert "模糊情况返回 none" in prompt
+
+    def test_prompt_halloween_skeleton_not_auto_risk(self):
+        """标题 Prompt 明确 Halloween skeleton 不自动风险。"""
+        prompt = _build_prompt([{"id": "1", "title": "Test"}])
+        assert "Halloween skeleton decoration -> none" in prompt
+        assert "Kids storage bag -> none" in prompt
+
+    def test_prompt_88cm_and_model_88_not_auto_risk(self):
+        """标题 Prompt 明确 88cm / 型号 88 不自动风险。"""
+        prompt = _build_prompt([{"id": "1", "title": "Test"}])
+        assert "88cm curtain -> none" in prompt
+        assert "model 88 -> none" in prompt
+
+    def test_prompt_contains_new_risk_families(self):
+        """标题 Prompt 补入成人 / 政治 / 宗教 / 仇恨 / 暴力语义。"""
+        prompt = _build_prompt([{"id": "1", "title": "Test"}])
+        assert "成人色情" in prompt
+        assert "政治人物" in prompt
+        assert "宗教人物" in prompt
+        assert "仇恨" in prompt
+        assert "暴力" in prompt
+        assert "自残" in prompt
+
+    def test_prompt_collect_exclusion_uses_platform_and_prefix(self):
+        """用户采集排除项仍输出 platform，reason 标记采集规则排除。"""
+        prompt = _build_prompt([{"id": "1", "title": "Test"}])
+        assert "用户内部采集排除项（platform" in prompt
+        assert "采集规则排除｜" in prompt
+
+    def test_prompt_contains_reason_prefixes(self):
+        """reason 三种前缀存在。"""
+        prompt = _build_prompt([{"id": "1", "title": "Test"}])
+        assert "SHEIN规则风险｜" in prompt
+        assert "采集规则排除｜" in prompt
+        assert "侵权风险｜" in prompt
+
+    def test_prompt_risk_enum_still_three(self):
+        """标题风险枚举仍只有 none/platform/infringement，无第四档。"""
+        prompt = _build_prompt([{"id": "1", "title": "Test"}])
+        assert "none | platform | infringement" in prompt
+        lowered = prompt.lower()
+        assert "review" not in lowered
+        assert "confidence" not in lowered
+
+
 class TestTitleRiskScanService:
     """测试 TitleRiskScanService。"""
 

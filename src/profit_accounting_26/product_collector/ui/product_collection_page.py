@@ -1799,7 +1799,10 @@ class ProductCollectionPage(QWidget):
         self.btn_infringement_check.clicked.disconnect()
         self.btn_infringement_check.clicked.connect(self._cancel_current_detect)
 
-        products = [{"id": p.product_id, "main_image": p.main_image} for p in targets]
+        products = [
+            {"id": p.product_id, "title": p.title, "main_image": p.main_image}
+            for p in targets
+        ]
         self._cancel_requested = False
 
         self._image_risk_thread = QThread(self)
@@ -1947,7 +1950,10 @@ class ProductCollectionPage(QWidget):
             "<span style='color:#3a7bc8;font-weight:600;'>正在检测图片…</span>"
         )
         targets = self._detect_all_targets or []
-        products = [{"id": p.product_id, "main_image": p.main_image} for p in targets]
+        products = [
+            {"id": p.product_id, "title": p.title, "main_image": p.main_image}
+            for p in targets
+        ]
 
         self._image_risk_thread = QThread(self)
         self._image_risk_worker = _ImageRiskWorker(
