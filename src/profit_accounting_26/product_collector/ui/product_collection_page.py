@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import keyword_engine
+from .. import keyword_engine, product_risk_log
 from ..collector_core.business_source import CollectionReport
 from ..collector_core.models import CandidateProduct
 from .ui_loader import load_ui
@@ -1017,19 +1017,39 @@ class ProductCollectionPage(QWidget):
             return
         task = self._search_tasks[self._current_task_idx]
 
-        self._thread = QThread(self)
-        self._worker = CollectWorker(
+        thread = QThread(self)
+        worker = CollectWorker(
             task.actual_query, task.target_count, self._collector,
             log_dir=self._log_dir,
         )
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.reportReady.connect(self._on_task_report)
-        self._worker.failed.connect(self._on_task_failed)
-        self._worker.reportReady.connect(self._thread.quit)
-        self._worker.failed.connect(self._thread.quit)
-        self._thread.finished.connect(self._thread.deleteLater)
-        self._thread.start()
+        self._thread = thread
+        self._worker = worker
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.reportReady.connect(self._on_task_report)
+        worker.failed.connect(self._on_task_failed)
+        worker.reportReady.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        # 通过默认参数捕获本次 thread/worker 身份，避免多关键词时
+        # 旧线程 finished 误清理刚创建的新线程/worker
+        thread.finished.connect(
+            lambda t=thread, w=worker: self._clear_collect_task(t, w)
+        )
+        thread.start()
+
+    def _clear_collect_task(self, finished_thread: QThread, finished_worker: CollectWorker) -> None:
+        """采集线程结束后安全清理。
+
+        worker / thread 正常 deleteLater；通过对象 identity 判断，
+        旧线程结束不会误清后续任务新建的线程/worker。
+        """
+        finished_worker.deleteLater()
+        finished_thread.deleteLater()
+        if self._thread is finished_thread:
+            self._thread = None
+        if self._worker is finished_worker:
+            self._worker = None
+        self._update_clear_button()
 
     def _on_task_report(self, report: CollectionReport) -> None:
         """按顺序累积，跨关键词 product_id 去重。"""
@@ -1501,6 +1521,12 @@ class ProductCollectionPage(QWidget):
         self._selected_ids = set()
         self._showing_removed = False
         self.btn_restore.setVisible(False)
+        # 本轮采集期运行引用：不再持有 CandidateProduct / 任务数据
+        self._all_products = []
+        self._seen_ids = set()
+        self._search_tasks = []
+        self._task_statuses = []
+        self._current_task_idx = 0
         # 页面当前引用与检测状态
         self._detect_snapshot = None
         self._detect_all_targets = None
@@ -2003,9 +2029,13 @@ class _TitleRiskWorker(QObject):
         try:
             # 标题检测是一次性批量请求，取消在请求发送前检查
             if self._cancel_requested and self._cancel_requested():
+                product_risk_log.title_scan_cancelled()
                 self.finished.emit([], "")
                 return
             risks = self._service.scan(self._titles)
+            if self._cancel_requested and self._cancel_requested():
+                # 请求进行期间用户点击取消：请求自然完成，但取消行为必须记录
+                product_risk_log.title_scan_cancelled()
             self.finished.emit(risks, "")
         except Exception as exc:
             self.finished.emit([], str(exc))

@@ -34,7 +34,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt, QThread, QTimer
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget, QAbstractSpinBox, QPushButton
@@ -42,7 +42,8 @@ from PySide6.QtWidgets import QApplication, QWidget, QAbstractSpinBox, QPushButt
 from profit_accounting_26.product_collector.collector_core.business_source import CollectionReport
 from profit_accounting_26.product_collector.collector_core.models import CandidateProduct
 from profit_accounting_26.product_collector.ui.product_collection_page import (
-    KeywordSelectPopup, ProductCard, ProductCollectionPage, parse_search_terms,
+    CollectWorker, KeywordSelectPopup, ProductCard, ProductCollectionPage,
+    _TitleRiskWorker, parse_search_terms,
 )
 
 
@@ -886,7 +887,6 @@ class TestWorkerLifecycle(_PageCase):
             loop.exec()
             timer.stop()
         self.assertTrue(called["run"])
-        self.assertIsNotNone(self.page._worker)
         self.assertEqual(self.page.keep_count(), 2)
 
     def test_worker_exception_reports_failure_not_crash(self):
@@ -898,6 +898,64 @@ class TestWorkerLifecycle(_PageCase):
             self.page.start_collect()
             self._pump(400)
         self.assertEqual(self.page.lbl_status.text(), "采集失败")
+
+
+class TestCollectThreadLifecycle(_PageCase):
+    """任务 2：采集 QThread / Worker 生命周期收紧。"""
+
+    def _run_fake_collect(self, report=None):
+        """patch 快速完成一轮单关键词采集，并等待线程 finished 事件处理完毕。"""
+        report = report if report is not None else _report(_products(2))
+        called = {"run": False}
+
+        def fake_run(worker):
+            called["run"] = True
+            worker.reportReady.emit(report)
+
+        with patch("profit_accounting_26.product_collector.ui.product_collection_page.CollectWorker.run", fake_run):
+            self.page.txt_cn.setText("women bag")
+            self.page.spin_per_keyword.setValue(5)
+            self.page.start_collect()
+            self.assertIsNotNone(self.page._thread)
+            self.assertIsNotNone(self.page._worker)
+            self._pump(800)
+        self.assertTrue(called["run"])
+
+    def test_thread_and_worker_cleared_after_last_collect(self):
+        """最后一轮采集线程结束后 _thread/_worker 清空。"""
+        self._run_fake_collect()
+        self.assertIsNone(self.page._thread)
+        self.assertIsNone(self.page._worker)
+
+    def test_clear_button_enabled_after_collect_with_products(self):
+        """采集完成且有商品后，清空本次按钮可用。"""
+        self._run_fake_collect()
+        self.assertEqual(self.page.keep_count(), 2)
+        self.assertTrue(self.page.btn_clear_all.isEnabled())
+
+    def test_old_thread_finished_does_not_clear_new_thread(self):
+        """多关键词：旧线程结束不得误清刚创建的新线程/worker（identity 判断）。"""
+        old_thread = QThread(self.page)
+        old_worker = CollectWorker("old", 5, None)
+        new_thread = QThread(self.page)
+        new_worker = CollectWorker("new", 5, None)
+        try:
+            self.page._thread = new_thread
+            self.page._worker = new_worker
+            # 旧线程 finished 触发清理：不应动新线程引用
+            self.page._clear_collect_task(old_thread, old_worker)
+            self.assertIs(self.page._thread, new_thread)
+            self.assertIs(self.page._worker, new_worker)
+            # 新线程结束才清理
+            self.page._clear_collect_task(new_thread, new_worker)
+            self.assertIsNone(self.page._thread)
+            self.assertIsNone(self.page._worker)
+        finally:
+            old_thread.deleteLater()
+            old_worker.deleteLater()
+            new_thread.deleteLater()
+            new_worker.deleteLater()
+            self.app.processEvents()
 
 
 # ── .ui 文件验证 ──────────────────────────────────────────────
@@ -1460,6 +1518,22 @@ class TestRound2ClearAndSelect(_PageCase):
         # 状态区回到空态计数
         self.assertIn("商品 0", self.page.lbl_status.text())
 
+    def test_clear_all_resets_collect_runtime_refs(self):
+        """清空本次：本轮采集期引用（_all_products/_seen_ids/任务数据）一并清空。"""
+        self.page._all_products = _products(2)
+        self.page._seen_ids = {"1", "2"}
+        self.page._search_tasks = ["任务A", "任务B"]
+        self.page._task_statuses = ["success", "success"]
+        self.page._current_task_idx = 1
+        self.page.load_results(_products(2))
+        self.page._clear_all_results()
+        # 不再持有 CandidateProduct / 任务数据
+        self.assertEqual(self.page._all_products, [])
+        self.assertEqual(self.page._seen_ids, set())
+        self.assertEqual(self.page._search_tasks, [])
+        self.assertEqual(self.page._task_statuses, [])
+        self.assertEqual(self.page._current_task_idx, 0)
+
     def test_clear_all_preserves_long_term_config(self):
         """清空本次不影响 API Profile store / 搜索词 / 检测服务等长期配置。"""
         from unittest.mock import Mock
@@ -1642,6 +1716,73 @@ class TestRound2OverlayDetails(_PageCase):
         card.set_image_risk_data("infringement", long_reason + "-img")
         self.assertEqual(card.lbl_title_risk.toolTip(), long_reason)
         self.assertEqual(card.lbl_image_risk.toolTip(), long_reason + "-img")
+
+
+class TestTitleRiskWorkerCancellation(_PageCase):
+    """任务 3：标题检测用户取消必须写入风险日志。"""
+
+    def setUp(self):
+        super().setUp()
+        import shutil
+        import tempfile
+
+        from profit_accounting_26.product_collector import product_risk_log as prl
+        for handler in list(prl._logger.handlers):
+            prl._logger.removeHandler(handler)
+            handler.close()
+        self._prl = prl
+        self._tmp = tempfile.mkdtemp(prefix="pa26_title_cancel_")
+        self._log_path = prl.configure(self._tmp)
+        self._shutil = shutil
+
+    def tearDown(self):
+        for handler in list(self._prl._logger.handlers):
+            self._prl._logger.removeHandler(handler)
+            handler.close()
+        self._shutil.rmtree(self._tmp, ignore_errors=True)
+        super().tearDown()
+
+    def test_cancel_before_request_logs_cancelled(self):
+        """请求发送前取消：日志出现 [标题检测] 用户取消，不调用 API。"""
+        from unittest.mock import Mock
+
+        service = Mock()
+        worker = _TitleRiskWorker(
+            service, [{"id": "1", "title": "t"}], cancel_requested=lambda: True
+        )
+        received = []
+        worker.finished.connect(lambda risks, err: received.append((risks, err)))
+        worker.run()
+        service.scan.assert_not_called()
+        self.assertEqual(received, [([], "")])
+        content = self._log_path.read_text(encoding="utf-8")
+        self.assertIn("[标题检测] 用户取消", content)
+
+    def test_cancel_during_request_logs_cancelled_and_keeps_results(self):
+        """请求进行中取消：请求自然完成返回结果，且日志记录用户取消。"""
+        from unittest.mock import Mock
+
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        service = Mock()
+        service.scan.return_value = [TitleRiskItem("1", "platform", "带电")]
+        calls = {"n": 0}
+
+        def cancel():
+            calls["n"] += 1
+            return calls["n"] > 1  # 请求前检查放行，请求完成后标记取消
+
+        worker = _TitleRiskWorker(
+            service, [{"id": "1", "title": "t"}], cancel_requested=cancel
+        )
+        received = []
+        worker.finished.connect(lambda risks, err: received.append((risks, err)))
+        worker.run()
+        # 结果仍返回，不因取消丢弃
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0][0][0].product_id, "1")
+        content = self._log_path.read_text(encoding="utf-8")
+        self.assertIn("[标题检测] 用户取消", content)
 
 
 if __name__ == "__main__":

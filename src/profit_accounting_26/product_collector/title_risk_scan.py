@@ -217,10 +217,15 @@ class TitleRiskScanService:
             raise RecognitionResponseError("标题风险检测返回格式无效。") from exc
 
         results = self._parse_risks(data)
+        # 日志统计按实际送检 id 集合去重：AI 返回重复 id / 未知 id 不夸大 success
+        expected_ids = {
+            str(t.get("id") or "").strip() for t in titles if str(t.get("id") or "").strip()
+        }
+        valid_returned_ids = {r.product_id for r in results if r.product_id in expected_ids}
         product_risk_log.title_request_finished(
             duration_ms=product_risk_log.elapsed_ms(_request_start),
-            success=len(results),
-            missing=len(titles) - len(results),
+            success=len(valid_returned_ids),
+            missing=len(expected_ids - valid_returned_ids),
             status="完成",
         )
         return results

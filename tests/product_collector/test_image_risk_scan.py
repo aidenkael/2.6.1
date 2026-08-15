@@ -763,3 +763,135 @@ class TestAllChecked:
         assert len(all_checked) == 1
         assert all_checked[0].product_id == "1"
         assert stats.failed_count == 2
+
+
+@pytest.fixture()
+def risk_log_dir(tmp_path):
+    """将风险日志配置到临时目录，测试结束关闭 handler（避免 Windows 文件锁）。"""
+    from profit_accounting_26.product_collector import product_risk_log as prl
+    for handler in list(prl._logger.handlers):
+        prl._logger.removeHandler(handler)
+        handler.close()
+    path = prl.configure(tmp_path)
+    yield path
+    for handler in list(prl._logger.handlers):
+        prl._logger.removeHandler(handler)
+        handler.close()
+
+
+class TestImageRiskLogStatus:
+    """任务 3/4：图片取消日志、最终状态规则、实际执行批次数。"""
+
+    def _service(self, batch_result=None):
+        profile_store = MagicMock()
+        service = ImageRiskScanService(profile_store)
+        if batch_result is None:
+            # 默认 mock：批次内每个商品都成功返回 none
+            service._scan_single_batch = MagicMock(
+                side_effect=lambda batch, **kw: (
+                    [ImageRiskItem(p["id"], p["main_image"], "none", "") for p in batch],
+                    0,
+                )
+            )
+        else:
+            service._scan_single_batch = MagicMock(return_value=batch_result)
+        return service
+
+    def _products(self, count):
+        return [
+            {"id": str(i), "main_image": f"https://img.example/{i}.jpg"}
+            for i in range(1, count + 1)
+        ]
+
+    def test_cancel_during_single_batch_logs_cancelled_once(self, risk_log_dir):
+        """单批（<=10 张）API 请求期间取消：日志只写一次用户取消，status=取消。"""
+        service = self._service()
+        calls = {"n": 0}
+
+        def cancel():
+            calls["n"] += 1
+            return calls["n"] > 1  # 批次前放行；批次完成后标记取消
+
+        risky, stats, _all = service.scan_batch(
+            self._products(2), cancel_requested=cancel
+        )
+        content = risk_log_dir.read_text(encoding="utf-8")
+        assert content.count("[图片检测] 用户取消") == 1
+        assert "status=取消" in content
+        assert stats.checked_count == 2  # 当前批允许自然完成
+
+    def test_cancel_during_last_batch_logs_cancelled_once(self, risk_log_dir):
+        """最后一批 API 请求期间取消：必须记录用户取消。"""
+        service = self._service()
+        calls = {"n": 0}
+
+        def cancel():
+            calls["n"] += 1
+            # 前 3 次检查放行（批次1前/批次1后/批次2前），
+            # 第 4 次（批次2 完成后的批次后检查）才标记取消
+            return calls["n"] >= 4
+
+        risky, stats, _all = service.scan_batch(
+            self._products(11), cancel_requested=cancel  # 2 批
+        )
+        content = risk_log_dir.read_text(encoding="utf-8")
+        assert content.count("[图片检测] 用户取消") == 1
+        assert "status=取消" in content
+        assert "批次数=2" in content  # 实际执行 2 批
+
+    def test_cancel_between_batches_logs_cancelled_once(self, risk_log_dir):
+        """批次间取消：只写一次用户取消，后续批次不再发送。"""
+        service = self._service()
+        calls = {"n": 0}
+
+        def cancel():
+            calls["n"] += 1
+            return calls["n"] >= 2  # 第一批后、第二批前取消
+
+        risky, stats, _all = service.scan_batch(
+            self._products(20), cancel_requested=cancel  # 计划 2 批
+        )
+        content = risk_log_dir.read_text(encoding="utf-8")
+        assert content.count("[图片检测] 用户取消") == 1
+        assert "status=取消" in content
+        assert "批次数=1" in content  # 只实际执行了 1 批
+        assert stats.checked_count == 10
+
+    def test_final_status_completed(self, risk_log_dir):
+        """无失败：status=完成。"""
+        service = self._service()
+        service.scan_batch(self._products(2))
+        content = risk_log_dir.read_text(encoding="utf-8")
+        assert "status=完成" in content
+
+    def test_final_status_partial_failure(self, risk_log_dir):
+        """failed>0 且 checked>0：status=部分失败。"""
+        batch_result = (
+            [ImageRiskItem("1", "https://img.example/1.jpg", "none", "")],
+            1,  # 下载失败 1 个
+        )
+        service = self._service(batch_result)
+        service.scan_batch(self._products(2))
+        content = risk_log_dir.read_text(encoding="utf-8")
+        assert "status=部分失败" in content
+
+    def test_final_status_total_failure(self, risk_log_dir):
+        """failed>0 且 checked==0：status=失败。"""
+        batch_result = ([], 2)  # 全部下载失败
+        service = self._service(batch_result)
+        service.scan_batch(self._products(2))
+        content = risk_log_dir.read_text(encoding="utf-8")
+        assert "status=失败" in content
+
+    def test_batches_records_executed_not_planned(self, risk_log_dir):
+        """批次数记录实际执行过的批次数，取消时不是原计划总批数。"""
+        service = self._service()
+        calls = {"n": 0}
+
+        def cancel():
+            calls["n"] += 1
+            return calls["n"] > 1  # 第一批完成后取消
+
+        service.scan_batch(self._products(15), cancel_requested=cancel)  # 计划 2 批
+        content = risk_log_dir.read_text(encoding="utf-8")
+        assert "批次数=1" in content

@@ -60,6 +60,17 @@ class ImageRiskScanStats:
     failed_count: int        # 检测失败的数量
 
 
+def _final_status(cancelled: bool, checked_count: int, failed_count: int) -> str:
+    """图片检测最终状态：取消 > 完成 > 部分失败 > 失败。"""
+    if cancelled:
+        return "取消"
+    if failed_count == 0:
+        return "完成"
+    if checked_count > 0:
+        return "部分失败"
+    return "失败"
+
+
 def _build_image_prompt() -> str:
     """构建图片风险检测 Prompt。"""
     return (
@@ -183,6 +194,8 @@ class ImageRiskScanService:
         product_risk_log.image_scan_start(requested_count)
 
         if not to_scan:
+            # 无实际 API 批次：仅按失败数决定最终状态
+            finish_status = _final_status(cancelled=False, checked_count=0, failed_count=failed_count)
             stats = ImageRiskScanStats(
                 requested_count=requested_count,
                 cached_count=cached_count,
@@ -191,7 +204,7 @@ class ImageRiskScanService:
                 failed_count=failed_count,
             )
             product_risk_log.image_scan_finished(
-                total=requested_count, batches=0, checked=0, failed=failed_count, status="完成"
+                total=requested_count, batches=0, checked=0, failed=failed_count, status=finish_status
             )
             return cached_risky, stats, []
 
@@ -199,16 +212,16 @@ class ImageRiskScanService:
         all_risky: list[ImageRiskItem] = list(cached_risky)
         all_checked: list[ImageRiskItem] = []
         checked_count = 0
-        total_batches = (len(to_scan) + BATCH_SIZE - 1) // BATCH_SIZE
+        executed_batches = 0
         cancelled = False
         for i in range(0, len(to_scan), BATCH_SIZE):
             # 取消检查：当前批自然完成后不再发送下一批
             if cancel_requested is not None and cancel_requested():
                 cancelled = True
-                product_risk_log.image_scan_cancelled()
                 break
             batch = to_scan[i:i + BATCH_SIZE]
             batch_index = i // BATCH_SIZE + 1
+            executed_batches += 1
             product_risk_log.image_batch_started(batch_index, len(batch))
             try:
                 batch_results, batch_download_failed = self._scan_single_batch(batch, batch_index=batch_index)
@@ -223,6 +236,13 @@ class ImageRiskScanService:
             except Exception as exc:
                 logger.warning("图片风险检测批次失败: %s", exc)
                 failed_count += len(batch)
+            # 批次（含最后一批）API 请求期间点击取消也必须记录
+            if cancel_requested is not None and cancel_requested():
+                cancelled = True
+
+        # 用户取消只记录一次（含单批场景与最后一批请求期间取消）
+        if cancelled:
+            product_risk_log.image_scan_cancelled()
 
         stats = ImageRiskScanStats(
             requested_count=requested_count,
@@ -233,10 +253,10 @@ class ImageRiskScanService:
         )
         product_risk_log.image_scan_finished(
             total=requested_count,
-            batches=total_batches,
+            batches=executed_batches,
             checked=checked_count,
             failed=failed_count,
-            status="取消" if cancelled else "完成",
+            status=_final_status(cancelled, checked_count, failed_count),
         )
         return all_risky, stats, all_checked
 
