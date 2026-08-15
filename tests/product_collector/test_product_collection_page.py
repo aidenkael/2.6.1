@@ -43,7 +43,7 @@ from profit_accounting_26.product_collector.collector_core.business_source impor
 from profit_accounting_26.product_collector.collector_core.models import CandidateProduct
 from profit_accounting_26.product_collector.ui.product_collection_page import (
     CollectWorker, KeywordSelectPopup, ProductCard, ProductCollectionPage,
-    _TitleRiskWorker, parse_search_terms,
+    _ImageRiskWorker, _TitleRiskWorker, parse_search_terms,
 )
 
 
@@ -1929,6 +1929,550 @@ class TestTitleRiskWorkerCancellation(_PageCase):
         self.assertEqual(received, [([], "timeout")])
         content = self._log_path.read_text(encoding="utf-8")
         self.assertNotIn("[标题检测] 用户取消", content)
+
+
+class TestBatchImmediateResult(_PageCase):
+    """C 项：每批结果立即写卡片，其它未完成商品不变。"""
+
+    def _enter(self, count=3):
+        self.page.load_results(_products(count))
+        targets = list(self.page._products)
+        self.page._enter_detecting(targets)
+        return targets
+
+    def test_title_batch_applies_immediately(self):
+        """第一批完成：对应卡片立即出现标题风险标签，其它不变。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self._enter(3)
+        self.page._on_title_batch_result(
+            [TitleRiskItem("1", "infringement", "品牌IP")], 0, 1, 1, 500.0
+        )
+        card1 = self.page._cards["1"]
+        self.assertIsNotNone(card1._title_risk_data)
+        self.assertEqual(card1._title_risk_data["risk"], "infringement")
+        # 其它未完成商品不改变
+        self.assertIsNone(self.page._cards["2"]._title_risk_data)
+        self.assertIsNone(self.page._cards["3"]._title_risk_data)
+        # 状态栏立即反映
+        self.assertIn("标题检测 1/3", self.page.lbl_status.text())
+        self.assertIn("风险 1", self.page.lbl_status.text())
+
+    def test_image_batch_applies_immediately(self):
+        """图片批次完成：对应卡片立即出现图片风险标签。"""
+        from profit_accounting_26.product_collector.image_risk_scan import ImageRiskItem
+
+        self._enter(3)
+        self.page._on_image_batch_result(
+            [ImageRiskItem("2", "https://img.example/2.jpg", "platform", "可疑")],
+            0, 1, 1, 500.0,
+        )
+        self.assertEqual(self.page._cards["2"]._image_risk_data["risk"], "platform")
+        self.assertIsNone(self.page._cards["1"]._image_risk_data)
+        self.assertIn("图片检测 1/3", self.page.lbl_status.text())
+
+    def test_batch_none_clears_only_own_source(self):
+        """risk=none 只清除该检测来源的旧风险，另一来源不受影响。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self._enter(1)
+        card = self.page._cards["1"]
+        card.set_title_risk_data("infringement", "旧标题风险")
+        card.set_image_risk_data("infringement", "品牌IP")
+        self.page._on_title_batch_result(
+            [TitleRiskItem("1", "none", "")], 0, 1, 1, 100.0
+        )
+        self.assertIsNone(card._title_risk_data)  # 旧标题风险清除
+        self.assertIsNotNone(card._image_risk_data)  # 图片风险不受影响
+        self.assertEqual(card._image_risk_data["risk"], "infringement")
+
+    def test_failed_batch_preserves_old_state(self):
+        """失败批次不覆盖旧状态，只计入失败数。"""
+        self._enter(1)
+        card = self.page._cards["1"]
+        card.set_title_risk_data("platform", "旧状态")
+        self.page._on_title_batch_result([], 1, 1, 2, 100.0)
+        self.assertEqual(card._title_risk_data["risk"], "platform")
+        self.assertEqual(card._title_risk_data["reason"], "旧状态")
+        self.assertIn("失败 1", self.page.lbl_status.text())
+
+
+class TestNoEarlySort(_PageCase):
+    """D 项：检测期间批次结果 / relayout 不重排，终态才排序。"""
+
+    def _enter(self, count=3):
+        self.page.load_results(_products(count))
+        targets = list(self.page._products)
+        self.page._enter_detecting(targets)
+        return targets
+
+    def test_first_batch_does_not_reorder(self):
+        """第一批 infringement 出现：卡片保持原位置。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self._enter(3)
+        self.page._on_title_batch_result(
+            [TitleRiskItem("2", "infringement", "品牌IP")], 0, 1, 2, 100.0
+        )
+        order = [c.product.product_id for c in self.page._visible_cards()]
+        self.assertEqual(order, ["1", "2", "3"])
+
+    def test_second_batch_still_no_reorder(self):
+        """第二批出现：仍保持原位置。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self._enter(3)
+        self.page._on_title_batch_result(
+            [TitleRiskItem("2", "infringement", "品牌IP")], 0, 1, 2, 100.0
+        )
+        self.page._on_title_batch_result(
+            [TitleRiskItem("3", "platform", "带电")], 0, 2, 2, 100.0
+        )
+        order = [c.product.product_id for c in self.page._visible_cards()]
+        self.assertEqual(order, ["1", "2", "3"])
+
+    def test_relayout_preserves_frozen_order(self):
+        """已有部分标签时触发 relayout/resize：顺序仍不变化。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self._enter(3)
+        self.page._on_title_batch_result(
+            [TitleRiskItem("2", "infringement", "品牌IP")], 0, 1, 1, 100.0
+        )
+        self.page._relayout_cards()
+        order = [c.product.product_id for c in self.page._visible_cards()]
+        self.assertEqual(order, ["1", "2", "3"])
+
+    def test_frozen_order_captured_at_enter(self):
+        """进入检测记录冻结顺序，退出时清除。"""
+        self._enter(3)
+        self.assertEqual(self.page._detect_display_order, ["1", "2", "3"])
+        self.page._exit_detecting()
+        self.assertIsNone(self.page._detect_display_order)
+
+    def test_frozen_order_respects_pre_detect_sort(self):
+        """进入检测前已排序，冻结顺序沿用已排序顺序。"""
+        self.page.load_results(_products(3))
+        self.page._cards["2"].set_title_risk_data("infringement", "品牌IP")
+        self.page._sort_risk_pinned()
+        # 直接进入检测（不重新 load_results，保留已排序状态）
+        targets = list(self.page._products)
+        self.page._enter_detecting(targets)
+        self.assertEqual(self.page._detect_display_order, ["2", "1", "3"])
+        order = [c.product.product_id for c in self.page._visible_cards()]
+        self.assertEqual(order, ["2", "1", "3"])
+
+    def test_terminal_sort_once_and_unfreezes(self):
+        """终态：清除冻结顺序并排序一次。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self._enter(3)
+        self.page._on_title_batch_result(
+            [TitleRiskItem("2", "infringement", "品牌IP")], 0, 1, 1, 100.0
+        )
+        risks = [
+            TitleRiskItem("1", "none", ""),
+            TitleRiskItem("2", "infringement", "品牌IP"),
+            TitleRiskItem("3", "none", ""),
+        ]
+        self.page._on_title_risk_finished(risks, "")
+        self.assertIsNone(self.page._detect_display_order)
+        self.assertFalse(self.page._detecting_active)
+        order = [c.product.product_id for c in self.page._visible_cards()]
+        self.assertEqual(order, ["2", "1", "3"])
+
+
+class TestTerminalSortCounts(_PageCase):
+    """E 项：正常/部分失败/取消/fatal error 各只排序一次。"""
+
+    def _count_relayouts(self, fn):
+        relayout_calls = []
+        orig = ProductCollectionPage._relayout_cards
+
+        def counting(self_obj):
+            relayout_calls.append(1)
+            return orig(self_obj)
+
+        with patch.object(ProductCollectionPage, "_relayout_cards", counting):
+            fn()
+        return len(relayout_calls)
+
+    def _enter(self, count=3):
+        self.page.load_results(_products(count))
+        targets = list(self.page._products)
+        self.page._enter_detecting(targets)
+        return targets
+
+    def test_normal_completion_sorts_once(self):
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self._enter(3)
+        risks = [TitleRiskItem(str(i), "none", "") for i in range(1, 4)]
+        n = self._count_relayouts(lambda: self.page._on_title_risk_finished(risks, ""))
+        self.assertEqual(n, 1)
+
+    def test_partial_failure_sorts_once(self):
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self._enter(3)
+        risks = [TitleRiskItem("1", "platform", "带电")]  # 只返回 1/3
+        n = self._count_relayouts(lambda: self.page._on_title_risk_finished(risks, ""))
+        self.assertEqual(n, 1)
+        self.assertIn("失败", self.page.lbl_status.text())
+
+    def test_cancel_sorts_once(self):
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self._enter(3)
+        risks = [TitleRiskItem(str(i), "none", "") for i in range(1, 4)]
+        self.page._cancel_requested = True
+        n = self._count_relayouts(lambda: self.page._on_title_risk_finished(risks, ""))
+        self.assertEqual(n, 1)
+        self.assertIn("取消", self.page.lbl_status.text())
+
+    def test_fatal_error_sorts_once_with_prior_results(self):
+        """整体 fatal error：已应用的成功结果仍排序一次。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self._enter(3)
+        self.page._on_title_batch_result(
+            [TitleRiskItem("2", "infringement", "品牌IP")], 0, 1, 1, 100.0
+        )
+        n = self._count_relayouts(lambda: self.page._on_title_risk_finished([], "timeout"))
+        self.assertEqual(n, 1)
+        self.assertEqual(self.page.lbl_status.text(), "标题检测失败")
+        # 已有结果保留且已按风险排序
+        order = [c.product.product_id for c in self.page._visible_cards()]
+        self.assertEqual(order, ["2", "1", "3"])
+        self.assertIsNone(self.page._detect_display_order)
+
+
+class TestDetectFreezeBehavior(_PageCase):
+    """F 项：检测中冻结选择，但双击标题/图片仍正常。"""
+
+    def _setup(self):
+        self.page.load_results(_products(2))
+        self.page._enter_detecting(list(self.page._products))
+        return self.page._cards["1"], self.page._cards["2"]
+
+    def _press(self, card, button):
+        event = QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            QPointF(10, 10), button, button,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        card.mousePressEvent(event)
+
+    def test_left_click_does_not_change_selection(self):
+        """检测中左键单击：selected 不变。"""
+        card, _ = self._setup()
+        emitted = []
+        card.selectionRequested.connect(lambda *a: emitted.append(a))
+        self._press(card, Qt.MouseButton.LeftButton)
+        self.assertEqual(emitted, [])
+        self.assertEqual(self.page.selected_count(), 0)
+
+    def test_right_click_does_not_change_selection(self):
+        """检测中右键单击：selected 不变。"""
+        card, _ = self._setup()
+        self.page.set_selection("1", True)
+        emitted = []
+        card.selectionRequested.connect(lambda *a: emitted.append(a))
+        self._press(card, Qt.MouseButton.RightButton)
+        self.assertEqual(emitted, [])
+        self.assertEqual(self.page.selected_count(), 1)  # 保持选中
+
+    def _dblclick_at(self, card, pos):
+        event = QMouseEvent(
+            QEvent.Type.MouseButtonDblClick,
+            pos, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        card.mouseDoubleClickEvent(event)
+
+    def _layout_card_manually(self, card):
+        """不 show 页面（offscreen 下连续 show/销毁会崩溃），手动摆位子控件。"""
+        card.lbl_image.setGeometry(10, 10, 200, 200)
+        card.lbl_title.setGeometry(10, 220, 200, 100)
+
+    def test_double_click_title_emits_title_activated(self):
+        """检测中双击标题：titleActivated 正常发出（不真实打开浏览器）。"""
+        card, _ = self._setup()
+        self._layout_card_manually(card)
+        received = []
+        card.titleActivated.connect(lambda url: received.append(url))
+        with patch(
+            "profit_accounting_26.product_collector.ui.product_collection_page.webbrowser.open"
+        ):
+            self._dblclick_at(card, QPointF(110, 270))
+        self.assertEqual(received, [card._product.product_url])
+
+    def test_double_click_image_emits_image_search(self):
+        """检测中双击图片：imageSearchRequested 正常发出。
+
+        沿用既有测试模式：patch ImageSearchWorker.run 让线程立即失败，
+        避免真实网络请求与打开浏览器。
+        """
+        card, _ = self._setup()
+        self._layout_card_manually(card)
+        received = []
+        card.imageSearchRequested.connect(lambda url: received.append(url))
+
+        def fail_fast(worker):
+            worker.failed.emit("test")
+
+        with patch(
+            "profit_accounting_26.product_collector.ui.product_collection_page.ImageSearchWorker.run",
+            fail_fast,
+        ):
+            self._dblclick_at(card, QPointF(110, 110))
+            self._pump(200)
+        self.assertEqual(received, [card._product.main_image])
+
+    def test_buttons_disabled_while_detecting(self):
+        """检测中：全选/移除/恢复/清空/重新采集等全部禁用。"""
+        self._setup()
+        for btn in (
+            self.page.btn_select_all, self.page.btn_keep_only,
+            self.page.btn_remove_selected, self.page.btn_view_removed,
+            self.page.btn_restore, self.page.btn_start,
+            self.page.btn_title_check, self.page.btn_infringement_check,
+            self.page.btn_detect_all, self.page.btn_clear_all,
+        ):
+            self.assertFalse(btn.isEnabled(), btn.objectName())
+        self.page._exit_detecting()
+        self.assertTrue(self.page.btn_start.isEnabled())
+        self.assertTrue(self.page.btn_clear_all.isEnabled())
+
+
+class TestAllDetectKeepsFreeze(_PageCase):
+    """G 项：全部检测标题→图片阶段冻结不断开，最终才解冻。"""
+
+    def _setup(self):
+        self.page.load_results(_products(3))
+        targets = list(self.page._products)
+        self.page._enter_detecting(targets)
+        self.page._detect_all_targets = targets
+        self.page._detect_all_phase = "title"
+        return targets
+
+    def _complete_title_phase(self):
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        risks = [TitleRiskItem(str(i), "none", "") for i in range(1, 4)]
+        with patch(
+            "profit_accounting_26.product_collector.ui.product_collection_page.QThread"
+        ), patch(
+            "profit_accounting_26.product_collector.ui.product_collection_page._ImageRiskWorker"
+        ):
+            self.page._on_detect_all_title_finished(risks, "")
+
+    def test_title_phase_end_keeps_detecting(self):
+        """标题阶段结束：仍 detecting_active=True，冻结不解除，直接进图片阶段。"""
+        self._setup()
+        self._complete_title_phase()
+        self.assertTrue(self.page._detecting_active)
+        self.assertIsNotNone(self.page._detect_display_order)
+        self.assertEqual(self.page._detect_all_phase, "image")
+        self.assertFalse(self.page.btn_start.isEnabled())
+        self.assertFalse(self.page.btn_select_all.isEnabled())
+        self.assertIn("图片", self.page.lbl_status.text())
+
+    def test_image_phase_end_unfreezes(self):
+        """图片阶段结束：才解除冻结。"""
+        from profit_accounting_26.product_collector.image_risk_scan import ImageRiskItem
+
+        self._setup()
+        self._complete_title_phase()
+        all_checked = [
+            ImageRiskItem(str(i), f"https://img.example/{i}.jpg", "none", "")
+            for i in range(1, 4)
+        ]
+        stats = {
+            "requested_count": 3, "cached_count": 0, "checked_count": 3,
+            "risk_count": 0, "failed_count": 0, "all_checked": all_checked,
+        }
+        self.page._on_detect_all_image_finished([], stats, "")
+        self.assertFalse(self.page._detecting_active)
+        self.assertIsNone(self.page._detect_display_order)
+        self.assertTrue(self.page.btn_start.isEnabled())
+
+    def test_title_phase_cancel_unfreezes(self):
+        """标题阶段用户取消：解冻并排序，不进入图片阶段。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self._setup()
+        risks = [TitleRiskItem(str(i), "none", "") for i in range(1, 4)]
+        self.page._cancel_requested = True
+        self.page._on_detect_all_title_finished(risks, "")
+        self.assertFalse(self.page._detecting_active)
+        self.assertIsNone(self.page._detect_display_order)
+        self.assertIn("取消", self.page.lbl_status.text())
+
+    def test_title_phase_error_unfreezes(self):
+        """标题阶段整体错误：解冻并排序。"""
+        self._setup()
+        self.page._on_detect_all_title_finished([], "timeout")
+        self.assertFalse(self.page._detecting_active)
+        self.assertIsNone(self.page._detect_display_order)
+        self.assertEqual(self.page.lbl_status.text(), "标题检测失败")
+
+
+class TestEtaStatus(_PageCase):
+    """H 项：简单 ETA 计算逻辑与格式（不做精准预测）。"""
+
+    def test_format_eta_seconds(self):
+        self.assertEqual(ProductCollectionPage._format_eta(55), "约 55秒")
+
+    def test_format_eta_exact_minute(self):
+        self.assertEqual(ProductCollectionPage._format_eta(60), "约 1分")
+
+    def test_format_eta_minutes_seconds(self):
+        self.assertEqual(ProductCollectionPage._format_eta(80), "约 1分20秒")
+
+    def test_format_eta_zero_safe(self):
+        """0 秒不产生除零 / 0 秒展示。"""
+        self.assertEqual(ProductCollectionPage._format_eta(0), "约 1秒")
+
+    def test_initial_status_shows_computing(self):
+        """第一批完成前：显示计算中。"""
+        self.page.load_results(_products(3))
+        self.page._update_detect_status("标题检测", 0, 3, 0, 0, 0, 0, "预计剩余")
+        self.assertIn("标题检测 0/3", self.page.lbl_status.text())
+        self.assertIn("计算中", self.page.lbl_status.text())
+
+    def test_eta_appears_after_first_batch(self):
+        """第一批后出现预计剩余（平均耗时 × 剩余批数）。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self.page.load_results(_products(3))
+        self.page._enter_detecting(list(self.page._products))
+        self.page._on_title_batch_result(
+            [TitleRiskItem("1", "none", "")], 0, 1, 3, 60_000.0
+        )
+        text = self.page.lbl_status.text()
+        self.assertIn("预计剩余约", text)
+        # avg=60s, 剩余 2 批 -> 120s -> 约 2分
+        self.assertIn("2分", text)
+
+    def test_eta_cleared_after_last_batch(self):
+        """最后一个批次完成：不再显示 ETA。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self.page.load_results(_products(3))
+        self.page._enter_detecting(list(self.page._products))
+        self.page._on_title_batch_result(
+            [TitleRiskItem("1", "none", "")], 0, 1, 1, 1000.0
+        )
+        self.assertNotIn("预计剩余", self.page.lbl_status.text())
+
+    def test_single_batch_no_abnormal_eta(self):
+        """单批任务：批次完成即最后一批，无 ETA 段、无异常。"""
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        self.page.load_results(_products(1))
+        self.page._enter_detecting(list(self.page._products))
+        self.page._on_title_batch_result(
+            [TitleRiskItem("1", "none", "")], 0, 1, 1, 500.0
+        )
+        text = self.page.lbl_status.text()
+        self.assertIn("标题检测 1/1", text)
+        self.assertNotIn("预计剩余", text)
+
+    def test_zero_products_no_division_by_zero(self):
+        """0 商品：不除零。"""
+        self.page._update_detect_status("标题检测", 0, 0, 0, 0, 0, 0, "预计剩余")
+        self.assertIn("0/0", self.page.lbl_status.text())
+        self.assertIn("计算中", self.page.lbl_status.text())
+
+
+class TestWorkerBatchSignal(_PageCase):
+    """二十一节：Worker 批次 Signal 转发，finished 只发一次，取消不产生批次。"""
+
+    def test_title_worker_forwards_batch_results(self):
+        from unittest.mock import Mock
+
+        from profit_accounting_26.product_collector.title_risk_scan import TitleRiskItem
+
+        service = Mock()
+
+        def fake_scan(titles, *, on_batch=None, cancel_requested=None):
+            on_batch([TitleRiskItem("1", "platform", "带电")], 0, 1, 2, 100.0)
+            on_batch([TitleRiskItem("2", "none", "")], 0, 2, 2, 150.0)
+            return [
+                TitleRiskItem("1", "platform", "带电"),
+                TitleRiskItem("2", "none", ""),
+            ]
+
+        service.scan.side_effect = fake_scan
+        worker = _TitleRiskWorker(
+            service, [{"id": "1", "title": "a"}, {"id": "2", "title": "b"}]
+        )
+        batches = []
+        finished = []
+        worker.batch_result.connect(lambda *a: batches.append(a))
+        worker.finished.connect(lambda *a: finished.append(a))
+        worker.run()
+        self.assertEqual(len(batches), 2)
+        self.assertEqual(batches[0][2], 1)  # batch_index
+        self.assertEqual(batches[0][3], 2)  # total_batches
+        self.assertEqual(batches[1][2], 2)
+        self.assertEqual(len(finished), 1)  # finished 只发一次
+        self.assertEqual(len(finished[0][0]), 2)
+
+    def test_image_worker_forwards_batch_results(self):
+        from unittest.mock import Mock
+
+        from profit_accounting_26.product_collector.image_risk_scan import ImageRiskItem
+
+        service = Mock()
+
+        def fake_scan_batch(products, *, force_refresh=False,
+                            cancel_requested=None, on_batch=None):
+            on_batch(
+                [ImageRiskItem("1", "http://x/1.jpg", "none", "")],
+                0, 1, 1, 80.0,
+            )
+            stats = Mock(requested_count=1, cached_count=0, checked_count=1,
+                         risk_count=0, failed_count=0)
+            return ([], stats, [ImageRiskItem("1", "http://x/1.jpg", "none", "")])
+
+        service.scan_batch.side_effect = fake_scan_batch
+        worker = _ImageRiskWorker(
+            service, [{"id": "1", "main_image": "http://x/1.jpg"}]
+        )
+        batches = []
+        finished = []
+        worker.batch_result.connect(lambda *a: batches.append(a))
+        worker.finished.connect(lambda *a: finished.append(a))
+        worker.run()
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(batches[0][3], 1)  # total_batches
+        self.assertEqual(len(finished), 1)
+        self.assertEqual(finished[0][1]["checked_count"], 1)
+
+    def test_image_worker_cancel_before_scan_passes_cancel_flag(self):
+        """图片 worker 请求前取消：仍调用 scan_batch 但携带取消标记（service 内不发送批次）。"""
+        from unittest.mock import Mock
+
+        service = Mock()
+        service.scan_batch.return_value = (
+            [],
+            Mock(requested_count=0, cached_count=0, checked_count=0,
+                 risk_count=0, failed_count=0),
+            [],
+        )
+        worker = _ImageRiskWorker(
+            service, [{"id": "1", "main_image": "http://x/1.jpg"}],
+            cancel_requested=lambda: True,
+        )
+        finished = []
+        worker.finished.connect(lambda *a: finished.append(a))
+        worker.run()
+        service.scan_batch.assert_called_once()
+        kwargs = service.scan_batch.call_args.kwargs
+        self.assertTrue(kwargs["cancel_requested"]())
+        self.assertEqual(len(finished), 1)
 
 
 if __name__ == "__main__":

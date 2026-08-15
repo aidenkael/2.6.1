@@ -256,6 +256,7 @@ class ImageRiskScanService:
         *,
         force_refresh: bool = False,
         cancel_requested: callable | None = None,
+        on_batch: callable | None = None,
     ) -> tuple[list[ImageRiskItem], ImageRiskScanStats, list[ImageRiskItem]]:
         """批量检测图片风险。
 
@@ -263,6 +264,9 @@ class ImageRiskScanService:
         title 仅作为理解图片的辅助上下文，缺失或空字符串时图片检测仍正常运行。
         force_refresh: True 时忽略运行期缓存，强制重新检测；新结果覆盖旧缓存。
         cancel_requested: 可选 callable，返回 True 时停止发送后续批次。
+        on_batch: 可选回调，每批实际 API 批次完成后调用一次：
+            on_batch(batch_results, batch_failed, batch_index, total_batches, elapsed_ms)
+            其中 batch_results 为本批成功解析的结果（缓存 / 缺图不在此回调）。
         返回: (risky_items, stats, all_checked_items)
         - risky_items: risk != "none" 的结果列表（含缓存）
         - stats: 检测统计信息
@@ -319,6 +323,7 @@ class ImageRiskScanService:
         checked_count = 0
         executed_batches = 0
         cancelled = False
+        total_batches = (len(to_scan) + BATCH_SIZE - 1) // BATCH_SIZE
         for i in range(0, len(to_scan), BATCH_SIZE):
             # 取消检查：当前批自然完成后不再发送下一批
             if cancel_requested is not None and cancel_requested():
@@ -328,6 +333,9 @@ class ImageRiskScanService:
             batch_index = i // BATCH_SIZE + 1
             executed_batches += 1
             product_risk_log.image_batch_started(batch_index, len(batch))
+            _batch_start = time.monotonic()
+            batch_results: list[ImageRiskItem] = []
+            batch_failed = 0
             try:
                 batch_results, batch_download_failed = self._scan_single_batch(batch, batch_index=batch_index)
                 checked_count += len(batch_results)
@@ -340,7 +348,16 @@ class ImageRiskScanService:
                         all_risky.append(item)
             except Exception as exc:
                 logger.warning("图片风险检测批次失败: %s", exc)
+                batch_failed = len(batch)
                 failed_count += len(batch)
+            if on_batch is not None:
+                on_batch(
+                    batch_results,
+                    batch_failed,
+                    batch_index,
+                    total_batches,
+                    product_risk_log.elapsed_ms(_batch_start),
+                )
             # 批次（含最后一批）API 请求期间点击取消也必须记录
             if cancel_requested is not None and cancel_requested():
                 cancelled = True
