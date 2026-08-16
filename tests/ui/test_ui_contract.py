@@ -136,7 +136,7 @@ class TestUIFileContract:
         assert not missing, f"settings_page.ui 缺少 objectName: {missing}"
 
     def test_ui_sha256_matches_contract(self):
-        """.ui SHA 与输入文件一致。"""
+        """.ui SHA 与输入文件一致（跨平台换行符规范化）。"""
         expected = {
             # Stage 4：导航精简 + 校准管理迁入 Settings 后的新契约 SHA
             # Product Collector 集成后 main_window.ui 新增导航按钮和页面占位
@@ -144,12 +144,15 @@ class TestUIFileContract:
             # PR #39：品牌更名为 UU护航 3.0.1，风险标签优化，未保存位置调整
             # PR #39 收口：导航按钮 text-align 改为 center，图标 SVG 替换为黑色 U
             # 风险标签根因修复 + 导航 SVG 图标两列对齐
-            "main_window.ui": "0c3ff08a48b4989b8341074d7e33c5bee883628f6161b3b0d3cd8633fb15782a",
+            # PR #39 最终：底部商品链接布局调整（取消 400px 限制）
+            "main_window.ui": "9dfd78b558fc7d1dcb85bc8a79c94e46e95994483f76ddc6f8fd7f03f33c41a9",
             "settings_page.ui": "e7ff5f8b380066a097462f094f1e25e31c81d1c1efc857c3cb35eafa30bdd614",
         }
         for name, sha in expected.items():
             data = (FORMS_DIR / name).read_bytes()
-            actual = hashlib.sha256(data).hexdigest()
+            # 规范化换行符：CRLF -> LF, CR -> LF，确保跨平台 SHA 一致
+            normalized = data.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+            actual = hashlib.sha256(normalized).hexdigest()
             assert actual == sha, f"{name} SHA 不匹配: {actual} != {sha}"
 
 
