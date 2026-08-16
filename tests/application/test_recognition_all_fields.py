@@ -10,7 +10,8 @@ def test_prompt_scans_every_image_without_slot_restrictions():
     assert "页面运费" in prompt
     assert "confirmed_facts 是用户已经确认的数据，优先级最高" in prompt
     assert "体积重" in prompt and "利润率" in prompt
-    assert "rigidity" not in prompt
+    # v1.4: rigidity is now an intentional structural field in the prompt
+    assert "rigidity" in prompt
     assert "normal" not in prompt
 
 

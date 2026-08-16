@@ -223,7 +223,8 @@ class TestPromptStateSemantics:
     def test_no_complex_v8_fields(self):
         """C12: 不重新出现复杂 V8 字段。"""
         prompt = RecognitionService._prompt(1)
-        for forbidden in ("rigidity", "foldability", "compressibility", "normal/conservative"):
+        # v1.4: rigidity/foldability/compressibility are now intentional structural fields
+        for forbidden in ("normal/conservative",):
             assert forbidden not in prompt
 
     def test_invalid_state_detection(self):

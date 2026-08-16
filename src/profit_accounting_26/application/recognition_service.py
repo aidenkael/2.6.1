@@ -93,7 +93,7 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-visual-v1.3"
+    PROMPT_VERSION = "2.6.1-visual-v1.4"
     RESPONSE_SCHEMA = {
         "type": "object",
         "additionalProperties": False,
@@ -143,6 +143,36 @@ class RecognitionService:
                     "state": {"type": "string"},
                 },
             },
+            "structure": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "overall_form": {"type": ["string", "null"]},
+                    "packaging_state_hint": {"type": ["string", "null"]},
+                    "rigidity": {"type": ["string", "null"]},
+                    "foldability": {"type": ["string", "null"]},
+                    "compressibility": {"type": ["string", "null"]},
+                    "requires_shape_retention": {"type": ["boolean", "null"]},
+                    "packing_actions": {"type": ["array", "null"], "items": {"type": "string"}},
+                    "packing_constraints": {"type": ["array", "null"], "items": {"type": "string"}},
+                    "has_hard_bottom": {"type": ["boolean", "null"]},
+                    "has_hard_backboard": {"type": ["boolean", "null"]},
+                    "has_frame": {"type": ["boolean", "null"]},
+                    "has_rigid_insert": {"type": ["boolean", "null"]},
+                    "has_rigid_parts": {"type": ["boolean", "null"]},
+                    "retail_box_visible": {"type": ["boolean", "null"]},
+                    "hard_card_visible": {"type": ["boolean", "null"]},
+                    "protrusion_flattenable": {"type": ["boolean", "null"]}
+                }
+            },
+            "quantity": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "purchase_quantity": {"type": ["integer", "null"]},
+                    "quantity_source": {"type": ["string", "null"]}
+                }
+            },
             "note": {"type": "string"},
         },
     }
@@ -181,7 +211,7 @@ class RecognitionService:
         prompt = f"""
 你是跨境电商商品图片识别助手。本次共有 {image_count} 张图片。
 
-只完成商品识别、图片事实读取和发货判断。不要计算或推理其余事项。
+只完成商品识别、图片事实读取、数量/套装判断、物流结构语义判断和发货判断。不要计算或推理其余事项。
 
 逐张查看全部图片，但图片顺序和图片框类型不代表字段职责。返回：
 1. product_name：简短、规范、可搜索的商品名称，不复制供应商 SEO 长标题。
@@ -190,11 +220,32 @@ class RecognitionService:
 4. shipment：独立判断商品真正交给物流时最可能的外部尺寸、总重量和简短发货状态。即使图片没有标注尺寸，也应根据商品本身尽量给出一套完整判断。
 shipment.state 是面向用户的一句简短"AI发货判断"，必须同时描述商品交给物流时的主要物理形态/处理状态、处理方式和简单包装方式，例如"可折叠；袋装发货"。不要只返回"折叠""压缩""保持原形"等单一处理词。
 shipment.state 禁止填写发货时效、48小时发货、现货、包邮、快递速度、商家履约、物流费用、货代、CAL、体积重或利润。
-如果详情页明确显示用户当前实际选择数量，shipment 必须按该数量的销售单位合并发货来判断；数量为 0、未识别、模糊或无法可靠确认时，按 1 个销售单位判断。库存、起订量、销量、规格数量等数字不是用户实际购买数量，不能据此判断 shipment。
-袜子、手套等通常按双销售的商品，在页面没有相反证据时可按一双作为一个销售单位；页面明确单只、单件、几双装、几件套或多件包时，以页面事实为准。不确定一套具体包含几件时，不要凭经验猜具体件数，只按可确认的信息判断最终 shipment。
-shipment 必须代表当前实际购买数量合并后的最终发货外廓、总重量和发货状态。不得将单个商品的长、宽、高机械全部乘以数量；应按叠放、折叠、套装或组合等实际可能的共同发货方式判断。
+【数量与套装判定（强制）】
+A. "当前购买数量"优先使用页面中能够确认的实际选择/购买数量。库存、MOQ、起订量、销量、SKU数量、规格选项数均不是购买数量，禁止用于 shipment 合并计算。
+B. 一个"销售单位"本身可能是单件、一双、N件套、multipack/set/pack。必须先判断"一个销售单位包含什么"，再结合当前购买数量判断最终共同发货状态。
+C. 主图同时出现多个商品：不能仅凭图片数量自动认定为 N 件套；也不能因为文字没有明确写 N 件套就自动认定为单件展示。
+D. 综合以下证据判断销售单位（优先级从高到低）：当前 SKU/规格文字 > 详情页说明 > 包装文字或包装形态 > 图片中同款成组/固定组合/共同包装等证据 > 当前实际购买数量。明确文字/SKU/包装证据优先级高于单纯视觉数量。
+E. 仅有"图片里摆了很多个"但没有固定组合/共同包装/规格支持时，不得直接当多件套。
+F. 图片能看出明显固定组合或共同包装但文字信息不足时，可将视觉证据纳入综合判断，但不能仅按画面中出现几个就机械计数。
+G. 无法可靠确认一个销售单位具体包含几件时：不凭经验猜具体件数；使用能够确认的最合理销售单位进行 shipment 判断；在 note 中简短说明数量/套装关系不确定。
+H. 袜子、手套等天然成双商品：无相反证据时一双可作为一个销售单位；页面明确单只、几双装、几件套时以页面事实为准。
+I. 无论数量是多少：禁止把单件 L/W/H 分别机械乘以数量。shipment 必须判断叠放、折叠、套装、共同包装后的实际外廓。
+J. 在 quantity 块中返回 purchase_quantity（当前购买数量，无法确认时为 null）和 quantity_source（如 sku_text / detail_page / packaging_label / visual_grouping / default 等），便于审计。
 如果详情页明确显示或写明袋装、OPP 袋、盒装、吸塑、原包装或纸卡等包装方式，shipment.state 应优先遵守该页面事实。页面明确包装方式不等于页面明确包装尺寸；若包装尺寸或总重量未展示，仍可合理估算，但不得把包装方式错误当作实测包装尺寸。
-5. note：仅写必要的简短补充。
+5. structure：根据图片/页面证据填写物流结构语义字段，所有字段均为可选。
+- overall_form：商品交给物流时的总体外形（如 rigid_box / soft_flat / rolled / irregular / collapsible / assembled 等）。
+- packaging_state_hint：运输前最可能的收纳/处理状态（如 folded / rolled / disassembled / nested / stacked / bagged / boxed 等）。
+- rigidity / foldability / compressibility：描述材料/结构的刚性、可折叠性、可压缩性（如 rigid / semi_rigid / flexible；flat_fold / roll / none；high / low / none 等）。
+- requires_shape_retention：是否需要保形（true/false/null）。
+- packing_actions：已经发生或合理明确的打包动作列表（如 fold / roll / nest / stack / wrap / bag / box 等）。
+- packing_constraints：打包限制列表（如 do_not_bend / keep_upright / avoid_pressure / retain_shape 等）。
+- has_hard_bottom / has_hard_backboard / has_frame / has_rigid_insert / has_rigid_parts / retail_box_visible / hard_card_visible / protrusion_flattenable：仅在图片/页面有明确证据时填 true/false，否则返回 null。
+重要原则：
+A. 展示状态不等于运输状态。撑开、展开、立体展示不代表运输时必须保持完全展开。
+B. 已处于自然折叠、盘卷、装袋、套叠等合理收纳状态时，不要为了"压缩"再次虚构更激进的折叠/压扁。
+C. 硬结构、保形要求等必须有图片/页面证据；不能因为商品类别经验就自动判定。
+D. 不确定时保持 null / []，不要为填满字段而猜测。
+6. note：仅写必要的简短补充。
 
 confirmed_facts 是用户已经确认的数据，优先级最高，不得修改。observed 是裸品/页面事实，bare_estimate 是 AI 推测的裸品近似值（不是图片事实），shipment 是发货外廓和发货总重量，三者不得混淆。
 不得输出或计算体积重、计费重、头程、固定服务费、尾程、总成本、利润、利润率、货代选择、CAL、规则编号、多候选方案或复杂分类字段。
@@ -222,6 +273,28 @@ confirmed_facts 是用户已经确认的数据，优先级最高，不得修改�
                     "height_cm": 0,
                     "weight_g": 0,
                     "state": "",
+                },
+                "structure": {
+                    "overall_form": None,
+                    "packaging_state_hint": None,
+                    "rigidity": None,
+                    "foldability": None,
+                    "compressibility": None,
+                    "requires_shape_retention": None,
+                    "packing_actions": [],
+                    "packing_constraints": [],
+                    "has_hard_bottom": None,
+                    "has_hard_backboard": None,
+                    "has_frame": None,
+                    "has_rigid_insert": None,
+                    "has_rigid_parts": None,
+                    "retail_box_visible": None,
+                    "hard_card_visible": None,
+                    "protrusion_flattenable": None
+                },
+                "quantity": {
+                    "purchase_quantity": None,
+                    "quantity_source": None
                 },
                 "note": "",
             },
@@ -416,6 +489,41 @@ confirmed_facts 是用户已经确认的数据，优先级最高，不得修改�
         normalized_payload["observation"] = dict(raw_observation)
         if parse_issues:
             normalized_payload["numeric_parse_issues"] = parse_issues
+        # --- Structural + quantity field mapping (v1.4) ---
+        structure = payload.get("structure") if isinstance(payload.get("structure"), dict) else {}
+        _STRUCT_STR_FIELDS = (
+            "overall_form", "packaging_state_hint", "rigidity", "foldability", "compressibility",
+        )
+        for fld in _STRUCT_STR_FIELDS:
+            val = structure.get(fld)
+            if isinstance(val, str) and val.strip():
+                raw_observation[fld] = val.strip()
+        _STRUCT_BOOL_FIELDS = (
+            "requires_shape_retention", "has_hard_bottom", "has_hard_backboard",
+            "has_frame", "has_rigid_insert", "has_rigid_parts",
+            "retail_box_visible", "hard_card_visible", "protrusion_flattenable",
+        )
+        for fld in _STRUCT_BOOL_FIELDS:
+            val = structure.get(fld)
+            if isinstance(val, bool):
+                raw_observation[fld] = val
+        _STRUCT_LIST_FIELDS = ("packing_actions", "packing_constraints")
+        for fld in _STRUCT_LIST_FIELDS:
+            val = structure.get(fld)
+            if isinstance(val, list):
+                cleaned = [str(v).strip() for v in val if isinstance(v, str) and str(v).strip()]
+                if cleaned:
+                    raw_observation[fld] = cleaned
+        # Quantity block
+        qty_block = payload.get("quantity") if isinstance(payload.get("quantity"), dict) else {}
+        pq = qty_block.get("purchase_quantity")
+        if isinstance(pq, int) and pq > 0:
+            raw_observation["quantity"] = pq
+        elif isinstance(pq, float) and pq > 0 and pq == int(pq):
+            raw_observation["quantity"] = int(pq)
+        qs = qty_block.get("quantity_source")
+        if isinstance(qs, str) and qs.strip():
+            raw_observation["quantity_source"] = qs.strip()
         observation = AIObservation.from_dict(raw_observation)
         observation.source = "vision_api"
         observation.model = model

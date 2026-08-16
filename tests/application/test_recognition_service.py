@@ -201,15 +201,15 @@ def test_multi_image_payload_order_is_stable_for_product_and_weight_evidence(tmp
 def test_v13_prompt_keeps_schema_and_adds_shipment_quantity_guidance():
     prompt = RecognitionService._prompt(1, include_json_shape=False)
 
-    assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.3"
+    assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.4"
     assert set(RecognitionService.RESPONSE_SCHEMA["properties"]) == {
-        "product_name", "observed", "bare_estimate", "shipment", "note"
+        "product_name", "observed", "bare_estimate", "shipment", "structure", "quantity", "note"
     }
-    assert "数量为 0、未识别、模糊或无法可靠确认时，按 1 个销售单位判断" in prompt
-    assert "袜子、手套等通常按双销售的商品" in prompt
-    assert "不确定一套具体包含几件时，不要凭经验猜具体件数" in prompt
-    assert "不得将单个商品的长、宽、高机械全部乘以数量" in prompt
-    assert "页面明确包装方式不等于页面明确包装尺寸" in prompt
+    assert "无法可靠确认一个销售单位具体包含几件时" in prompt
+    assert "袜子、手套等天然成双商品" in prompt
+    assert "不凭经验猜具体件数" in prompt
+    assert "禁止把单件 L/W/H 分别机械乘以数量" in prompt
+    assert "purchase_quantity" in prompt
 
 
 def test_ambiguous_bare_dimension_is_ignored_and_reported_without_losing_weight():
