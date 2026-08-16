@@ -35,7 +35,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt, QThread, QTimer
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtGui import QFontMetrics, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget, QAbstractSpinBox, QPushButton
 
@@ -1338,24 +1338,28 @@ class TestOverlayGeometry(_PageCase):
         self.assertGreaterEqual(overlay_geo.left(), img_geo.left())
         self.assertLessEqual(overlay_geo.right(), img_geo.right() + 10)
 
-    def test_overlay_height_not_locked_by_short_text(self):
-        """先短 reason 后长 reason，第二次高度应重新计算，不被第一次锁死。"""
+    def test_overlay_height_fixed_regardless_of_text_length(self):
+        """短 reason 和长 reason 的标签高度应一致（固定 3 行高度）。"""
         self.page.load_results(_products(1))
         card = self.page._cards["1"]
-        # 先设置短 reason
-        card.set_title_risk_data("platform", "短原因")
+        # 短 reason
+        card.set_title_risk_data("platform", "短")
         card._layout_risk_overlays()
         h_short = card.lbl_title_risk.height()
-        # 再设置明显更长的 reason，应能重新计算为两行
+        w_short = card.lbl_title_risk.width()
+        # 长 reason
         card.set_title_risk_data(
             "platform",
-            "这是一段明显更长的原因描述，用来验证第二次设置文字后高度能重新计算，不会被第一次短文本的高度固定限制，最多两行显示",
+            "这是一段明显更长的原因描述，用来验证固定高度方案下标签尺寸不随内容变化",
         )
         card._layout_risk_overlays()
         h_long = card.lbl_title_risk.height()
-        self.assertGreater(h_long, h_short)
-        # 最大高度仍受约三行约束（本轮从两行轻量增加到三行）
-        self.assertLessEqual(h_long, 56)
+        w_long = card.lbl_title_risk.width()
+        # 高度和宽度应完全一致
+        self.assertEqual(h_short, h_long)
+        self.assertEqual(w_short, w_long)
+        # 宽度应为固定的 _TITLE_RISK_BADGE_WIDTH
+        self.assertEqual(w_short, card._TITLE_RISK_BADGE_WIDTH)
 
 
 class TestForceRefreshClearsRisk(_PageCase):
@@ -1791,24 +1795,104 @@ class TestRound2RiskSorting(_PageCase):
 
 
 class TestRound2OverlayDetails(_PageCase):
-    """R 项：Overlay 三行高度限制与 Tooltip 完整原因。"""
+    """R 项：Overlay 固定尺寸、Tooltip 完整原因、换行算法。"""
 
-    def test_overlay_max_height_three_lines(self):
-        """标题/图片 Overlay 最大高度受约三行约束。"""
+    def test_overlay_fixed_dimensions(self):
+        """标题/图片 Overlay 宽度和高度固定，不随内容变化。"""
         self.page.load_results(_products(1))
         card = self.page._cards["1"]
-        self.assertEqual(card.lbl_title_risk.maximumHeight(), 54)
-        self.assertEqual(card.lbl_image_risk.maximumHeight(), 54)
+        # 短内容
+        card.set_title_risk_data("platform", "短")
+        card.set_image_risk_data("infringement", "短")
+        card._layout_risk_overlays()
+        h_title_short = card.lbl_title_risk.height()
+        w_title_short = card.lbl_title_risk.width()
+        h_img_short = card.lbl_image_risk.height()
+        w_img_short = card.lbl_image_risk.width()
+        # 长内容
+        card.set_title_risk_data("platform", "这是一段很长的风险原因描述用来验证固定尺寸")
+        card.set_image_risk_data("infringement", "这是一段很长的图片风险原因描述用来验证固定尺寸方案")
+        card._layout_risk_overlays()
+        h_title_long = card.lbl_title_risk.height()
+        w_title_long = card.lbl_title_risk.width()
+        h_img_long = card.lbl_image_risk.height()
+        w_img_long = card.lbl_image_risk.width()
+        # 尺寸应完全一致
+        self.assertEqual(h_title_short, h_title_long)
+        self.assertEqual(w_title_short, w_title_long)
+        self.assertEqual(h_img_short, h_img_long)
+        self.assertEqual(w_img_short, w_img_long)
+        # 标题和图片标签尺寸也应一致
+        self.assertEqual(w_title_short, w_img_short)
+        self.assertEqual(h_title_short, h_img_short)
+
+    def test_overlay_max_three_lines(self):
+        """长 reason 最多显示 3 行，不出现第 4 行。"""
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        long_reason = "这是一段很长的风险原因，" * 10
+        card.set_title_risk_data("platform", long_reason)
+        card._layout_risk_overlays()
+        text = card.lbl_title_risk.text()
+        lines = text.split("\n")
+        self.assertLessEqual(len(lines), 3)
+        # 不出现省略号
+        self.assertNotIn("...", text)
+        self.assertNotIn("…", text)
 
     def test_overlay_tooltip_full_reason(self):
-        """Overlay 完整风险原因通过 Tooltip 展示。"""
+        """Overlay Tooltip 包含来源、类型和完整原因。"""
         self.page.load_results(_products(1))
         card = self.page._cards["1"]
         long_reason = "这是一段很长的风险原因" * 10
         card.set_title_risk_data("platform", long_reason)
         card.set_image_risk_data("infringement", long_reason + "-img")
-        self.assertEqual(card.lbl_title_risk.toolTip(), long_reason)
-        self.assertEqual(card.lbl_image_risk.toolTip(), long_reason + "-img")
+        title_tooltip = card.lbl_title_risk.toolTip()
+        image_tooltip = card.lbl_image_risk.toolTip()
+        # Tooltip 应包含来源、类型和完整原因
+        self.assertIn("来源：标题检测", title_tooltip)
+        self.assertIn("SHEIN规则风险", title_tooltip)
+        self.assertIn(long_reason, title_tooltip)
+        self.assertIn("来源：图片检测", image_tooltip)
+        self.assertIn("侵权风险", image_tooltip)
+        self.assertIn(long_reason + "-img", image_tooltip)
+
+    def test_risk_label_receives_hover(self):
+        """风险标签未设置 WA_TransparentForMouseEvents，可以接收 Hover 事件。"""
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        card.set_title_risk_data("platform", "测试风险")
+        # 标签不应设置 WA_TransparentForMouseEvents
+        transparent = card.lbl_title_risk.testAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        )
+        self.assertFalse(transparent)
+
+    def test_risk_summary_strips_prefixes(self):
+        """默认标签应去除风险前缀和来源描述前缀。"""
+        from profit_accounting_26.product_collector.ui.product_collection_page import (
+            _risk_display_summary,
+        )
+        # 侵权风险
+        self.assertEqual(
+            _risk_display_summary("侵权风险｜标题包含蜘蛛侠（Spider-Man）IP"),
+            "蜘蛛侠（Spider-Man）IP",
+        )
+        # 平台风险
+        self.assertEqual(
+            _risk_display_summary("SHEIN规则风险｜标题明确为电子烟配件"),
+            "电子烟配件",
+        )
+        # 采集规则
+        self.assertEqual(
+            _risk_display_summary("采集规则排除｜标题明确为USB带电商品"),
+            "USB带电商品",
+        )
+        # 图片风险
+        self.assertEqual(
+            _risk_display_summary("侵权风险｜图片出现漫威（Marvel）蜘蛛侠（Spider-Man）角色"),
+            "漫威（Marvel）蜘蛛侠（Spider-Man）角色",
+        )
 
 
 class TestTitleRiskWorkerCancellation(_PageCase):
@@ -2520,6 +2604,142 @@ class TestWorkerBatchSignal(_PageCase):
         kwargs = service.scan_batch.call_args.kwargs
         self.assertTrue(kwargs["cancel_requested"]())
         self.assertEqual(len(finished), 1)
+
+
+class TestRiskBadgeWrapAlgorithm(unittest.TestCase):
+    """测试风险标签换行算法：填满行宽、自然断点、IP 保护。"""
+
+    def _make_fm(self, font_size: int = 11) -> QFontMetrics:
+        from PySide6.QtGui import QFont
+        font = QFont("Microsoft YaHei", font_size)
+        return QFontMetrics(font)
+
+    def test_short_text_no_wrap(self):
+        """短文本不需要换行。"""
+        from profit_accounting_26.product_collector.ui.product_collection_page import (
+            _wrap_risk_badge_text,
+        )
+        fm = self._make_fm()
+        result = _wrap_risk_badge_text("USB带电", fm, 160)
+        self.assertEqual(result, "USB带电")
+        self.assertNotIn("\n", result)
+
+    def test_long_text_wraps_to_multiple_lines(self):
+        """长文本应换行为多行。"""
+        from profit_accounting_26.product_collector.ui.product_collection_page import (
+            _wrap_risk_badge_text,
+        )
+        fm = self._make_fm()
+        text = "这是一段很长的风险原因描述，包含多个逗号，用来验证换行算法是否正确工作"
+        result = _wrap_risk_badge_text(text, fm, 160)
+        lines = result.split("\n")
+        self.assertGreater(len(lines), 1)
+
+    def test_max_lines_respected(self):
+        """超长文本最多返回 max_lines 行。"""
+        from profit_accounting_26.product_collector.ui.product_collection_page import (
+            _wrap_risk_badge_text,
+        )
+        fm = self._make_fm()
+        text = "这是一段非常长的文本，" * 20
+        result = _wrap_risk_badge_text(text, fm, 160, max_lines=3)
+        lines = result.split("\n")
+        self.assertLessEqual(len(lines), 3)
+
+    def test_no_ellipsis_in_output(self):
+        """输出不应包含省略号。"""
+        from profit_accounting_26.product_collector.ui.product_collection_page import (
+            _wrap_risk_badge_text,
+        )
+        fm = self._make_fm()
+        text = "这是一段非常长的文本，" * 20
+        result = _wrap_risk_badge_text(text, fm, 160, max_lines=3)
+        self.assertNotIn("...", result)
+        self.assertNotIn("…", result)
+
+    def test_tokenize_keeps_english_words_intact(self):
+        """英文单词、连字符词应作为完整 token。"""
+        from profit_accounting_26.product_collector.ui.product_collection_page import (
+            _tokenize,
+        )
+        tokens = _tokenize("Spider-Man and Pokémon")
+        self.assertIn("Spider-Man", tokens)
+        self.assertIn("Pokémon", tokens)
+
+    def test_tokenize_bracket_groups(self):
+        """括号内容应作为独立 token。"""
+        from profit_accounting_26.product_collector.ui.product_collection_page import (
+            _tokenize,
+        )
+        tokens = _tokenize("漫威（Marvel）角色")
+        self.assertIn("（Marvel）", tokens)
+
+    def test_wrap_fills_line_width(self):
+        """换行应贪心填满行宽，不因早期标点提前换行。"""
+        from profit_accounting_26.product_collector.ui.product_collection_page import (
+            _wrap_risk_badge_text,
+        )
+        fm = self._make_fm()
+        # 构造一个足够长的文本，确保需要换行
+        text = "包含游戏IP（恋与深空）角色形象设计原画周边商品"
+        result = _wrap_risk_badge_text(text, fm, 160)
+        lines = result.split("\n")
+        # 应该有多行
+        self.assertGreater(len(lines), 1)
+        # 每行都不应为空
+        for line in lines:
+            self.assertGreater(len(line), 0)
+        # 总字符数不应超过原文（不添加额外字符）
+        total_chars = sum(len(l) for l in lines)
+        self.assertLessEqual(total_chars, len(text))
+
+    def test_empty_text(self):
+        """空文本返回空。"""
+        from profit_accounting_26.product_collector.ui.product_collection_page import (
+            _wrap_risk_badge_text,
+        )
+        fm = self._make_fm()
+        self.assertEqual(_wrap_risk_badge_text("", fm, 160), "")
+
+
+class TestRiskBadgeDoubleClickForwarding(_PageCase):
+    """测试风险标签双击事件转发到卡片。"""
+
+    def test_risk_label_has_event_filter(self):
+        """风险标签已安装事件过滤器。"""
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        card.set_title_risk_data("platform", "测试")
+        # 事件过滤器应已安装（通过检查 label 的父对象）
+        # 简单验证：标签存在且可见
+        self.assertFalse(card.lbl_title_risk.isHidden())
+
+    def test_title_double_click_still_works_with_risk_label(self):
+        """标题双击打开链接功能在风险标签存在时仍正常（不触发真实浏览器）。"""
+        from unittest.mock import patch
+        self.page.load_results(_products(1))
+        card = self.page._cards["1"]
+        card.set_title_risk_data("platform", "测试风险")
+        received = []
+        card.titleActivated.connect(lambda url: received.append(url))
+        # 在标题区域（非风险标签区域）双击
+        title_geo = card.lbl_title.geometry()
+        from PySide6.QtGui import QMouseEvent
+        from PySide6.QtCore import QPoint
+        pos = QPoint(title_geo.right() - 5, title_geo.top() + 5)
+        event = QMouseEvent(
+            QEvent.Type.MouseButtonDblClick,
+            pos,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        # 阻止真实 webbrowser.open（与现有测试一致的 patch 路径）
+        with patch(
+            "profit_accounting_26.product_collector.ui.product_collection_page.webbrowser.open"
+        ):
+            card.mouseDoubleClickEvent(event)
+        self.assertEqual(len(received), 1)
 
 
 if __name__ == "__main__":

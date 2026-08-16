@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
         loaded_central = loaded_ui.centralWidget()
         loaded_central.setParent(self)
         self.setCentralWidget(loaded_central)
-        # 窗口标题使用 .ui 中的 windowTitle（运行时为 2.6.1），不硬编码旧版本
+        # 窗口标题使用 .ui 中的 windowTitle（运行时为 UU护航 3.0.1），不硬编码旧版本
         self.setWindowTitle(loaded_ui.windowTitle())
         self.resize(loaded_ui.size())
         if loaded_ui.minimumSize().width() > 0:

@@ -141,7 +141,10 @@ class TestUIFileContract:
             # Stage 4：导航精简 + 校准管理迁入 Settings 后的新契约 SHA
             # Product Collector 集成后 main_window.ui 新增导航按钮和页面占位
             # 2.6.1 第二轮：导航交换（商品采集在前）+ 新品测算演示数字清零
-            "main_window.ui": "44f89d1a5b1a9daf10cff6d70fc6b41de9fecd4e9ac45d51849c517cbaf811e0",
+            # PR #39：品牌更名为 UU护航 3.0.1，风险标签优化，未保存位置调整
+            # PR #39 收口：导航按钮 text-align 改为 center，图标 SVG 替换为黑色 U
+            # 风险标签根因修复 + 导航 SVG 图标两列对齐
+            "main_window.ui": "f764faa9bc1b8f10eae1874916f64ad0df3027f77731664eaf4488fc410faf76",
             "settings_page.ui": "e7ff5f8b380066a097462f094f1e25e31c81d1c1efc857c3cb35eafa30bdd614",
         }
         for name, sha in expected.items():

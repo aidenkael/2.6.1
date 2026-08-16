@@ -22,7 +22,7 @@ from typing import Callable, List
 from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QBuffer, QEvent, QIODevice, QObject, Qt, QThread, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QImage, QPainter, QPixmap
+from PySide6.QtGui import QFontMetrics, QImage, QMouseEvent, QPainter, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
@@ -284,6 +284,147 @@ class KeywordSelectPopup(QWidget):
         self.close()
 
 
+# ── 风险标签辅助函数 ────────────────────────────────────────────
+
+# 需要清理的风险类型前缀
+_RISK_PREFIXES = (
+    "侵权风险｜",
+    "SHEIN规则风险｜",
+    "采集规则排除｜",
+)
+
+# 需要清理的来源描述前缀
+_SOURCE_PREFIXES = (
+    "标题包含",
+    "标题含有",
+    "标题明确为",
+    "标题出现",
+    "图片包含",
+    "图片出现",
+    "图片显示",
+    "图片中出现",
+    "图片明确显示",
+    "检测到",
+)
+
+
+def _risk_display_summary(reason: str) -> str:
+    """从完整 reason 中提取默认显示的核心信息。
+
+    去除风险类型前缀和来源描述前缀，保留核心 IP / 品牌 / 风险内容。
+    """
+    text = reason
+    # 去除风险类型前缀
+    for prefix in _RISK_PREFIXES:
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+            break
+    # 去除来源描述前缀
+    for prefix in _SOURCE_PREFIXES:
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+            break
+    return text.strip()
+
+
+def _tokenize(text: str) -> list[str]:
+    """将摘要文本拆成原子 token。
+
+    - 连续英文/数字/连字符/拉丁扩展字符 → 一个 token（Spider-Man, Pokémon, IT）
+    - 括号内容（含括号）→ 一个 token（（Marvel）, (IT)）
+    - 单个中文字符 → 一个 token
+    - 标点符号 → 各自独立 token
+    """
+    tokens: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        # 中文括号内容
+        if ch == "（":
+            j = text.find("）", i + 1)
+            if j != -1:
+                tokens.append(text[i : j + 1])
+                i = j + 1
+                continue
+        # 英文括号内容
+        if ch == "(":
+            j = text.find(")", i + 1)
+            if j != -1:
+                tokens.append(text[i : j + 1])
+                i = j + 1
+                continue
+        # 连续英文/数字/连字符/拉丁扩展字符（如 Pokémon 中的 é）
+        if _is_word_char(ch):
+            j = i
+            while j < n and _is_word_char(text[j]):
+                j += 1
+            tokens.append(text[i:j])
+            i = j
+            continue
+        # 单个字符（中文、标点等）
+        tokens.append(ch)
+        i += 1
+    return tokens
+
+
+def _is_word_char(ch: str) -> bool:
+    """判断字符是否属于英文单词字符（含拉丁扩展、连字符）。"""
+    if ch.isascii():
+        return ch.isalnum() or ch == "-"
+    # 拉丁扩展字符（如 é, ö, ñ 等）
+    cp = ord(ch)
+    if 0x00C0 <= cp <= 0x024F:
+        return True
+    return False
+
+
+def _wrap_risk_badge_text(text: str, font_metrics: QFontMetrics, max_width: int, max_lines: int = 3) -> str:
+    """基于 token 的贪心填充换行，最多 max_lines 行。
+
+    算法：
+    1. 将文本拆成原子 token（英文单词、括号内容、单字）；
+    2. 每行从左到右贪心加入 token，直到下一个 token 会超出宽度才换行；
+    3. 不因标点提前换行——先填满，再换行；
+    4. 超过 max_lines 行时截断，第三行只放能完整装下的 token；
+    5. 不显示省略号，不显示半截英文单词。
+    """
+    if not text:
+        return text
+
+    tokens = _tokenize(text)
+    lines: list[str] = []
+    token_idx = 0
+
+    while token_idx < len(tokens) and len(lines) < max_lines:
+        line_tokens: list[str] = []
+        line_width = 0
+
+        while token_idx < len(tokens):
+            token = tokens[token_idx]
+            token_width = font_metrics.horizontalAdvance(token)
+            # 计算加入此 token 后的行宽（token 间无额外间距）
+            new_width = line_width + token_width
+            if new_width > max_width and line_tokens:
+                # 下一个 token 会超出宽度，换行
+                break
+            line_tokens.append(token)
+            line_width = new_width
+            token_idx += 1
+
+        if line_tokens:
+            lines.append("".join(line_tokens))
+        else:
+            # 单个 token 就超出宽度（极长英文词），强制放入
+            if token_idx < len(tokens):
+                lines.append(tokens[token_idx])
+                token_idx += 1
+            else:
+                break
+
+    return "\n".join(lines)
+
+
 # ── 商品卡片 ──────────────────────────────────────────────────
 
 class ProductCard(QFrame):
@@ -347,22 +488,20 @@ class ProductCard(QFrame):
         self.lbl_badge.hide()
 
         # 标题风险 Overlay（绝对定位，不参与布局）
+        # 注意：不设置 WA_TransparentForMouseEvents，以便接收 Hover 事件显示 Tooltip
         self.lbl_title_risk = QLabel(self)
         self.lbl_title_risk.setObjectName("productCardTitleRisk")
-        self.lbl_title_risk.setWordWrap(True)
-        self.lbl_title_risk.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.lbl_title_risk.setWordWrap(False)
+        self.lbl_title_risk.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.lbl_title_risk.hide()
-        # 限制 Overlay 最大高度约为 3 行文字，防止长 reason 覆盖整个卡片
-        self.lbl_title_risk.setMaximumHeight(54)
 
         # 图片风险 Overlay（绝对定位，不参与布局）
+        # 注意：不设置 WA_TransparentForMouseEvents，以便接收 Hover 事件显示 Tooltip
         self.lbl_image_risk = QLabel(self)
         self.lbl_image_risk.setObjectName("productCardImageRisk")
-        self.lbl_image_risk.setWordWrap(True)
-        self.lbl_image_risk.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.lbl_image_risk.setWordWrap(False)
+        self.lbl_image_risk.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.lbl_image_risk.hide()
-        # 限制 Overlay 最大高度约为 3 行文字
-        self.lbl_image_risk.setMaximumHeight(54)
 
         # 标题风险和图片风险独立存储（新格式）
         self._title_risk_data: dict | None = None  # {"risk": "...", "reason": "..."}
@@ -372,7 +511,38 @@ class ProductCard(QFrame):
         self._detecting: bool = False
 
         self._network = network
+
+        # 风险标签需要接收 Hover 事件（已移除 WA_TransparentForMouseEvents），
+        # 但双击事件需要转发到卡片，以保留标题/图片的双击功能。
+        self.lbl_title_risk.installEventFilter(self)
+        self.lbl_image_risk.installEventFilter(self)
+
         self._load_image()
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt 命名)
+        """事件过滤器：将风险标签的双击事件转发到卡片。
+
+        风险标签需要接收 Hover 事件来显示 Tooltip，
+        但双击事件应转发到卡片以保留标题打开链接和图片搜图功能。
+        """
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            if obj in (self.lbl_title_risk, self.lbl_image_risk):
+                # 将事件坐标转换到卡片坐标系，转发给卡片的双击处理
+                pos = event.position().toPoint()
+                # 将标签坐标转换为卡片坐标
+                card_pos = obj.mapTo(self, pos)
+                # 构造新事件并转发
+                forward_event = QMouseEvent(
+                    QEvent.Type.MouseButtonDblClick,
+                    card_pos,
+                    Qt.MouseButton.LeftButton,
+                    Qt.MouseButton.LeftButton,
+                    Qt.KeyboardModifier.NoModifier,
+                )
+                # 直接调用卡片的双击处理
+                self.mouseDoubleClickEvent(forward_event)
+                return True
+        return super().eventFilter(obj, event)
 
     # ------------------------------------------------------------------
     # 对外状态
@@ -424,23 +594,52 @@ class ProductCard(QFrame):
     # -- 风险样式常量 --
     _RISK_STYLE_PLATFORM = (
         "background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;"
-        "border-radius:4px;padding:2px 6px;font-size:11px;"
+        "border-radius:4px;padding:4px 6px;font-size:11px;"
     )
     _RISK_STYLE_INFRINGEMENT = (
         "background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;"
-        "border-radius:4px;padding:2px 6px;font-size:11px;"
+        "border-radius:4px;padding:4px 6px;font-size:11px;"
     )
+    # 风险标签固定宽度：标题 145px，图片 160px
+    _TITLE_RISK_BADGE_WIDTH = 145
+    _IMAGE_RISK_BADGE_WIDTH = 160
+    # 风险标签固定行数
+    _RISK_BADGE_MAX_LINES = 3
+    # 风险标签水平方向 padding + border 总占用（padding 6px×2 + border 1px×2 = 14px）
+    _RISK_BADGE_H_CHROME = 14
+
+    def _badge_fixed_height(self) -> int:
+        """计算风险标签的固定高度（3 行文字 + padding + border）。"""
+        fm = QFontMetrics(self.lbl_title_risk.font())
+        line_height = fm.height()
+        # padding 4px top + 4px bottom = 8px；border 1px top + 1px bottom = 2px
+        chrome_v = 10
+        return line_height * self._RISK_BADGE_MAX_LINES + chrome_v
 
     def _refresh_risk_display(self) -> None:
         """分别更新标题风险和图片风险 Overlay。"""
+        badge_h = self._badge_fixed_height()
         # 标题风险 Overlay
         title = self._title_risk_data
         if title and title.get("risk") != "none":
             risk = title["risk"]
             reason = title.get("reason", "")
-            text = reason if reason else risk
-            self.lbl_title_risk.setText(text)
-            self.lbl_title_risk.setToolTip(reason)
+            summary = _risk_display_summary(reason) if reason else risk
+            # 按实际内容区域宽度换行（标签宽度 - padding - border），最多 3 行
+            fm = QFontMetrics(self.lbl_title_risk.font())
+            text_width = self._TITLE_RISK_BADGE_WIDTH - self._RISK_BADGE_H_CHROME
+            wrapped = _wrap_risk_badge_text(summary, fm, text_width, self._RISK_BADGE_MAX_LINES)
+            self.lbl_title_risk.setText(wrapped)
+            # 固定尺寸
+            self.lbl_title_risk.setFixedSize(self._TITLE_RISK_BADGE_WIDTH, badge_h)
+            # Hover 显示完整信息
+            risk_type_label = {
+                "infringement": "侵权风险",
+                "platform": "SHEIN规则风险",
+            }.get(risk, risk)
+            self.lbl_title_risk.setToolTip(
+                f"来源：标题检测\n类型：{risk_type_label}\n完整信息：{reason}"
+            )
             self.lbl_title_risk.setStyleSheet(
                 self._RISK_STYLE_INFRINGEMENT if risk == "infringement" else self._RISK_STYLE_PLATFORM
             )
@@ -453,9 +652,20 @@ class ProductCard(QFrame):
         if image and image.get("risk") != "none":
             risk = image["risk"]
             reason = image.get("reason", "")
-            text = reason if reason else risk
-            self.lbl_image_risk.setText(text)
-            self.lbl_image_risk.setToolTip(reason)
+            summary = _risk_display_summary(reason) if reason else risk
+            fm = QFontMetrics(self.lbl_image_risk.font())
+            text_width = self._IMAGE_RISK_BADGE_WIDTH - self._RISK_BADGE_H_CHROME
+            wrapped = _wrap_risk_badge_text(summary, fm, text_width, self._RISK_BADGE_MAX_LINES)
+            self.lbl_image_risk.setText(wrapped)
+            # 固定尺寸
+            self.lbl_image_risk.setFixedSize(self._IMAGE_RISK_BADGE_WIDTH, badge_h)
+            risk_type_label = {
+                "infringement": "侵权风险",
+                "platform": "SHEIN规则风险",
+            }.get(risk, risk)
+            self.lbl_image_risk.setToolTip(
+                f"来源：图片检测\n类型：{risk_type_label}\n完整信息：{reason}"
+            )
             self.lbl_image_risk.setStyleSheet(
                 self._RISK_STYLE_INFRINGEMENT if risk == "infringement" else self._RISK_STYLE_PLATFORM
             )
@@ -467,30 +677,26 @@ class ProductCard(QFrame):
         self._layout_risk_overlays()
 
     def _layout_risk_overlays(self) -> None:
-        """重新计算并设置两个风险 Overlay 的尺寸和位置。
+        """重新计算并设置两个风险 Overlay 的位置。
 
         在 resizeEvent() 和 _refresh_risk_display() 后调用，
         确保 Overlay 始终位于对应区域内。
-        高度由 setMaximumHeight(约两行) 约束，不 setFixedHeight，
-        每次 setText 后 adjustSize 都能按当前文字重新计算高度。
+        使用固定宽度和固定高度（3 行），位置不随内容变化。
         """
-        # 标题风险 Overlay：覆盖在标题区域内部，最大宽度 96%
+        badge_h = self._badge_fixed_height()
+        # 标题风险 Overlay：覆盖在标题区域内部左下角，固定 145px 宽
         title_geo = self.lbl_title.geometry()
-        max_w = int(title_geo.width() * 0.96)
-        self.lbl_title_risk.setMaximumWidth(max_w)
-        self.lbl_title_risk.adjustSize()
+        self.lbl_title_risk.setFixedSize(self._TITLE_RISK_BADGE_WIDTH, badge_h)
         self.lbl_title_risk.move(
             title_geo.left() + 4,
-            title_geo.bottom() - self.lbl_title_risk.height() - 2,
+            title_geo.bottom() - badge_h - 2,
         )
-        # 图片风险 Overlay：覆盖在图片区内部左下角，最大宽度 96%
+        # 图片风险 Overlay：覆盖在图片区内部左下角，固定 160px 宽
         img_geo = self.lbl_image.geometry()
-        max_img_w = int(img_geo.width() * 0.96)
-        self.lbl_image_risk.setMaximumWidth(max_img_w)
-        self.lbl_image_risk.adjustSize()
+        self.lbl_image_risk.setFixedSize(self._IMAGE_RISK_BADGE_WIDTH, badge_h)
         self.lbl_image_risk.move(
             img_geo.left() + 4,
-            img_geo.bottom() - self.lbl_image_risk.height() - 4,
+            img_geo.bottom() - badge_h - 4,
         )
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)

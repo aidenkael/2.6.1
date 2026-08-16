@@ -18,7 +18,8 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QFileDialog,
     QLabel,
@@ -31,16 +32,18 @@ from PySide6.QtWidgets import (
 )
 
 from profit_accounting_26.application import AppContext
+from profit_accounting_26.shared import resource_path
 from profit_accounting_26.ui.greeting_header import GreetingHeaderController
 from profit_accounting_26.ui.ui_loader import load_settings_page
 
 
-# 导航按钮 objectName 与页面 objectName 的映射（顺序固定）
-NAV_BINDINGS: list[tuple[str, str, str]] = [
-    ("btnNavProductCollection", "pageProductCollection", "商品采集"),
-    ("btnNavCalculation", "pageCalculation", "新商品测算"),
-    ("btnNavHistory", "pageHistory", "历史记录管理"),
-    ("btnNavSettings", "pageSettingsHost", "设置"),
+# 导航按钮 objectName、页面 objectName、显示文字、SVG 图标文件名（顺序固定）
+_NAV_ICON_DIR = "src/profit_accounting_26/ui/assets"
+NAV_BINDINGS: list[tuple[str, str, str, str]] = [
+    ("btnNavProductCollection", "pageProductCollection", "商品采集", "nav_data_import_export.svg"),
+    ("btnNavCalculation", "pageCalculation", "新商品测算", "nav_model_calibration_feedback.svg"),
+    ("btnNavHistory", "pageHistory", "历史记录管理", "nav_history_records.svg"),
+    ("btnNavSettings", "pageSettingsHost", "设置", "nav_settings.svg"),
 ]
 
 
@@ -105,14 +108,49 @@ class MainWindowBinder:
 
     def _bind_navigation(self) -> None:
         self._nav_buttons = []
-        for btn_name, _page_name, _label in NAV_BINDINGS:
+        # 导航按钮使用 QPushButton 原生 icon + text 布局，
+        # 通过 CSS padding-left 实现图标列与文字列的固定对齐。
+        _nav_base_style = (
+            "QPushButton { background: transparent; border: none;"
+            " text-align: left; padding: 10px 12px 10px 40px;"
+            " font-size: 13px; color: #42526a;"
+            " border-radius: 6px; }"
+        )
+        for btn_name, _page_name, label, icon_file in NAV_BINDINGS:
             btn = self.window.findChild(QPushButton, btn_name)
-            if btn:
-                btn.setCheckable(True)
-                # 每个按钮只连接一次
-                idx = len(self._nav_buttons)
-                btn.clicked.connect(lambda _checked, i=idx: self.switch_page(i))
-                self._nav_buttons.append(btn)
+            if not btn:
+                continue
+            btn.setCheckable(True)
+            btn.setText(label)
+            # 设置 SVG 图标，固定 20×20 渲染尺寸
+            icon_path = str(resource_path(f"{_NAV_ICON_DIR}/{icon_file}"))
+            btn.setIcon(QIcon(icon_path))
+            btn.setIconSize(QSize(20, 20))
+            btn.setStyleSheet(_nav_base_style)
+            # 索引与连接
+            idx = len(self._nav_buttons)
+            btn.clicked.connect(lambda _checked, i=idx: self.switch_page(i))
+            self._nav_buttons.append(btn)
+        # 初始化第一个按钮为选中态
+        if self._nav_buttons:
+            self._update_nav_styles(0)
+
+    def _update_nav_styles(self, active_index: int) -> None:
+        """更新导航按钮的选中/未选中样式。"""
+        _inactive = (
+            "QPushButton { background: transparent; border: none;"
+            " text-align: left; padding: 10px 12px 10px 40px;"
+            " font-size: 13px; color: #42526a;"
+            " border-radius: 6px; }"
+        )
+        _active = (
+            "QPushButton { background: #eaf2ff; border: none;"
+            " text-align: left; padding: 10px 12px 10px 40px;"
+            " font-size: 13px; color: #176ff2; font-weight: 600;"
+            " border-radius: 6px; }"
+        )
+        for idx, btn in enumerate(self._nav_buttons):
+            btn.setStyleSheet(_active if idx == active_index else _inactive)
 
     def switch_page(self, index: int) -> None:
         """切换到第 index 个导航页（索引按 NAV_BINDINGS 显示顺序）。
@@ -123,13 +161,14 @@ class MainWindowBinder:
         stack = self.window.findChild(QStackedWidget, "mainStack")
         if not stack or not (0 <= index < len(NAV_BINDINGS)):
             return
-        _btn_name, page_name, label = NAV_BINDINGS[index]
+        _btn_name, page_name, label, _icon_file = NAV_BINDINGS[index]
         real_index = self._page_stack_index(stack, page_name)
         if real_index < 0:
             real_index = index
         stack.setCurrentIndex(real_index)
         for idx, btn in enumerate(self._nav_buttons):
             btn.setChecked(idx == index)
+        self._update_nav_styles(index)
         # 触发页面刷新
         if label == "历史记录管理" and self.history_page:
             self.history_page.refresh()

@@ -72,7 +72,7 @@ def build_window(data_dir=None):
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
     app = QApplication.instance() or QApplication(sys.argv)
     _install_chinese_translator(app)
-    app.setApplicationName("微智能利润管理软件 2.6.1")
+    app.setApplicationName("UU护航 3.0.1")
     app.setOrganizationName("ProfitAccounting26")
     app.setWindowIcon(QIcon(str(resource_path("src/profit_accounting_26/ui/assets/app_icon_desktop_taskbar.svg"))))
     if data_dir is not None:

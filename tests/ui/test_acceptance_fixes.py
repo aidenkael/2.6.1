@@ -359,12 +359,12 @@ def test_snapshot_fields_include_full_rule_snapshot_and_legacy_flag(qapp, binder
 # ---------------------------------------------------------------------------
 
 
-def test_real_main_window_title_is_261_from_ui(qapp, temp_context):
+def test_real_main_window_title_is_uu_301_from_ui(qapp, temp_context):
     from profit_accounting_26.ui.main_window import MainWindow
 
     window = MainWindow(temp_context)
     try:
-        assert window.windowTitle() == "微智能利润管理软件 2.6.1"
+        assert window.windowTitle() == "UU护航 3.0.1"
     finally:
         window.close()
         qapp.processEvents()

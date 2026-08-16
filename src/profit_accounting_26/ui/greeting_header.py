@@ -134,11 +134,11 @@ class GreetingHeaderController(QObject):
 
         shuffle_button.setToolTip("刷新欢迎语")
 
-        # 加载刷新图标
-        icon_path = resource_path("src/profit_accounting_26/ui/assets/refresh_welcome.svg")
+        # 加载蓝色 U 图标（替换原刷新图标）
+        icon_path = resource_path("src/profit_accounting_26/ui/assets/uu_logo_blue.png")
         if icon_path.exists():
             shuffle_button.setIcon(QIcon(str(icon_path)))
-            shuffle_button.setIconSize(QSize(22, 22))
+            shuffle_button.setIconSize(QSize(28, 28))
         else:
             shuffle_button.setText("↻")
 
