@@ -6524,12 +6524,6 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                   </item>
                   <item>
                    <widget class="QLineEdit" name="txtProductLink">
-                    <property name="maximumSize">
-                     <size>
-                      <width>400</width>
-                      <height>16777215</height>
-                     </size>
-                    </property>
                     <property name="text">
                      <string />
                     </property>

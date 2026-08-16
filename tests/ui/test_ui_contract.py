@@ -144,7 +144,7 @@ class TestUIFileContract:
             # PR #39：品牌更名为 UU护航 3.0.1，风险标签优化，未保存位置调整
             # PR #39 收口：导航按钮 text-align 改为 center，图标 SVG 替换为黑色 U
             # 风险标签根因修复 + 导航 SVG 图标两列对齐
-            "main_window.ui": "f764faa9bc1b8f10eae1874916f64ad0df3027f77731664eaf4488fc410faf76",
+            "main_window.ui": "0c3ff08a48b4989b8341074d7e33c5bee883628f6161b3b0d3cd8633fb15782a",
             "settings_page.ui": "e7ff5f8b380066a097462f094f1e25e31c81d1c1efc857c3cb35eafa30bdd614",
         }
         for name, sha in expected.items():
