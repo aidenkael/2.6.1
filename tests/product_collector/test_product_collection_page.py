@@ -1817,13 +1817,16 @@ class TestRound2OverlayDetails(_PageCase):
         w_title_long = card.lbl_title_risk.width()
         h_img_long = card.lbl_image_risk.height()
         w_img_long = card.lbl_image_risk.width()
-        # 尺寸应完全一致
+        # 尺寸应完全一致（短文本 vs 长文本）
         self.assertEqual(h_title_short, h_title_long)
         self.assertEqual(w_title_short, w_title_long)
         self.assertEqual(h_img_short, h_img_long)
         self.assertEqual(w_img_short, w_img_long)
-        # 标题和图片标签尺寸也应一致
-        self.assertEqual(w_title_short, w_img_short)
+        # 标题宽度应等于 _TITLE_RISK_BADGE_WIDTH
+        self.assertEqual(w_title_short, card._TITLE_RISK_BADGE_WIDTH)
+        # 图片宽度应等于 _IMAGE_RISK_BADGE_WIDTH
+        self.assertEqual(w_img_short, card._IMAGE_RISK_BADGE_WIDTH)
+        # 高度应一致（标题和图片使用相同高度）
         self.assertEqual(h_title_short, h_img_short)
 
     def test_overlay_max_three_lines(self):
