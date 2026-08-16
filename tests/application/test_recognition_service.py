@@ -201,9 +201,9 @@ def test_multi_image_payload_order_is_stable_for_product_and_weight_evidence(tmp
 def test_v13_prompt_keeps_schema_and_adds_shipment_quantity_guidance():
     prompt = RecognitionService._prompt(1, include_json_shape=False)
 
-    assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.4"
+    assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.5"
     assert set(RecognitionService.RESPONSE_SCHEMA["properties"]) == {
-        "product_name", "observed", "bare_estimate", "shipment", "structure", "quantity", "note"
+        "product_name", "observed", "bare_estimate", "shipment", "structure", "quantity", "field_evidence", "note"
     }
     assert "无法可靠确认一个销售单位具体包含几件时" in prompt
     assert "袜子、手套等天然成双商品" in prompt
