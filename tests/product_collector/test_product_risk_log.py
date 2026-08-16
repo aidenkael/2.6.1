@@ -101,6 +101,12 @@ class TestProductRiskLog(unittest.TestCase):
             batch_index=1, duration_ms=1500, success=20, failed=0,
             status="完成", timeout=False, http_error="",
         )
+        prl.title_batch_diagnostics(
+            batch_index=1, finish_reason="stop", content_chars=2048,
+            results_is_list=True, raw_results_count=20, valid_count=20,
+            missing_id_count=0, invalid_risk_count=0,
+            unknown_id_count=0, duplicate_id_count=0,
+        )
         prl.title_scan_finished(
             total=90, batches=5, checked=90, failed=0, status="完成",
         )
@@ -123,6 +129,12 @@ class TestProductRiskLog(unittest.TestCase):
         self.assertIn("missing=1", content)
         self.assertIn("[标题检测] 批次1开始 本批数量=20", content)
         self.assertIn("批次1结束 duration_ms=1500 success=20 failed=0 status=完成", content)
+        self.assertIn(
+            "批次1诊断 finish_reason=stop content_chars=2048 results_is_list=True"
+            " raw_results_count=20 valid_count=20 missing_id_count=0"
+            " invalid_risk_count=0 unknown_id_count=0 duplicate_id_count=0",
+            content,
+        )
         self.assertIn("结束 总商品数=90 批次数=5 checked=90 failed=0 status=完成", content)
         self.assertIn("[图片检测] 批次1开始 本批数量=10", content)
         self.assertIn("download_ms=800", content)
@@ -158,6 +170,7 @@ class TestProductRiskLog(unittest.TestCase):
             prl.title_request_finished,
             prl.title_batch_started,
             prl.title_batch_finished,
+            prl.title_batch_diagnostics,
             prl.title_scan_finished,
             prl.image_batch_finished,
             prl.image_scan_finished,

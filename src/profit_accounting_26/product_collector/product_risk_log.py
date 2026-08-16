@@ -151,6 +151,40 @@ def title_batch_finished(
     )
 
 
+def title_batch_diagnostics(
+    *,
+    batch_index: int,
+    finish_reason: str,
+    content_chars: int,
+    results_is_list: bool,
+    raw_results_count: int,
+    valid_count: int,
+    missing_id_count: int,
+    invalid_risk_count: int,
+    unknown_id_count: int,
+    duplicate_id_count: int,
+) -> None:
+    """单批返回结构诊断（API HTTP 成功后记录，用于排查 success=0 missing=N）。
+
+    只记录统计字段，不记录完整 AI 返回内容 / 标题 / Prompt。
+    """
+    _logger.info(
+        "[标题检测] 批次%d诊断 finish_reason=%s content_chars=%d results_is_list=%s"
+        " raw_results_count=%d valid_count=%d missing_id_count=%d invalid_risk_count=%d"
+        " unknown_id_count=%d duplicate_id_count=%d",
+        batch_index,
+        finish_reason,
+        content_chars,
+        results_is_list,
+        raw_results_count,
+        valid_count,
+        missing_id_count,
+        invalid_risk_count,
+        unknown_id_count,
+        duplicate_id_count,
+    )
+
+
 def title_scan_finished(
     *,
     total: int,

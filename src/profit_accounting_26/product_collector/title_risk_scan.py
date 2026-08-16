@@ -170,7 +170,8 @@ class TitleRiskScanService:
             其中 batch_failed 为本批明确失败 / 缺失结果的商品数。
         cancel_requested: 可选回调，批次开始前调用；返回 True 时停止后续批次，
             已完成的批次结果仍保留在返回值中。
-        返回: 所有批次成功解析结果的合并列表（含 none，含未知 id 条目）。
+        返回: 所有批次成功解析结果的合并列表（含 none，仅含属于送检 id 的
+        唯一有效条目；unknown / 重复 id 已过滤）。
         """
         if not titles:
             return []
@@ -187,7 +188,13 @@ class TitleRiskScanService:
             profile.display_name, profile.provider, profile.model_name, len(titles)
         )
 
-        uses_openai_schema = str(getattr(profile, "provider", "") or "").strip().casefold() == "openai"
+        provider = str(getattr(profile, "provider", "") or "").strip()
+        model_name = str(getattr(profile, "model_name", "") or "").strip()
+        uses_openai_schema = provider.casefold() == "openai"
+        # 阿里云百炼 qwen3.7-plus：同样启用 JSON Mode，稳定返回结构
+        # （与 qwen_request_params.py 的 _PROVIDER_DASHSCOPE 常量保持一致）
+        if provider == "阿里云百炼" and model_name.startswith("qwen3.7-plus"):
+            uses_openai_schema = True
 
         total_batches = (len(titles) + BATCH_SIZE - 1) // BATCH_SIZE
         all_results: list[TitleRiskItem] = []
@@ -207,7 +214,7 @@ class TitleRiskScanService:
             batch_failed = 0
             try:
                 batch_results = self._request_single_batch(
-                    batch, profile, api_key, endpoint, uses_openai_schema
+                    batch, batch_index, profile, api_key, endpoint, uses_openai_schema
                 )
             except (RecognitionUnavailableError, RecognitionResponseError) as exc:
                 # 单批失败不拖垮其它批：记录本批失败，继续下一批
@@ -215,13 +222,14 @@ class TitleRiskScanService:
                 batch_status = "超时" if "超时" in str(exc) else "失败"
             else:
                 batch_status = "完成"
+                # batch_results 已在 _request_single_batch 内过滤为
+                # 仅本批 expected_ids 的唯一有效结果
                 expected_ids = {
                     str(t.get("id") or "").strip()
                     for t in batch
                     if str(t.get("id") or "").strip()
                 }
-                valid_ids = {r.product_id for r in batch_results if r.product_id in expected_ids}
-                batch_failed = len(expected_ids - valid_ids)
+                batch_failed = len(expected_ids) - len(batch_results)
                 all_results.extend(batch_results)
             total_failed += batch_failed
             elapsed_ms = product_risk_log.elapsed_ms(_batch_start)
@@ -254,13 +262,16 @@ class TitleRiskScanService:
     def _request_single_batch(
         self,
         batch: list[dict[str, str]],
+        batch_index: int,
         profile: Any,
         api_key: str,
         endpoint: str,
         uses_openai_schema: bool,
     ) -> list[TitleRiskItem]:
-        """请求单个批次并解析返回结果（含该批次请求日志）。
+        """请求单个批次并解析返回结果（含该批次请求日志与结构诊断）。
 
+        返回结果只保留属于本批 expected_ids 的唯一有效条目：
+        unknown id / 重复 id / 非法 risk 均不计入，且不加入 all_results。
         失败时抛 RecognitionUnavailableError / RecognitionResponseError，
         由 scan() 统一按"单批失败"处理。
         """
@@ -341,19 +352,66 @@ class TitleRiskScanService:
             )
             raise RecognitionResponseError("标题风险检测返回格式无效。") from exc
 
-        results = self._parse_risks(data)
-        # 日志统计按实际送检 id 集合去重：AI 返回重复 id / 未知 id 不夸大 success
+        # ---- 结果归属校验与统计：只接受属于本批 expected_ids 的结果 ----
         expected_ids = {
             str(t.get("id") or "").strip() for t in batch if str(t.get("id") or "").strip()
         }
-        valid_returned_ids = {r.product_id for r in results if r.product_id in expected_ids}
+        raw_results = data.get("results")
+        results_is_list = isinstance(raw_results, list)
+        raw_results_count = len(raw_results) if results_is_list else 0
+
+        valid_results: list[TitleRiskItem] = []
+        seen: set[str] = set()
+        invalid_risk_count = 0
+        unknown_id_count = 0
+        duplicate_id_count = 0
+        for item in raw_results if results_is_list else []:
+            if not isinstance(item, dict):
+                continue
+            pid = str(item.get("id") or "").strip()
+            risk = str(item.get("risk") or "").strip().lower()
+            if risk not in _VALID_RISKS:
+                invalid_risk_count += 1
+                continue
+            if not pid or pid not in expected_ids:
+                unknown_id_count += 1
+                continue
+            if pid in seen:
+                duplicate_id_count += 1
+                continue
+            seen.add(pid)
+            reason = str(item.get("reason") or "").strip()
+            valid_results.append(TitleRiskItem(product_id=pid, risk=risk, reason=reason))
+        valid_count = len(valid_results)
+        missing_id_count = len(expected_ids - seen)
+
+        try:
+            finish_reason = str(
+                response_data["choices"][0].get("finish_reason") or ""
+            ).strip()
+        except (KeyError, IndexError, TypeError):
+            finish_reason = ""
+        content_chars = len(str(content))
+
+        product_risk_log.title_batch_diagnostics(
+            batch_index=batch_index,
+            finish_reason=finish_reason,
+            content_chars=content_chars,
+            results_is_list=results_is_list,
+            raw_results_count=raw_results_count,
+            valid_count=valid_count,
+            missing_id_count=missing_id_count,
+            invalid_risk_count=invalid_risk_count,
+            unknown_id_count=unknown_id_count,
+            duplicate_id_count=duplicate_id_count,
+        )
         product_risk_log.title_request_finished(
             duration_ms=product_risk_log.elapsed_ms(_request_start),
-            success=len(valid_returned_ids),
-            missing=len(expected_ids - valid_returned_ids),
+            success=valid_count,
+            missing=missing_id_count,
             status="完成",
         )
-        return results
+        return valid_results
 
     @staticmethod
     def _parse_risks(data: Any) -> list[TitleRiskItem]:

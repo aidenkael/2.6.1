@@ -630,8 +630,11 @@ class TestNewControlBehavior(_PageCase):
         with patch("profit_accounting_26.product_collector.ui.product_collection_page.ImageSearchWorker.run", fail_fast):
             QTest.mouseClick(card, Qt.MouseButton.LeftButton, pos=card.lbl_image.geometry().center())
             QTest.mouseDClick(card, Qt.MouseButton.LeftButton, pos=card.lbl_image.geometry().center())
-            # 全量测试高负载下线程退出可能超过 200ms，放宽等待避免偶发时序失败
-            self._pump(800)
+            # 全量测试高负载下线程退出可能超过固定等待，轮询等待线程真正清理完成
+            for _ in range(60):
+                self._pump(50)
+                if self.page._image_search_thread is None:
+                    break
         self.assertEqual(image_requests, [product.main_image])
         self.assertIsNone(self.page._image_search_thread)
         self.assertIsNone(self.page._image_search_worker)
@@ -645,14 +648,21 @@ class TestNewControlBehavior(_PageCase):
             completed.append(worker._image_url)
             worker.ready.emit("https://example.test/result")
 
+        def wait_cleared():
+            """轮询等待搜图线程结束并清理引用（高负载下避免固定等待不够）。"""
+            for _ in range(60):
+                self._pump(50)
+                if self.page._image_search_thread is None:
+                    return
+
         with patch("profit_accounting_26.product_collector.ui.product_collection_page.ImageSearchWorker.run", complete), \
              patch("profit_accounting_26.product_collector.ui.product_collection_page.webbrowser.open") as open_browser:
             self.page._start_1688_image_search(product.main_image)
-            self._pump(200)
+            wait_cleared()
             self.assertIsNone(self.page._image_search_thread)
             self.assertIsNone(self.page._image_search_worker)
             self.page._start_1688_image_search(product.main_image)
-            self._pump(200)
+            wait_cleared()
         self.assertEqual(completed, [product.main_image, product.main_image])
         self.assertEqual(open_browser.call_count, 2)
 

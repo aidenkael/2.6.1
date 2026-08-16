@@ -1170,9 +1170,15 @@ class ProductCollectionPage(QWidget):
         if not image_url:
             self._notice(self, "提示", "当前商品没有可用图片。", level="warning")
             return
-        if self._image_search_thread is not None and self._image_search_thread.isRunning():
-            self._notice(self, "提示", "图片搜图正在进行，请稍候。", level="warning")
-            return
+        if self._image_search_thread is not None:
+            try:
+                running = self._image_search_thread.isRunning()
+            except RuntimeError:
+                # 旧线程 C++ 对象已被 deleteLater 销毁：视为已结束
+                running = False
+            if running:
+                self._notice(self, "提示", "图片搜图正在进行，请稍候。", level="warning")
+                return
         self._image_search_thread = QThread(self)
         self._image_search_worker = ImageSearchWorker(image_url)
         self._image_search_worker.moveToThread(self._image_search_thread)
@@ -1183,9 +1189,9 @@ class ProductCollectionPage(QWidget):
         self._image_search_worker.failed.connect(self._image_search_thread.quit)
         self._image_search_thread.finished.connect(self._image_search_worker.deleteLater)
         self._image_search_thread.finished.connect(self._image_search_thread.deleteLater)
-        self._image_search_thread.finished.connect(
-            lambda thread=self._image_search_thread: self._clear_image_search_task(thread)
-        )
+        # 清理槽绑定页面自身：finished 信号跨线程投递时若绑定 QThread 自身，
+        # 线程对象被 DeferredDelete 销毁后槽会丢失，导致引用残留（再次搜图崩溃）
+        self._image_search_thread.finished.connect(self._clear_image_search_task)
         self._image_search_thread.start()
 
     def _open_1688_result(self, result_url: str) -> None:
@@ -1194,11 +1200,17 @@ class ProductCollectionPage(QWidget):
     def _on_1688_image_search_failed(self, _message: str) -> None:
         self._notice(self, "提示", "1688 图片搜图失败。", level="warning")
 
-    def _clear_image_search_task(self, finished_thread: QThread) -> None:
-        """仅清理刚结束的搜图任务，允许下一次创建新的 worker/thread。"""
-        if self._image_search_thread is finished_thread:
-            self._image_search_thread = None
-            self._image_search_worker = None
+    def _clear_image_search_task(self) -> None:
+        """仅清理刚结束的搜图任务，允许下一次创建新的 worker/thread。
+
+        receiver 为页面自身（而非 QThread 对象），finished 信号跨线程投递时
+        即使线程对象已被 DeferredDelete 销毁，本槽仍能正常执行。
+        注意：finished 到达时 QThread/worker 的 C++ 对象可能已被 deleteLater
+        同步销毁（PySide6 事件处理时序竞争），因此本槽内禁止访问线程对象的
+        任何 C++ 成员（sender()/isRunning() 等），只做 Python 引用清理。
+        """
+        self._image_search_thread = None
+        self._image_search_worker = None
 
     def load_results(self, products: list[CandidateProduct]) -> None:
         """一次性载入采集结果并构建卡片墙。"""
