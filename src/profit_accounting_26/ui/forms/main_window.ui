@@ -17,7 +17,7 @@
    </size>
   </property>
   <property name="windowTitle">
-   <string>微智能利润管理软件 2.6.1</string>
+   <string>UU护航 3.0.1</string>
   </property>
   <property name="styleSheet">
    <string notr="true">
@@ -43,15 +43,15 @@ QLabel#lblGreetingSubtitle, QLabel[hint="true"] { color: #738198; font-size: 9pt
 QPushButton { background: white; border: 1px solid #d7e2ef; border-radius: 7px; padding: 6px 12px; }
 QPushButton:hover { border-color: #4083ff; color: #1767e8; }
 QPushButton[primary="true"] { background: #176ff2; color: white; border-color: #176ff2; font-weight: 600; }
-QPushButton[navActive="true"] { background: #eaf2ff; color: #176ff2; border: none; text-align: left; font-weight: 600; }
-QPushButton[navItem="true"] { background: transparent; border: none; text-align: left; padding: 10px 12px; }
+QPushButton[navActive="true"] { background: #eaf2ff; color: #176ff2; border: none; text-align: center; font-weight: 600; }
+QPushButton[navItem="true"] { background: transparent; border: none; text-align: center; padding: 10px 12px; }
 QLineEdit, QTextEdit, QComboBox, QDoubleSpinBox { background: white; border: 1px solid #d7e2ef; border-radius: 6px; padding: 5px 8px; min-height: 24px; }
 QLineEdit[preview="true"], QTextEdit[preview="true"], QDoubleSpinBox[preview="true"], QLabel[preview="true"] { background: #f1f5fa; color: #607089; }
 QLabel[dropZone="true"] { background: #fbfdff; border: 1px dashed #c9d7e8; border-radius: 7px; color: #42526a; }
 QFrame#normalPackageCard[selected="true"], QFrame#forwarderCardShenzhen[selected="true"] { border: 2px solid #4d8dff; background: #f7fbff; }
 QLabel#lblSubsidyStatus { background: #ecfff4; color: #1b9a5a; border: 1px solid #bdebd1; border-radius: 6px; padding: 6px 10px; font-weight: 600; }
 QLabel#lblSaveStatus { background: #fff4df; color: #e27c12; border-radius: 6px; padding: 5px 10px; }
-QLabel[logoBadge="true"] { background: #176ff2; color: white; border-radius: 8px; font-weight: 700; }
+QLabel[logoBadge="true"] { background: transparent; }
 QLabel[totalValue="true"] { color: #176ff2; font-weight: 700; }
 QLabel[statusOk="true"] { color: #1b9a5a; font-weight: 600; }
 QLabel[conclusion="true"] { background: #eef5ff; border: 1px solid #cfe0f7; border-radius: 6px; padding: 7px; color: #33445d; }
@@ -191,7 +191,13 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
             </size>
            </property>
            <property name="text">
-            <string>↗</string>
+            <string/>
+           </property>
+           <property name="pixmap">
+            <pixmap>src/profit_accounting_26/ui/assets/uu_logo_black.png</pixmap>
+           </property>
+           <property name="scaledContents">
+            <bool>true</bool>
            </property>
            <property name="alignment">
             <set>Qt::AlignmentFlag::AlignCenter</set>
@@ -221,17 +227,10 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
            <item>
             <widget class="QLabel" name="lblAppName">
              <property name="text">
-              <string>微智能利润管理软件</string>
+              <string>UU护航</string>
              </property>
              <property name="sectionTitle" stdset="0">
               <bool>true</bool>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QLabel" name="lblAppVersion">
-             <property name="text">
-              <string>v2.6.1 · 本地桌面版</string>
              </property>
             </widget>
            </item>
@@ -264,7 +263,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
           </size>
          </property>
          <property name="text">
-          <string>采  商品采集</string>
+          <string>商品采集</string>
          </property>
          <property name="navItem" stdset="0">
           <bool>true</bool>
@@ -280,7 +279,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
           </size>
          </property>
          <property name="text">
-          <string>测  新商品测算</string>
+          <string>新商品测算</string>
          </property>
          <property name="navItem" stdset="0">
           <bool>true</bool>
@@ -299,7 +298,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
           </size>
          </property>
          <property name="text">
-          <string>记  历史记录管理</string>
+          <string>历史记录管理</string>
          </property>
          <property name="navItem" stdset="0">
           <bool>true</bool>
@@ -315,7 +314,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
           </size>
          </property>
          <property name="text">
-          <string>⚙  设置</string>
+          <string>设置</string>
          </property>
          <property name="navItem" stdset="0">
           <bool>true</bool>
@@ -493,7 +492,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
        <item>
         <widget class="QLabel" name="lblCurrentVersion">
          <property name="text">
-          <string>当前版本：2.6.1</string>
+          <string>当前版本：3.0.1</string>
          </property>
         </widget>
        </item>
@@ -607,13 +606,6 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
              </size>
             </property>
            </spacer>
-          </item>
-          <item>
-           <widget class="QLabel" name="lblSaveStatus">
-            <property name="text">
-             <string>未保存</string>
-            </property>
-           </widget>
           </item>
           <item>
            <widget class="QPushButton" name="btnRefreshGreeting">
@@ -6537,6 +6529,13 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                     </property>
                     <property name="placeholderText">
                      <string>请输入商品链接（可选）</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QLabel" name="lblSaveStatus">
+                    <property name="text">
+                     <string>未保存</string>
                     </property>
                    </widget>
                   </item>

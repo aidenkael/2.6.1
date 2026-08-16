@@ -96,6 +96,20 @@ class TestProductRiskLog(unittest.TestCase):
             duration_ms=1234, success=9, missing=1, status="ok",
             timeout=False, http_error="",
         )
+        prl.title_batch_started(1, 20)
+        prl.title_batch_finished(
+            batch_index=1, duration_ms=1500, success=20, failed=0,
+            status="完成", timeout=False, http_error="",
+        )
+        prl.title_batch_diagnostics(
+            batch_index=1, finish_reason="stop", content_chars=2048,
+            results_is_list=True, raw_results_count=20, valid_count=20,
+            missing_id_count=0, invalid_risk_count=0,
+            unknown_id_count=0, duplicate_id_count=0,
+        )
+        prl.title_scan_finished(
+            total=90, batches=5, checked=90, failed=0, status="完成",
+        )
         prl.image_scan_start(10)
         prl.image_batch_started(1, 10)
         prl.image_batch_finished(
@@ -113,6 +127,15 @@ class TestProductRiskLog(unittest.TestCase):
         self.assertIn("payload_bytes=2048", content)
         self.assertIn("duration_ms=1234", content)
         self.assertIn("missing=1", content)
+        self.assertIn("[标题检测] 批次1开始 本批数量=20", content)
+        self.assertIn("批次1结束 duration_ms=1500 success=20 failed=0 status=完成", content)
+        self.assertIn(
+            "批次1诊断 finish_reason=stop content_chars=2048 results_is_list=True"
+            " raw_results_count=20 valid_count=20 missing_id_count=0"
+            " invalid_risk_count=0 unknown_id_count=0 duplicate_id_count=0",
+            content,
+        )
+        self.assertIn("结束 总商品数=90 批次数=5 checked=90 failed=0 status=完成", content)
         self.assertIn("[图片检测] 批次1开始 本批数量=10", content)
         self.assertIn("download_ms=800", content)
         self.assertIn("download_failed=1", content)
@@ -145,6 +168,10 @@ class TestProductRiskLog(unittest.TestCase):
         for fn in (
             prl.title_request_started,
             prl.title_request_finished,
+            prl.title_batch_started,
+            prl.title_batch_finished,
+            prl.title_batch_diagnostics,
+            prl.title_scan_finished,
             prl.image_batch_finished,
             prl.image_scan_finished,
         ):

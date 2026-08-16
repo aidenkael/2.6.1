@@ -1107,3 +1107,123 @@ class TestImageRiskLogStatus:
         service.scan_batch(self._products(15), cancel_requested=cancel)  # 计划 2 批
         content = risk_log_dir.read_text(encoding="utf-8")
         assert "批次数=1" in content
+
+
+class TestScanBatchOnBatchCallback:
+    """on_batch 回调：每实际 API 批次调用一次，携带批次结果/失败/序号/总数/耗时。
+
+    缓存 / 缺图不触发回调；失败批次仍回调并报告整批失败。
+    """
+
+    def _service(self):
+        profile_store = MagicMock()
+        profile = MagicMock()
+        profile.api_url = "https://api.example.com/v1"
+        profile.model_name = "test-model"
+        profile.provider = "OpenAI"
+        profile_store.bound_profile.return_value = (profile, "test-key")
+        service = ImageRiskScanService(profile_store)
+        service._scan_single_batch = MagicMock(
+            side_effect=lambda batch, **kw: (
+                [ImageRiskItem(p["id"], p["main_image"], "none", "") for p in batch],
+                0,
+            )
+        )
+        return service
+
+    def _products(self, count):
+        return [
+            {"id": str(i), "main_image": f"https://img.example/{i}.jpg"}
+            for i in range(1, count + 1)
+        ]
+
+    def test_on_batch_called_per_api_batch(self):
+        """21 商品 -> 3 批（10+10+1），每批回调一次，序号/总数/耗时正确。"""
+        service = self._service()
+        calls = []
+        service.scan_batch(self._products(21), on_batch=lambda *a: calls.append(a))
+        assert len(calls) == 3
+        assert calls[0][2] == 1 and calls[0][3] == 3
+        assert calls[1][2] == 2 and calls[1][3] == 3
+        assert calls[2][2] == 3 and calls[2][3] == 3
+        assert all(c[1] == 0 for c in calls)  # 无失败
+        assert all(c[4] >= 0 for c in calls)  # elapsed_ms 非负（mock 极快可能为 0）
+        assert len(calls[0][0]) == 10
+        assert len(calls[1][0]) == 10
+        assert len(calls[2][0]) == 1  # 最后一批不足 10 正常
+
+    def test_on_batch_hundred_products_ten_batches(self):
+        """100 商品 -> 10 批，BATCH_SIZE=10 保持，每批 10 个。"""
+        service = self._service()
+        calls = []
+        service.scan_batch(self._products(100), on_batch=lambda *a: calls.append(a))
+        assert len(calls) == 10
+        assert calls[-1][2] == 10 and calls[-1][3] == 10
+        assert all(len(c[0]) == 10 for c in calls)
+
+    def test_on_batch_reports_failure_batch(self):
+        """中间批次异常：该批回调 failed=10，后续批仍继续。"""
+        profile_store = MagicMock()
+        profile = MagicMock()
+        profile.api_url = "https://api.example.com/v1"
+        profile.model_name = "test-model"
+        profile.provider = "OpenAI"
+        profile_store.bound_profile.return_value = (profile, "test-key")
+        service = ImageRiskScanService(profile_store)
+        call = {"n": 0}
+
+        def fake_batch(batch, **kw):
+            call["n"] += 1
+            if call["n"] == 2:
+                raise RuntimeError("simulated API failure")
+            return (
+                [ImageRiskItem(p["id"], p["main_image"], "none", "") for p in batch],
+                0,
+            )
+
+        service._scan_single_batch = fake_batch
+        calls = []
+        _, stats, _all = service.scan_batch(
+            self._products(21), on_batch=lambda *a: calls.append(a)
+        )
+        assert len(calls) == 3  # 第 2 批失败仍继续第 3 批
+        assert calls[1][1] == 10  # 失败批 failed=10
+        assert calls[1][0] == []
+        assert stats.failed_count == 10
+        assert stats.checked_count == 11  # 批1 10 + 批3 1
+
+    def test_no_batch_callback_when_all_cached(self):
+        """全部缓存命中：不发 API、不回调。"""
+        service = self._service()
+        for p in self._products(5):
+            service._set_cached(
+                p["id"], p["main_image"],
+                ImageRiskItem(p["id"], p["main_image"], "none", ""),
+            )
+        calls = []
+        _, stats, _all = service.scan_batch(
+            self._products(5), on_batch=lambda *a: calls.append(a)
+        )
+        assert calls == []
+        assert stats.cached_count == 5
+
+    def test_batch_callback_with_partial_download_failure(self):
+        """下载失败计入 failed，但回调仍触发且 batch_results 为成功解析部分。"""
+        profile_store = MagicMock()
+        profile = MagicMock()
+        profile.api_url = "https://api.example.com/v1"
+        profile.model_name = "test-model"
+        profile.provider = "OpenAI"
+        profile_store.bound_profile.return_value = (profile, "test-key")
+        service = ImageRiskScanService(profile_store)
+        service._scan_single_batch = MagicMock(
+            return_value=(
+                [ImageRiskItem("1", "https://img.example/1.jpg", "none", "")],
+                1,  # 1 个下载失败
+            )
+        )
+        calls = []
+        service.scan_batch(self._products(2), on_batch=lambda *a: calls.append(a))
+        assert len(calls) == 1
+        assert calls[0][1] == 1  # batch_failed = 下载失败 + 解析缺失 = 1
+        assert len(calls[0][0]) == 1

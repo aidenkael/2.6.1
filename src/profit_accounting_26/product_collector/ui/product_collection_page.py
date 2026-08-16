@@ -22,7 +22,7 @@ from typing import Callable, List
 from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QBuffer, QEvent, QIODevice, QObject, Qt, QThread, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QImage, QPainter, QPixmap
+from PySide6.QtGui import QFontMetrics, QImage, QMouseEvent, QPainter, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
@@ -284,6 +284,147 @@ class KeywordSelectPopup(QWidget):
         self.close()
 
 
+# ── 风险标签辅助函数 ────────────────────────────────────────────
+
+# 需要清理的风险类型前缀
+_RISK_PREFIXES = (
+    "侵权风险｜",
+    "SHEIN规则风险｜",
+    "采集规则排除｜",
+)
+
+# 需要清理的来源描述前缀
+_SOURCE_PREFIXES = (
+    "标题包含",
+    "标题含有",
+    "标题明确为",
+    "标题出现",
+    "图片包含",
+    "图片出现",
+    "图片显示",
+    "图片中出现",
+    "图片明确显示",
+    "检测到",
+)
+
+
+def _risk_display_summary(reason: str) -> str:
+    """从完整 reason 中提取默认显示的核心信息。
+
+    去除风险类型前缀和来源描述前缀，保留核心 IP / 品牌 / 风险内容。
+    """
+    text = reason
+    # 去除风险类型前缀
+    for prefix in _RISK_PREFIXES:
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+            break
+    # 去除来源描述前缀
+    for prefix in _SOURCE_PREFIXES:
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+            break
+    return text.strip()
+
+
+def _tokenize(text: str) -> list[str]:
+    """将摘要文本拆成原子 token。
+
+    - 连续英文/数字/连字符/拉丁扩展字符 → 一个 token（Spider-Man, Pokémon, IT）
+    - 括号内容（含括号）→ 一个 token（（Marvel）, (IT)）
+    - 单个中文字符 → 一个 token
+    - 标点符号 → 各自独立 token
+    """
+    tokens: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        # 中文括号内容
+        if ch == "（":
+            j = text.find("）", i + 1)
+            if j != -1:
+                tokens.append(text[i : j + 1])
+                i = j + 1
+                continue
+        # 英文括号内容
+        if ch == "(":
+            j = text.find(")", i + 1)
+            if j != -1:
+                tokens.append(text[i : j + 1])
+                i = j + 1
+                continue
+        # 连续英文/数字/连字符/拉丁扩展字符（如 Pokémon 中的 é）
+        if _is_word_char(ch):
+            j = i
+            while j < n and _is_word_char(text[j]):
+                j += 1
+            tokens.append(text[i:j])
+            i = j
+            continue
+        # 单个字符（中文、标点等）
+        tokens.append(ch)
+        i += 1
+    return tokens
+
+
+def _is_word_char(ch: str) -> bool:
+    """判断字符是否属于英文单词字符（含拉丁扩展、连字符）。"""
+    if ch.isascii():
+        return ch.isalnum() or ch == "-"
+    # 拉丁扩展字符（如 é, ö, ñ 等）
+    cp = ord(ch)
+    if 0x00C0 <= cp <= 0x024F:
+        return True
+    return False
+
+
+def _wrap_risk_badge_text(text: str, font_metrics: QFontMetrics, max_width: int, max_lines: int = 3) -> str:
+    """基于 token 的贪心填充换行，最多 max_lines 行。
+
+    算法：
+    1. 将文本拆成原子 token（英文单词、括号内容、单字）；
+    2. 每行从左到右贪心加入 token，直到下一个 token 会超出宽度才换行；
+    3. 不因标点提前换行——先填满，再换行；
+    4. 超过 max_lines 行时截断，第三行只放能完整装下的 token；
+    5. 不显示省略号，不显示半截英文单词。
+    """
+    if not text:
+        return text
+
+    tokens = _tokenize(text)
+    lines: list[str] = []
+    token_idx = 0
+
+    while token_idx < len(tokens) and len(lines) < max_lines:
+        line_tokens: list[str] = []
+        line_width = 0
+
+        while token_idx < len(tokens):
+            token = tokens[token_idx]
+            token_width = font_metrics.horizontalAdvance(token)
+            # 计算加入此 token 后的行宽（token 间无额外间距）
+            new_width = line_width + token_width
+            if new_width > max_width and line_tokens:
+                # 下一个 token 会超出宽度，换行
+                break
+            line_tokens.append(token)
+            line_width = new_width
+            token_idx += 1
+
+        if line_tokens:
+            lines.append("".join(line_tokens))
+        else:
+            # 单个 token 就超出宽度（极长英文词），强制放入
+            if token_idx < len(tokens):
+                lines.append(tokens[token_idx])
+                token_idx += 1
+            else:
+                break
+
+    return "\n".join(lines)
+
+
 # ── 商品卡片 ──────────────────────────────────────────────────
 
 class ProductCard(QFrame):
@@ -347,22 +488,20 @@ class ProductCard(QFrame):
         self.lbl_badge.hide()
 
         # 标题风险 Overlay（绝对定位，不参与布局）
+        # 注意：不设置 WA_TransparentForMouseEvents，以便接收 Hover 事件显示 Tooltip
         self.lbl_title_risk = QLabel(self)
         self.lbl_title_risk.setObjectName("productCardTitleRisk")
-        self.lbl_title_risk.setWordWrap(True)
-        self.lbl_title_risk.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.lbl_title_risk.setWordWrap(False)
+        self.lbl_title_risk.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.lbl_title_risk.hide()
-        # 限制 Overlay 最大高度约为 3 行文字，防止长 reason 覆盖整个卡片
-        self.lbl_title_risk.setMaximumHeight(54)
 
         # 图片风险 Overlay（绝对定位，不参与布局）
+        # 注意：不设置 WA_TransparentForMouseEvents，以便接收 Hover 事件显示 Tooltip
         self.lbl_image_risk = QLabel(self)
         self.lbl_image_risk.setObjectName("productCardImageRisk")
-        self.lbl_image_risk.setWordWrap(True)
-        self.lbl_image_risk.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.lbl_image_risk.setWordWrap(False)
+        self.lbl_image_risk.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.lbl_image_risk.hide()
-        # 限制 Overlay 最大高度约为 3 行文字
-        self.lbl_image_risk.setMaximumHeight(54)
 
         # 标题风险和图片风险独立存储（新格式）
         self._title_risk_data: dict | None = None  # {"risk": "...", "reason": "..."}
@@ -372,7 +511,38 @@ class ProductCard(QFrame):
         self._detecting: bool = False
 
         self._network = network
+
+        # 风险标签需要接收 Hover 事件（已移除 WA_TransparentForMouseEvents），
+        # 但双击事件需要转发到卡片，以保留标题/图片的双击功能。
+        self.lbl_title_risk.installEventFilter(self)
+        self.lbl_image_risk.installEventFilter(self)
+
         self._load_image()
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt 命名)
+        """事件过滤器：将风险标签的双击事件转发到卡片。
+
+        风险标签需要接收 Hover 事件来显示 Tooltip，
+        但双击事件应转发到卡片以保留标题打开链接和图片搜图功能。
+        """
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            if obj in (self.lbl_title_risk, self.lbl_image_risk):
+                # 将事件坐标转换到卡片坐标系，转发给卡片的双击处理
+                pos = event.position().toPoint()
+                # 将标签坐标转换为卡片坐标
+                card_pos = obj.mapTo(self, pos)
+                # 构造新事件并转发
+                forward_event = QMouseEvent(
+                    QEvent.Type.MouseButtonDblClick,
+                    card_pos,
+                    Qt.MouseButton.LeftButton,
+                    Qt.MouseButton.LeftButton,
+                    Qt.KeyboardModifier.NoModifier,
+                )
+                # 直接调用卡片的双击处理
+                self.mouseDoubleClickEvent(forward_event)
+                return True
+        return super().eventFilter(obj, event)
 
     # ------------------------------------------------------------------
     # 对外状态
@@ -424,23 +594,52 @@ class ProductCard(QFrame):
     # -- 风险样式常量 --
     _RISK_STYLE_PLATFORM = (
         "background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;"
-        "border-radius:4px;padding:2px 6px;font-size:11px;"
+        "border-radius:4px;padding:4px 6px;font-size:11px;"
     )
     _RISK_STYLE_INFRINGEMENT = (
         "background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;"
-        "border-radius:4px;padding:2px 6px;font-size:11px;"
+        "border-radius:4px;padding:4px 6px;font-size:11px;"
     )
+    # 风险标签固定宽度：标题 145px，图片 160px
+    _TITLE_RISK_BADGE_WIDTH = 145
+    _IMAGE_RISK_BADGE_WIDTH = 160
+    # 风险标签固定行数
+    _RISK_BADGE_MAX_LINES = 3
+    # 风险标签水平方向 padding + border 总占用（padding 6px×2 + border 1px×2 = 14px）
+    _RISK_BADGE_H_CHROME = 14
+
+    def _badge_fixed_height(self) -> int:
+        """计算风险标签的固定高度（3 行文字 + padding + border）。"""
+        fm = QFontMetrics(self.lbl_title_risk.font())
+        line_height = fm.height()
+        # padding 4px top + 4px bottom = 8px；border 1px top + 1px bottom = 2px
+        chrome_v = 10
+        return line_height * self._RISK_BADGE_MAX_LINES + chrome_v
 
     def _refresh_risk_display(self) -> None:
         """分别更新标题风险和图片风险 Overlay。"""
+        badge_h = self._badge_fixed_height()
         # 标题风险 Overlay
         title = self._title_risk_data
         if title and title.get("risk") != "none":
             risk = title["risk"]
             reason = title.get("reason", "")
-            text = reason if reason else risk
-            self.lbl_title_risk.setText(text)
-            self.lbl_title_risk.setToolTip(reason)
+            summary = _risk_display_summary(reason) if reason else risk
+            # 按实际内容区域宽度换行（标签宽度 - padding - border），最多 3 行
+            fm = QFontMetrics(self.lbl_title_risk.font())
+            text_width = self._TITLE_RISK_BADGE_WIDTH - self._RISK_BADGE_H_CHROME
+            wrapped = _wrap_risk_badge_text(summary, fm, text_width, self._RISK_BADGE_MAX_LINES)
+            self.lbl_title_risk.setText(wrapped)
+            # 固定尺寸
+            self.lbl_title_risk.setFixedSize(self._TITLE_RISK_BADGE_WIDTH, badge_h)
+            # Hover 显示完整信息
+            risk_type_label = {
+                "infringement": "侵权风险",
+                "platform": "SHEIN规则风险",
+            }.get(risk, risk)
+            self.lbl_title_risk.setToolTip(
+                f"来源：标题检测\n类型：{risk_type_label}\n完整信息：{reason}"
+            )
             self.lbl_title_risk.setStyleSheet(
                 self._RISK_STYLE_INFRINGEMENT if risk == "infringement" else self._RISK_STYLE_PLATFORM
             )
@@ -453,9 +652,20 @@ class ProductCard(QFrame):
         if image and image.get("risk") != "none":
             risk = image["risk"]
             reason = image.get("reason", "")
-            text = reason if reason else risk
-            self.lbl_image_risk.setText(text)
-            self.lbl_image_risk.setToolTip(reason)
+            summary = _risk_display_summary(reason) if reason else risk
+            fm = QFontMetrics(self.lbl_image_risk.font())
+            text_width = self._IMAGE_RISK_BADGE_WIDTH - self._RISK_BADGE_H_CHROME
+            wrapped = _wrap_risk_badge_text(summary, fm, text_width, self._RISK_BADGE_MAX_LINES)
+            self.lbl_image_risk.setText(wrapped)
+            # 固定尺寸
+            self.lbl_image_risk.setFixedSize(self._IMAGE_RISK_BADGE_WIDTH, badge_h)
+            risk_type_label = {
+                "infringement": "侵权风险",
+                "platform": "SHEIN规则风险",
+            }.get(risk, risk)
+            self.lbl_image_risk.setToolTip(
+                f"来源：图片检测\n类型：{risk_type_label}\n完整信息：{reason}"
+            )
             self.lbl_image_risk.setStyleSheet(
                 self._RISK_STYLE_INFRINGEMENT if risk == "infringement" else self._RISK_STYLE_PLATFORM
             )
@@ -467,30 +677,26 @@ class ProductCard(QFrame):
         self._layout_risk_overlays()
 
     def _layout_risk_overlays(self) -> None:
-        """重新计算并设置两个风险 Overlay 的尺寸和位置。
+        """重新计算并设置两个风险 Overlay 的位置。
 
         在 resizeEvent() 和 _refresh_risk_display() 后调用，
         确保 Overlay 始终位于对应区域内。
-        高度由 setMaximumHeight(约两行) 约束，不 setFixedHeight，
-        每次 setText 后 adjustSize 都能按当前文字重新计算高度。
+        使用固定宽度和固定高度（3 行），位置不随内容变化。
         """
-        # 标题风险 Overlay：覆盖在标题区域内部，最大宽度 96%
+        badge_h = self._badge_fixed_height()
+        # 标题风险 Overlay：覆盖在标题区域内部左下角，固定 145px 宽
         title_geo = self.lbl_title.geometry()
-        max_w = int(title_geo.width() * 0.96)
-        self.lbl_title_risk.setMaximumWidth(max_w)
-        self.lbl_title_risk.adjustSize()
+        self.lbl_title_risk.setFixedSize(self._TITLE_RISK_BADGE_WIDTH, badge_h)
         self.lbl_title_risk.move(
             title_geo.left() + 4,
-            title_geo.bottom() - self.lbl_title_risk.height() - 2,
+            title_geo.bottom() - badge_h - 2,
         )
-        # 图片风险 Overlay：覆盖在图片区内部左下角，最大宽度 96%
+        # 图片风险 Overlay：覆盖在图片区内部左下角，固定 160px 宽
         img_geo = self.lbl_image.geometry()
-        max_img_w = int(img_geo.width() * 0.96)
-        self.lbl_image_risk.setMaximumWidth(max_img_w)
-        self.lbl_image_risk.adjustSize()
+        self.lbl_image_risk.setFixedSize(self._IMAGE_RISK_BADGE_WIDTH, badge_h)
         self.lbl_image_risk.move(
             img_geo.left() + 4,
-            img_geo.bottom() - self.lbl_image_risk.height() - 4,
+            img_geo.bottom() - badge_h - 4,
         )
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
@@ -824,6 +1030,13 @@ class ProductCollectionPage(QWidget):
         self._detect_snapshot: list[CandidateProduct] | None = None
         # 全部检测：标题阶段失败数量（供最终状态合并显示）
         self._detect_all_title_failed = 0
+        # 检测期间冻结的 KEEP 商品显示顺序（id），进入终态后清除再统一排序
+        self._detect_display_order: list[str] | None = None
+        # 本次检测批次进度统计（批次信号回主线程后累计）
+        self._batch_times: list[float] = []
+        self._detect_processed = 0
+        self._detect_risks = 0
+        self._detect_failed = 0
 
         # 容器尺寸变化时重排卡片
         self._container.installEventFilter(self)
@@ -1163,9 +1376,15 @@ class ProductCollectionPage(QWidget):
         if not image_url:
             self._notice(self, "提示", "当前商品没有可用图片。", level="warning")
             return
-        if self._image_search_thread is not None and self._image_search_thread.isRunning():
-            self._notice(self, "提示", "图片搜图正在进行，请稍候。", level="warning")
-            return
+        if self._image_search_thread is not None:
+            try:
+                running = self._image_search_thread.isRunning()
+            except RuntimeError:
+                # 旧线程 C++ 对象已被 deleteLater 销毁：视为已结束
+                running = False
+            if running:
+                self._notice(self, "提示", "图片搜图正在进行，请稍候。", level="warning")
+                return
         self._image_search_thread = QThread(self)
         self._image_search_worker = ImageSearchWorker(image_url)
         self._image_search_worker.moveToThread(self._image_search_thread)
@@ -1176,9 +1395,9 @@ class ProductCollectionPage(QWidget):
         self._image_search_worker.failed.connect(self._image_search_thread.quit)
         self._image_search_thread.finished.connect(self._image_search_worker.deleteLater)
         self._image_search_thread.finished.connect(self._image_search_thread.deleteLater)
-        self._image_search_thread.finished.connect(
-            lambda thread=self._image_search_thread: self._clear_image_search_task(thread)
-        )
+        # 清理槽绑定页面自身：finished 信号跨线程投递时若绑定 QThread 自身，
+        # 线程对象被 DeferredDelete 销毁后槽会丢失，导致引用残留（再次搜图崩溃）
+        self._image_search_thread.finished.connect(self._clear_image_search_task)
         self._image_search_thread.start()
 
     def _open_1688_result(self, result_url: str) -> None:
@@ -1187,11 +1406,17 @@ class ProductCollectionPage(QWidget):
     def _on_1688_image_search_failed(self, _message: str) -> None:
         self._notice(self, "提示", "1688 图片搜图失败。", level="warning")
 
-    def _clear_image_search_task(self, finished_thread: QThread) -> None:
-        """仅清理刚结束的搜图任务，允许下一次创建新的 worker/thread。"""
-        if self._image_search_thread is finished_thread:
-            self._image_search_thread = None
-            self._image_search_worker = None
+    def _clear_image_search_task(self) -> None:
+        """仅清理刚结束的搜图任务，允许下一次创建新的 worker/thread。
+
+        receiver 为页面自身（而非 QThread 对象），finished 信号跨线程投递时
+        即使线程对象已被 DeferredDelete 销毁，本槽仍能正常执行。
+        注意：finished 到达时 QThread/worker 的 C++ 对象可能已被 deleteLater
+        同步销毁（PySide6 事件处理时序竞争），因此本槽内禁止访问线程对象的
+        任何 C++ 成员（sender()/isRunning() 等），只做 Python 引用清理。
+        """
+        self._image_search_thread = None
+        self._image_search_worker = None
 
     def load_results(self, products: list[CandidateProduct]) -> None:
         """一次性载入采集结果并构建卡片墙。"""
@@ -1249,6 +1474,14 @@ class ProductCollectionPage(QWidget):
             for product_id, card in self._cards.items()
             if self._states[product_id] == KEEP
         ]
+        # 检测期间冻结显示顺序：批次结果逐步写入 / 窗口 resize 都不重排
+        order = self._detect_display_order
+        if order:
+            by_id = {card.product.product_id: card for card in visible}
+            ordered = [by_id[pid] for pid in order if pid in by_id]
+            seen = {c.product.product_id for c in ordered}
+            ordered.extend(c for c in visible if c.product.product_id not in seen)
+            return ordered
         # 风险商品置顶：infringement > platform > none；
         # 稳定排序 + self._cards 插入序（即原始采集顺序），同级不漂移
         visible.sort(key=lambda card: -self._card_risk_rank(card))
@@ -1478,8 +1711,12 @@ class ProductCollectionPage(QWidget):
     def _update_clear_button(self) -> None:
         """清空本次按钮：有商品且非检测/采集中才可用。"""
         collecting = self._thread is not None and self._thread.isRunning()
+        risk_running = (
+            (self._title_risk_thread is not None and self._title_risk_thread.isRunning())
+            or (self._image_risk_thread is not None and self._image_risk_thread.isRunning())
+        )
         self.btn_clear_all.setEnabled(
-            bool(self._products) and not self._detecting_active and not collecting
+            bool(self._products) and not self._detecting_active and not collecting and not risk_running
         )
 
     def _on_clear_all(self) -> None:
@@ -1532,6 +1769,11 @@ class ProductCollectionPage(QWidget):
         self._detect_all_targets = None
         self._detect_all_phase = None
         self._detect_all_title_failed = 0
+        self._detect_display_order = None
+        self._batch_times = []
+        self._detect_processed = 0
+        self._detect_risks = 0
+        self._detect_failed = 0
         # 图片检测运行期缓存（标题检测无运行期缓存）
         if self._image_risk_service is not None:
             self._image_risk_service.clear_cache()
@@ -1557,6 +1799,149 @@ class ProductCollectionPage(QWidget):
         self.btn_detect_all.setEnabled(has_products and has_title_api and has_image_api and not self._detecting_active)
 
     # ------------------------------------------------------------------
+    # 批次进度反馈（批次 Signal 回主线程后执行）
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _format_eta(seconds: float) -> str:
+        """把秒数格式化为中文约数：'约 55秒' / '约 1分20秒' / '约 2分'。"""
+        total = max(int(round(seconds)), 1)
+        if total < 60:
+            return f"约 {total}秒"
+        minutes, secs = divmod(total, 60)
+        if secs:
+            return f"约 {minutes}分{secs}秒"
+        return f"约 {minutes}分"
+
+    def _update_detect_status(
+        self,
+        prefix: str,
+        processed: int,
+        total: int,
+        risks: int,
+        failed: int,
+        batch_index: int,
+        total_batches: int,
+        eta_label: str,
+    ) -> None:
+        """更新中央状态栏：已完成/总数｜风险｜失败｜预计剩余（无新控件）。"""
+        parts = [f"{prefix} {processed}/{total}", f"风险 {risks}", f"失败 {failed}"]
+        # 初始(0,0)或进行中批次显示 ETA；最后一批完成后不再显示
+        if batch_index < total_batches or total_batches == 0:
+            if not self._batch_times:
+                parts.append(f"{eta_label}：计算中…")
+            else:
+                avg = sum(self._batch_times) / len(self._batch_times)
+                remaining = max(total_batches - batch_index, 0)
+                # _format_eta 已带“约”，外层不再重复拼接，避免“约 约”
+                parts.append(f"{eta_label}{self._format_eta(avg * remaining)}")
+        self.lbl_status.setText("｜".join(parts))
+
+    def _apply_batch(
+        self,
+        results: list,
+        failed: int,
+        batch_index: int,
+        total_batches: int,
+        elapsed_ms: float,
+        prefix: str,
+        eta_label: str,
+        kind: str,
+    ) -> None:
+        """应用一个批次成功结果到快照卡片，并累计批次进度。
+
+        kind: "title" | "image"，决定写入标题 / 图片风险。
+        失败 / 缺失商品不覆盖旧状态，只计入失败数；已处理含成功 + 失败。
+        """
+        snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
+        applied = 0
+        batch_risks = 0
+        for r in results:
+            pid = r.product_id
+            if pid not in snapshot_ids:
+                continue
+            card = self._cards.get(pid)
+            if card is None:
+                continue
+            if kind == "image":
+                card.set_image_risk_data(r.risk, r.reason)
+            else:
+                card.set_title_risk_data(r.risk, r.reason)
+            applied += 1
+            if r.risk != "none":
+                batch_risks += 1
+        self._batch_times.append(elapsed_ms / 1000.0)
+        self._detect_processed += applied + failed
+        self._detect_risks += batch_risks
+        self._detect_failed += failed
+        self._update_detect_status(
+            prefix, self._detect_processed, len(snapshot_ids),
+            self._detect_risks, self._detect_failed,
+            batch_index, total_batches, eta_label,
+        )
+
+    def _preapply_image_cache(self, targets: list[CandidateProduct]) -> tuple[int, int]:
+        """检测开始前预应用图片运行期缓存并统计缺图。
+
+        返回 (missing_count, cache_hits)。
+        缺图：计入失败；缓存命中：立即写卡片并计入已处理。
+        仅接受真实 ImageRiskItem 缓存条目，避免把异常 / mock 返回值当结果。
+        """
+        from ..image_risk_scan import ImageRiskItem
+
+        service = self._image_risk_service
+        if service is None:
+            return 0, 0
+        missing = 0
+        hits = 0
+        for p in targets:
+            card = self._cards.get(p.product_id)
+            if card is None:
+                continue
+            img = str(p.main_image or "").strip()
+            if not img:
+                missing += 1
+                continue
+            cached = service.get_cached(p.product_id, img)
+            if not isinstance(cached, ImageRiskItem):
+                continue
+            card.set_image_risk_data(cached.risk, cached.reason)
+            hits += 1
+            if cached.risk != "none":
+                self._detect_risks += 1
+        return missing, hits
+
+    def _on_title_batch_result(self, results, failed, batch_index, total_batches, elapsed_ms) -> None:
+        """标题检测：单批完成 → 立即写卡片 + 更新状态栏。"""
+        self._apply_batch(results, failed, batch_index, total_batches, elapsed_ms,
+                          "标题检测", "预计剩余", "title")
+
+    def _on_image_batch_result(self, results, failed, batch_index, total_batches, elapsed_ms) -> None:
+        """图片检测：单批完成 → 立即写卡片 + 更新状态栏。"""
+        self._apply_batch(results, failed, batch_index, total_batches, elapsed_ms,
+                          "图片检测", "预计剩余", "image")
+
+    def _on_detect_all_title_batch_result(self, results, failed, batch_index, total_batches, elapsed_ms) -> None:
+        """全部检测·标题阶段：单批完成 → 立即写卡片 + 更新状态栏。"""
+        self._apply_batch(results, failed, batch_index, total_batches, elapsed_ms,
+                          "全部检测·标题", "预计本阶段剩余", "title")
+
+    def _on_detect_all_image_batch_result(self, results, failed, batch_index, total_batches, elapsed_ms) -> None:
+        """全部检测·图片阶段：单批完成 → 立即写卡片 + 更新状态栏。"""
+        self._apply_batch(results, failed, batch_index, total_batches, elapsed_ms,
+                          "全部检测·图片", "预计本阶段剩余", "image")
+
+    def _on_title_risk_thread_cleanup(self) -> None:
+        """标题风险检测线程结束：释放引用并刷新清空按钮。"""
+        self._title_risk_thread = None
+        self._update_clear_button()
+
+    def _on_image_risk_thread_cleanup(self) -> None:
+        """图片风险检测线程结束：释放引用并刷新清空按钮。"""
+        self._image_risk_thread = None
+        self._update_clear_button()
+
+    # ------------------------------------------------------------------
     # 检测只读模式
     # ------------------------------------------------------------------
 
@@ -1576,6 +1961,15 @@ class ProductCollectionPage(QWidget):
                 p for p in self._products
                 if self._states.get(p.product_id) == KEEP
             ]
+        # 冻结当前 KEEP 商品显示顺序：检测期间不因批次结果 / 窗口 resize 重排
+        # 先清空再取，确保取到的是真实排序后的当前顺序
+        self._detect_display_order = None
+        self._detect_display_order = [c.product.product_id for c in self._visible_cards()]
+        # 本次检测批次进度统计
+        self._batch_times = []
+        self._detect_processed = 0
+        self._detect_risks = 0
+        self._detect_failed = 0
         # 禁用所有非检测操作按钮
         for btn in (
             self.btn_select_all, self.btn_keep_only, self.btn_remove_selected,
@@ -1590,9 +1984,10 @@ class ProductCollectionPage(QWidget):
             card.set_detecting(True)
 
     def _exit_detecting(self) -> None:
-        """退出检测只读模式：恢复所有操作。"""
+        """退出检测只读模式：恢复所有操作，并清除冻结显示顺序。"""
         self._detecting_active = False
         self._detect_snapshot = None
+        self._detect_display_order = None
         # 恢复卡片级鼠标事件
         for card in self._cards.values():
             card.set_detecting(False)
@@ -1687,11 +2082,9 @@ class ProductCollectionPage(QWidget):
         self._start_title_risk_check(targets)
 
     def _start_title_risk_check(self, targets: list[CandidateProduct]) -> None:
-        """启动标题风险检测。"""
+        """启动标题风险检测（按 20/批 顺序执行，批次结果逐批回 UI）。"""
         self._enter_detecting(targets)
-        self.lbl_status.setText(
-            "<span style='color:#3a7bc8;font-weight:600;'>正在检测标题…</span>"
-        )
+        self._update_detect_status("标题检测", 0, len(targets), 0, 0, 0, 0, "预计剩余")
         self.btn_title_check.setText("取消标题检测")
         self.btn_title_check.setEnabled(True)
         self.btn_title_check.setStyleSheet("background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;border-radius:6px;")
@@ -1707,9 +2100,12 @@ class ProductCollectionPage(QWidget):
         self._title_risk_thread.started.connect(self._title_risk_worker.run)
         self._title_risk_worker.finished.connect(self._on_title_risk_finished)
         self._title_risk_worker.finished.connect(self._title_risk_thread.quit)
+        batch_signal = getattr(self._title_risk_worker, "batch_result", None)
+        if batch_signal is not None:
+            batch_signal.connect(self._on_title_batch_result)
         self._title_risk_thread.finished.connect(self._title_risk_worker.deleteLater)
         self._title_risk_thread.finished.connect(self._title_risk_thread.deleteLater)
-        self._title_risk_thread.finished.connect(lambda: setattr(self, '_title_risk_thread', None))
+        self._title_risk_thread.finished.connect(self._on_title_risk_thread_cleanup)
         self._title_risk_thread.start()
 
     def _cancel_current_detect(self) -> None:
@@ -1720,7 +2116,7 @@ class ProductCollectionPage(QWidget):
         )
 
     def _on_title_risk_finished(self, risks: list, error: str) -> None:
-        """标题风险检测完成回调。"""
+        """标题风险检测完成回调（终态：应用结果 → 解冻 → 排序一次）。"""
         # 恢复按钮文字和连接
         self.btn_title_check.setText("标题检测")
         self.btn_title_check.setStyleSheet("")
@@ -1730,13 +2126,13 @@ class ProductCollectionPage(QWidget):
             pass
         self.btn_title_check.clicked.connect(self._on_title_risk_check)
 
+        snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
         if error:
             self.lbl_status.setText("标题检测失败")
             self._notice(self, "标题风险检测失败", error, level="error")
         else:
-            # 无论是否取消，先应用本次成功结果
+            # 无论是否取消，先应用本次成功结果（批次已应用，此处幂等兜底）
             risk_map = {r.product_id: r for r in risks}
-            snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
             for pid, card in self._cards.items():
                 if pid not in snapshot_ids:
                     continue
@@ -1748,27 +2144,31 @@ class ProductCollectionPage(QWidget):
             title_failed = len(snapshot_ids - set(risk_map))
             # 根据取消状态显示不同消息
             if self._cancel_requested:
-                self.lbl_status.setText("检测已取消，已完成部分结果")
+                self.lbl_status.setText(
+                    f"检测已取消 · 已完成 {self._detect_processed}/{len(snapshot_ids)} · 已按现有结果排序"
+                )
+            elif title_failed > 0 and not risk_map:
+                self.lbl_status.setText("检测失败 · 已按现有有效结果排序")
+                self._notice(self, "标题风险检测完成",
+                             f"共处理 {len(snapshot_ids)} 个商品，{title_failed} 个失败，未获得新的有效结果。")
+            elif title_failed > 0:
+                self.lbl_status.setText(
+                    "检测完成 · "
+                    f"<span style='color:#C62828;font-weight:600;'>失败 {title_failed} 个</span>"
+                    " · 风险商品已置顶"
+                )
+                self._notice(self, "标题风险检测完成",
+                             f"共处理 {len(snapshot_ids)} 个商品，{title_failed} 个失败，发现 {risk_count} 个风险商品。")
             else:
-                if title_failed > 0:
-                    self.lbl_status.setText(
-                        "检测完成 · "
-                        f"<span style='color:#C62828;font-weight:600;'>失败 {title_failed} 个</span>"
-                        " · 风险商品已置顶"
-                    )
-                else:
-                    self.lbl_status.setText("检测完成 · 风险商品已置顶")
-                if title_failed > 0:
-                    self._notice(self, "标题风险检测完成",
-                                 f"共处理 {len(snapshot_ids)} 个商品，{title_failed} 个失败，发现 {risk_count} 个风险商品。")
-                elif risk_count > 0:
+                self.lbl_status.setText("检测完成 · 风险商品已置顶")
+                if risk_count > 0:
                     self._notice(self, "标题风险检测完成", f"共检测 {len(risks)} 个商品，发现 {risk_count} 个风险商品。")
                 else:
                     self._notice(self, "标题风险检测完成", "未发现风险商品。")
-            # 全部标题请求结束：写入成功结果后综合排序一次并回到顶部
-            self._sort_risk_pinned()
 
+        # 终态统一：先解冻（清除冻结显示顺序），再按当前有效结果排序一次
         self._exit_detecting()
+        self._sort_risk_pinned()
 
     # ------------------------------------------------------------------
     # 图片检测
@@ -1788,10 +2188,15 @@ class ProductCollectionPage(QWidget):
         self._start_image_risk_check(targets)
 
     def _start_image_risk_check(self, targets: list[CandidateProduct]) -> None:
-        """启动图片风险检测。"""
+        """启动图片风险检测（保持 10/批，批次结果逐批回 UI）。"""
         self._enter_detecting(targets)
-        self.lbl_status.setText(
-            "<span style='color:#3a7bc8;font-weight:600;'>正在检测图片…</span>"
+        # 预应用运行期缓存 + 统计缺图，进度从实际剩余 API 商品开始
+        missing, hits = self._preapply_image_cache(targets)
+        self._detect_processed += missing + hits
+        self._detect_failed += missing
+        self._update_detect_status(
+            "图片检测", self._detect_processed, len(targets),
+            self._detect_risks, self._detect_failed, 0, 0, "预计剩余",
         )
         self.btn_infringement_check.setText("取消图片检测")
         self.btn_infringement_check.setEnabled(True)
@@ -1814,13 +2219,16 @@ class ProductCollectionPage(QWidget):
         self._image_risk_thread.started.connect(self._image_risk_worker.run)
         self._image_risk_worker.finished.connect(self._on_image_risk_finished)
         self._image_risk_worker.finished.connect(self._image_risk_thread.quit)
+        batch_signal = getattr(self._image_risk_worker, "batch_result", None)
+        if batch_signal is not None:
+            batch_signal.connect(self._on_image_batch_result)
         self._image_risk_thread.finished.connect(self._image_risk_worker.deleteLater)
         self._image_risk_thread.finished.connect(self._image_risk_thread.deleteLater)
-        self._image_risk_thread.finished.connect(lambda: setattr(self, '_image_risk_thread', None))
+        self._image_risk_thread.finished.connect(self._on_image_risk_thread_cleanup)
         self._image_risk_thread.start()
 
     def _on_image_risk_finished(self, risks: list, stats: dict, error: str) -> None:
-        """图片风险检测完成回调。"""
+        """图片风险检测完成回调（终态：应用结果 → 解冻 → 排序一次）。"""
         # 恢复按钮文字和连接
         self.btn_infringement_check.setText("图片检测")
         self.btn_infringement_check.setStyleSheet("")
@@ -1830,14 +2238,14 @@ class ProductCollectionPage(QWidget):
             pass
         self.btn_infringement_check.clicked.connect(self._on_image_risk_check)
 
+        snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
         if error:
             self.lbl_status.setText("图片检测失败")
             self._notice(self, "图片风险检测失败", error, level="error")
         else:
-            # 无论是否取消，先应用本次成功结果（all_checked 中的成功商品）
+            # 无论是否取消，先应用本次成功结果（批次已应用，此处幂等兜底）
             all_checked = stats.get("all_checked", [])
             checked_map = {r.product_id: r for r in all_checked}
-            snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
             for pid, card in self._cards.items():
                 if pid not in snapshot_ids:
                     continue
@@ -1848,24 +2256,33 @@ class ProductCollectionPage(QWidget):
             failed = stats.get("failed_count", 0)
             # 根据取消状态显示不同消息
             if self._cancel_requested:
-                self.lbl_status.setText("检测已取消，已完成部分结果")
+                self.lbl_status.setText(
+                    f"检测已取消 · 已完成 {self._detect_processed}/{len(snapshot_ids)} · 已按现有结果排序"
+                )
+            elif failed > 0 and not all_checked and stats.get("cached_count", 0) == 0:
+                self.lbl_status.setText("检测失败 · 已按现有有效结果排序")
+            elif failed > 0:
+                self.lbl_status.setText(
+                    "检测完成 · "
+                    f"<span style='color:#C62828;font-weight:600;'>失败 {failed} 个</span>"
+                    " · 风险商品已置顶"
+                )
             else:
-                if failed > 0:
-                    self.lbl_status.setText(
-                        "检测完成 · "
-                        f"<span style='color:#C62828;font-weight:600;'>失败 {failed} 个</span>"
-                        " · 风险商品已置顶"
-                    )
-                else:
-                    self.lbl_status.setText("检测完成 · 风险商品已置顶")
-                if risk_count > 0:
-                    self._notice(self, "图片风险检测完成", f"共处理 {stats.get('requested_count', 0)} 个商品，发现 {risk_count} 个风险商品。")
-                else:
-                    self._notice(self, "图片风险检测完成", "未发现风险商品。")
-            # 全部图片批次结束：写入成功结果后综合排序一次并回到顶部
-            self._sort_risk_pinned()
+                self.lbl_status.setText("检测完成 · 风险商品已置顶")
+            if not self._cancel_requested and failed == 0 and risk_count > 0:
+                self._notice(self, "图片风险检测完成", f"共处理 {stats.get('requested_count', 0)} 个商品，发现 {risk_count} 个风险商品。")
+            elif not self._cancel_requested and failed == 0:
+                self._notice(self, "图片风险检测完成", "未发现风险商品。")
+            elif not self._cancel_requested and failed > 0 and all_checked:
+                self._notice(self, "图片风险检测完成",
+                             f"共处理 {stats.get('requested_count', 0)} 个商品，{failed} 个失败，发现 {risk_count} 个风险商品。")
+            elif not self._cancel_requested and failed > 0 and not all_checked and stats.get("cached_count", 0) == 0:
+                self._notice(self, "图片风险检测完成",
+                             f"共处理 {stats.get('requested_count', 0)} 个商品，{failed} 个失败，未获得新的有效结果。")
 
+        # 终态统一：先解冻（清除冻结显示顺序），再按当前有效结果排序一次
         self._exit_detecting()
+        self._sort_risk_pinned()
 
     # ------------------------------------------------------------------
     # 全部检测（标题 + 图片顺序执行）
@@ -1891,11 +2308,9 @@ class ProductCollectionPage(QWidget):
         self._start_title_risk_check_for_all(targets)
 
     def _start_title_risk_check_for_all(self, targets: list[CandidateProduct]) -> None:
-        """全部检测的标题阶段。"""
+        """全部检测的标题阶段（20/批，阶段结束不断开冻结直接进图片阶段）。"""
         self._enter_detecting(targets)
-        self.lbl_status.setText(
-            "<span style='color:#3a7bc8;font-weight:600;'>正在检测标题…</span>"
-        )
+        self._update_detect_status("全部检测·标题", 0, len(targets), 0, 0, 0, 0, "预计本阶段剩余")
         self.btn_detect_all.setText("取消全部检测")
         self.btn_detect_all.setEnabled(True)
         self.btn_detect_all.setStyleSheet("background:#FFF4E5;color:#C77600;border:1px solid #FFD59E;border-radius:6px;")
@@ -1911,23 +2326,31 @@ class ProductCollectionPage(QWidget):
         self._title_risk_thread.started.connect(self._title_risk_worker.run)
         self._title_risk_worker.finished.connect(self._on_detect_all_title_finished)
         self._title_risk_worker.finished.connect(self._title_risk_thread.quit)
+        batch_signal = getattr(self._title_risk_worker, "batch_result", None)
+        if batch_signal is not None:
+            batch_signal.connect(self._on_detect_all_title_batch_result)
         self._title_risk_thread.finished.connect(self._title_risk_worker.deleteLater)
         self._title_risk_thread.finished.connect(self._title_risk_thread.deleteLater)
-        self._title_risk_thread.finished.connect(lambda: setattr(self, '_title_risk_thread', None))
+        self._title_risk_thread.finished.connect(self._on_title_risk_thread_cleanup)
         self._title_risk_thread.start()
 
     def _on_detect_all_title_finished(self, risks: list, error: str) -> None:
-        """全部检测的标题阶段完成。"""
+        """全部检测的标题阶段完成。
+
+        标题阶段结束：不排序、不解冻，直接进入图片阶段（除非 error / 用户取消）。
+        """
+        snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
         if error:
             self.lbl_status.setText("标题检测失败")
             self._notice(self, "标题风险检测失败", error, level="error")
             self._restore_detect_all_button()
+            # 终态统一：先解冻再排序一次
             self._exit_detecting()
+            self._sort_risk_pinned()
             return
 
-        # 更新标题风险
+        # 更新标题风险（批次已应用，此处幂等兜底）
         risk_map = {r.product_id: r for r in risks}
-        snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
         for pid, card in self._cards.items():
             if pid not in snapshot_ids:
                 continue
@@ -1939,17 +2362,30 @@ class ProductCollectionPage(QWidget):
 
         # 检查取消
         if self._cancel_requested:
-            self.lbl_status.setText("检测已取消，已完成部分结果")
+            self.lbl_status.setText(
+                f"检测已取消 · 已完成 {self._detect_processed}/{len(snapshot_ids)} · 已按现有结果排序"
+            )
             self._restore_detect_all_button()
+            # 终态统一：先解冻再排序一次
             self._exit_detecting()
+            self._sort_risk_pinned()
             return
 
-        # 继续图片检测阶段
+        # 继续图片检测阶段（保持冻结，不排序、不解冻、不重建卡片）
         self._detect_all_phase = "image"
-        self.lbl_status.setText(
-            "<span style='color:#3a7bc8;font-weight:600;'>正在检测图片…</span>"
-        )
+        # 重置阶段进度统计（标题失败数保留供最终合并）
+        self._batch_times = []
+        self._detect_processed = 0
+        self._detect_risks = 0
+        self._detect_failed = 0
         targets = self._detect_all_targets or []
+        missing, hits = self._preapply_image_cache(targets)
+        self._detect_processed += missing + hits
+        self._detect_failed += missing
+        self._update_detect_status(
+            "全部检测·图片", self._detect_processed, len(targets),
+            self._detect_risks, self._detect_failed, 0, 0, "预计本阶段剩余",
+        )
         products = [
             {"id": p.product_id, "title": p.title, "main_image": p.main_image}
             for p in targets
@@ -1964,21 +2400,24 @@ class ProductCollectionPage(QWidget):
         self._image_risk_thread.started.connect(self._image_risk_worker.run)
         self._image_risk_worker.finished.connect(self._on_detect_all_image_finished)
         self._image_risk_worker.finished.connect(self._image_risk_thread.quit)
+        batch_signal = getattr(self._image_risk_worker, "batch_result", None)
+        if batch_signal is not None:
+            batch_signal.connect(self._on_detect_all_image_batch_result)
         self._image_risk_thread.finished.connect(self._image_risk_worker.deleteLater)
         self._image_risk_thread.finished.connect(self._image_risk_thread.deleteLater)
-        self._image_risk_thread.finished.connect(lambda: setattr(self, '_image_risk_thread', None))
+        self._image_risk_thread.finished.connect(self._on_image_risk_thread_cleanup)
         self._image_risk_thread.start()
 
     def _on_detect_all_image_finished(self, risks: list, stats: dict, error: str) -> None:
-        """全部检测的图片阶段完成。"""
+        """全部检测的图片阶段完成（终态：应用结果 → 解冻 → 综合排序一次）。"""
+        snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
         if error:
             self.lbl_status.setText("图片检测失败")
             self._notice(self, "图片风险检测失败", error, level="error")
         else:
-            # 无论是否取消，先应用本次成功结果
+            # 无论是否取消，先应用本次成功结果（批次已应用，此处幂等兜底）
             all_checked = stats.get("all_checked", [])
             checked_map = {r.product_id: r for r in all_checked}
-            snapshot_ids = {p.product_id for p in (self._detect_snapshot or self._get_keep_products())}
             for pid, card in self._cards.items():
                 if pid not in snapshot_ids:
                     continue
@@ -1987,23 +2426,31 @@ class ProductCollectionPage(QWidget):
                     card.set_image_risk_data(item.risk, item.reason)
 
             failed = stats.get("failed_count", 0)
+            title_failed = getattr(self, "_detect_all_title_failed", 0)
             # 根据取消状态和失败数量显示不同消息（标题失败 + 图片失败合并为一条）
             if self._cancel_requested:
-                self.lbl_status.setText("检测已取消，已完成部分结果")
+                self.lbl_status.setText(
+                    f"检测已取消 · 已完成 {self._detect_processed}/{len(snapshot_ids)} · 已按现有结果排序"
+                )
             else:
-                title_failed = getattr(self, "_detect_all_title_failed", 0)
                 parts = []
                 if title_failed > 0:
                     parts.append(f"标题失败 {title_failed} 个")
                 if failed > 0:
                     parts.append(f"图片失败 {failed} 个")
-                parts.append("风险商品已置顶")
-                self.lbl_status.setText("检测完成 · " + " · ".join(parts))
-            # 两种结果全部处理完成：综合风险只排序一次并回到顶部
-            self._sort_risk_pinned()
+                if not parts:
+                    self.lbl_status.setText("检测完成 · 风险商品已置顶")
+                else:
+                    parts.append("风险商品已置顶")
+                    self.lbl_status.setText("检测完成 · " + " · ".join(parts))
+                if not self._cancel_requested and (title_failed > 0 or failed > 0):
+                    self._notice(self, "风险检测完成",
+                                 f"标题失败 {title_failed} 个，图片失败 {failed} 个。")
 
         self._restore_detect_all_button()
+        # 终态统一：先解冻（清除冻结显示顺序），再综合排序一次并回到顶部
         self._exit_detecting()
+        self._sort_risk_pinned()
 
     def _restore_detect_all_button(self) -> None:
         """恢复全部检测按钮状态。"""
@@ -2023,6 +2470,9 @@ class _TitleRiskWorker(QObject):
     """标题风险检测后台线程。"""
 
     finished = Signal(list, str)  # (risks, error)
+    # 每批完成：
+    # (batch_results, batch_failed, batch_index, total_batches, elapsed_ms)
+    batch_result = Signal(list, int, int, int, float)
 
     def __init__(self, service, titles: list, *, cancel_requested: callable | None = None) -> None:
         super().__init__()
@@ -2041,13 +2491,21 @@ class _TitleRiskWorker(QObject):
                 product_risk_log.title_scan_cancelled()
                 cancelled_logged = True
 
+        def emit_batch(results, failed, batch_index, total_batches, elapsed_ms) -> None:
+            """批次结果跨线程转发到 UI 主线程（不直接碰 QWidget）。"""
+            self.batch_result.emit(results, failed, batch_index, total_batches, elapsed_ms)
+
         try:
-            # 标题检测是一次性批量请求，取消在请求发送前检查
+            # 标题检测分批次顺序执行，取消在批次开始前检查
             if self._cancel_requested and self._cancel_requested():
                 log_cancel_once()
                 self.finished.emit([], "")
                 return
-            risks = self._service.scan(self._titles)
+            risks = self._service.scan(
+                self._titles,
+                cancel_requested=self._cancel_requested,
+                on_batch=emit_batch,
+            )
             if self._cancel_requested and self._cancel_requested():
                 # 请求进行期间用户点击取消：请求自然完成，但取消行为必须记录
                 log_cancel_once()
@@ -2064,6 +2522,9 @@ class _ImageRiskWorker(QObject):
     """图片风险检测后台线程。"""
 
     finished = Signal(list, dict, str)  # (risky_items, stats_dict, error)
+    # 每批完成：
+    # (batch_results, batch_failed, batch_index, total_batches, elapsed_ms)
+    batch_result = Signal(list, int, int, int, float)
 
     def __init__(self, service, products: list, *, force_refresh: bool = False,
                  cancel_requested: callable | None = None) -> None:
@@ -2075,10 +2536,15 @@ class _ImageRiskWorker(QObject):
 
     @Slot()
     def run(self) -> None:
+        def emit_batch(results, failed, batch_index, total_batches, elapsed_ms) -> None:
+            """批次结果跨线程转发到 UI 主线程（不直接碰 QWidget）。"""
+            self.batch_result.emit(results, failed, batch_index, total_batches, elapsed_ms)
+
         try:
             risky_items, stats_obj, all_checked = self._service.scan_batch(
                 self._products, force_refresh=self._force_refresh,
                 cancel_requested=self._cancel_requested,
+                on_batch=emit_batch,
             )
             stats = {
                 "requested_count": stats_obj.requested_count,
