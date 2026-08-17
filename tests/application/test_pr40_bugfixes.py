@@ -79,7 +79,7 @@ class TestPromptV17:
         return RecognitionService._prompt(1, include_json_shape=True)
 
     def test_prompt_version_is_v17(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.8"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.9"
 
     def test_prompt_lighter_than_v16(self):
         """v1.8 prompt 文本部分不含旧版冗长数量规则和具体示例。

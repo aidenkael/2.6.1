@@ -93,7 +93,7 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-visual-v1.8"
+    PROMPT_VERSION = "2.6.1-visual-v1.9"
     RESPONSE_SCHEMA = {
         "type": "object",
         "additionalProperties": False,
@@ -217,30 +217,24 @@ class RecognitionService:
     def _prompt(cls, image_count: int, *, include_json_shape: bool = True) -> str:
         prompt = f"""跨境电商商品图片识别助手。本次共 {image_count} 张图片。
 
-职责：商品标题、页面事实、裸品估算、数量判断、发货判断。不计算费用或规则。
+职责：识别商品、读取页面事实、估算裸品、判断数量、整体判断发货。不计算费用。
 
 1. product_name：简短、规范、可搜索。
 
-2. observed：只读页面/图片明确事实（价格、页面运费、裸品长宽高、裸品重量）；看不清返回 null，禁止猜测。
+2. observed：只读取图片/页面明确事实（商品价格、页面/国内运费、裸尺寸、裸重）；看不清返回 null，禁止猜测。
 
-3. bare_estimate：页面无明确裸品尺寸/重量时合理估算（observed=页面事实，bare_estimate=AI推测，必须区分）。
+3. bare_estimate：observed 缺失时合理估算裸品长宽高/裸重（observed=页面事实，bare_estimate=AI推测，必须区分）。
 
-4. quantity：先理解一个销售单位包含什么，再判断当前购买数量。
-   purchase_quantity 是实际购买的销售单位数量（非库存/销量/MOQ/SKU选项数）。
-   无法确认时：shipment 按 1 个销售单位估算，quantity_source 填 assumed/unknown。
+4. quantity：先理解一个销售单位包含什么，再判断购买多少销售单位（purchase_quantity）。主图多件不能直接等于套装；库存/销量/MOQ/SKU数量不能当购买数量。无法确认时：shipment 按 1 个销售单位估算，quantity_source 填 assumed/unknown。
 
-5. shipment：整体判断实际交给物流时的长宽高、总重量、物理形态+处理方式+包装方式（如"可折叠；袋装发货"）。
-   禁止：裸尺寸×数量、机械放大 L/W/H、固定压缩率、时效/包邮/货代/CAL/体积重/利润。
+5. shipment（重点）：基于图片、页面事实、商品材质与结构、裸品、数量，以及正常低成本电商仓库的实际发货行为，直接整体判断真实打包员最可能采取什么正常处理方式，并给出处理后的长宽高、总重量和包装/运输状态。
+   在两个极端之间正常判断：不过度保形（不无依据塞满填充物、纸箱完全保形），也不无依据做损伤商品的极端压缩。
+   目标是"正常真实仓库最可能怎么发"，不是"最安全怎么发"，也不是"最极限省体积怎么发"。
+   shipment.state 直接写最可能行为，同时描述主要物理形态、处理方式与包装方式，例如：自然压平后袋装、轻度压缩袋装、自然折叠后袋装、保持主体形状后袋装、保持形状后箱装。
+   禁止：发货时效、包邮、货代、CAL、体积重、利润。禁止裸尺寸×数量、机械放大 L/W/H、固定压缩率。
 
-6. structure（有图片/页面证据才填，无证据 null）：
-   rigidity: unknown / soft / semi_rigid / hard
-   foldability: unknown / none / limited / good
-   compressibility: unknown / none / limited / good
-   packaging_state_hint: unknown / full_flat_fold / strong_compression / moderate_compression / shape_retained
-   requires_shape_retention: true / false / null
-   packing_actions: 仅允许 flat_fold / roll / coil / compress / nest / disassemble / retain_shape
-   has_hard_bottom / has_hard_backboard / has_frame / has_rigid_insert / retail_box_visible / hard_card_visible: true / false / null
-   field_evidence：硬结构/保形判断的证据定位（图序号+区域+原文）。
+6. structure（辅助观察，有明确证据才记录，无证据 null/unknown）：rigidity（soft/semi_rigid/hard）、foldability、compressibility、packaging_state_hint、requires_shape_retention、packing_actions（flat_fold/roll/coil/compress/nest/disassemble/retain_shape）、硬底/硬背板/框架/硬内衬/原盒/硬卡。
+   不得因为"看起来挺括"自动推出 requires_shape_retention=true；不得因为 semi_rigid 自动推出不能压缩。硬结构与保形判断需要真实图片/页面证据，并在 field_evidence 定位（图序号+区域+原文）。structure 只作辅助记录，不得机械推导 shipment。
 
 7. note：仅必要补充。
 
@@ -248,9 +242,8 @@ class RecognitionService:
 - 用户确认事实最高优先，不得修改。
 - 页面/图片明确事实高于 AI 推测。
 - 展示/支撑状态不等于实际运输状态。
-- 已处于合理自然收纳/折叠状态且无更强包装证据时，不要无依据重新展开或二次压缩。
-- 有可靠硬结构/保形证据时，不得无依据压扁或折叠。
-- 不确定的页面事实返回 null，不要编造。
+- 已自然折叠/袋装/收纳状态不要无依据重新展开或再次极端处理。
+- 不确定的页面事实返回 null。
 """.strip()
         if not include_json_shape:
             return prompt + "\n只返回符合给定 JSON Schema 的一个 JSON 对象，不要 Markdown。"

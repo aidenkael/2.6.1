@@ -28,6 +28,12 @@ class CalculationSession:
     adopted_packaging: PackagingProposal | None = None
     calculation_result: dict[str, Any] = field(default_factory=dict)
     rule_trace: list[str] = field(default_factory=list)
+    # 局部重估完整轨迹（后台校准证据，不进历史 UI）：
+    # 每条 {reestimate_id, sequence, timestamp, user_correction,
+    #        confirmed_facts, input_current_adopted, raw_reestimate_proposal,
+    #        adopted_reestimate_proposal, arbitration_trace,
+    #        model, provider, prompt_version, accepted}
+    reestimate_history: list[dict[str, Any]] = field(default_factory=list)
 
     def confirm_value(self, field: str, value: Any) -> None:
         """Record a valid user-entered fact in the existing session authority."""
@@ -41,6 +47,32 @@ class CalculationSession:
         self.user_overrides[field] = value
         self.confirmed_fields.add(field)
         self.field_sources[field] = "user_confirmed"
+
+    def reset_facts(self) -> None:
+        """Clear all user-confirmed facts (history reload rebuilds them from the record)."""
+        self.user_overrides.clear()
+        self.confirmed_fields.clear()
+        self.field_sources.clear()
+
+    def append_reestimate(self, entry: dict[str, Any]) -> bool:
+        """Record one local-reestimate attempt; dedup by stable reestimate_id.
+
+        Returns True when appended, False when a duplicate id was ignored.
+        """
+        entry = dict(entry)
+        identifier = str(entry.get("reestimate_id") or "").strip()
+        if identifier:
+            existing_ids = {
+                str(item.get("reestimate_id") or "")
+                for item in self.reestimate_history
+                if isinstance(item, dict)
+            }
+            if identifier in existing_ids:
+                return False
+        if not entry.get("sequence"):
+            entry["sequence"] = len(self.reestimate_history) + 1
+        self.reestimate_history.append(entry)
+        return True
 
     def confirmed_facts(self) -> dict[str, dict[str, Any]]:
         meanings = {

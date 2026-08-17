@@ -504,7 +504,9 @@ class TestManifestV2:
             "main_image", "images", "ai_initial_shipment",
             "user_calibration", "actual_first_mile", "machine_facts",
         }
-        assert set(entry["machine_facts"]) == {"ai_initial", "local_adopted", "user_feedback", "actual_logistics"}
+        assert set(entry["machine_facts"]) == {
+            "ai_initial", "local_adopted", "user_feedback", "actual_logistics", "reestimate_history",
+        }
 
     def test_machine_facts_ai_initial_observation_exact_values(self, context, tmp_path):
         _record_id, manifest_path = self._export_one(context, tmp_path)
@@ -814,7 +816,9 @@ class TestManifestV2:
         entry = manifest["records"][0]
         assert entry["main_image"] == ""
         assert entry["images"] == []
-        assert set(entry["machine_facts"]) == {"ai_initial", "local_adopted", "user_feedback", "actual_logistics"}
+        assert set(entry["machine_facts"]) == {
+            "ai_initial", "local_adopted", "user_feedback", "actual_logistics", "reestimate_history",
+        }
 
 
 class TestExportModes:

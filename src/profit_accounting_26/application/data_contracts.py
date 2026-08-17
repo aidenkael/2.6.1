@@ -341,6 +341,8 @@ class HistoryRecordV2:
     ai_initial: dict[str, Any] | None = None
     # Current Adopted Result（用户当前采用的单一主包装结果）
     current_estimate: dict[str, Any] = field(default_factory=dict)
+    # Local re-estimate full trace（后台校准证据：每次局部重估的完整轨迹）
+    reestimate_history: list[dict[str, Any]] = field(default_factory=list)
     # Calculation Snapshot（复用现有 profit_scenarios / layers.calculated）
     calculation_snapshot: dict[str, Any] = field(default_factory=dict)
     # Calibration Feedback 引用（避免重复保存两份可能不一致的数据）
@@ -362,6 +364,7 @@ class HistoryRecordV2:
             "bare_product": dict(self.bare_product),
             "ai_initial": self.ai_initial,
             "current_estimate": dict(self.current_estimate),
+            "reestimate_history": [dict(entry) for entry in self.reestimate_history],
             "calculation_snapshot": dict(self.calculation_snapshot),
             "calibration_feedback_id": self.calibration_feedback_id,
         }
@@ -425,6 +428,11 @@ def record_from_payload(payload: dict[str, Any]) -> HistoryRecordV2:
             "weight_g": selected_scenario.get("weight_g"),
             "selected_packaging": selected,
         },
+        reestimate_history=[
+            dict(entry)
+            for entry in (v2.get("reestimate_history") or [])
+            if isinstance(entry, dict)
+        ],
         calculation_snapshot={
             "calculated": layers.get("calculated") if isinstance(layers.get("calculated"), dict) else {},
             "profit_scenarios": payload.get("profit_scenarios") if isinstance(payload.get("profit_scenarios"), dict) else {},

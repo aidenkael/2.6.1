@@ -13,7 +13,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
+from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from PySide6.QtCore import QEvent, QObject, QThread, Qt, QSignalBlocker, Signal, Slot
 from PySide6.QtGui import QDoubleValidator, QKeyEvent, QKeySequence
@@ -50,6 +52,7 @@ from profit_accounting_26.application.recognition_service import (
     RecognitionService,
     RecognitionUnavailableError,
 )
+from profit_accounting_26.application.runtime_ai_services import apply_confirmed_facts
 from profit_accounting_26.domain.models import (
     AIObservation,
     ImageType,
@@ -274,6 +277,7 @@ class CalculationPage(QWidget):
         self._local_thread: QThread | None = None
         self._local_worker: LocalReestimateWorker | None = None
         self._local_dialog: QDialog | None = None
+        self._pending_reestimate_meta: dict[str, Any] | None = None
         self._ai_baseline: dict[str, Any] | None = None
         self.initial_ai_snapshot: dict[str, Any] | None = None
         self.current_feedback_id: str | None = None
@@ -1100,6 +1104,15 @@ class CalculationPage(QWidget):
     def _apply_observation(self, observation: AIObservation) -> None:
         previous_updating = self._updating
         self._updating = True
+        # 统一数据优先级规则 B：页面裸品字段必须显示 authoritative 结果
+        # （raw observation + 页面事实 + 用户确认事实）。即使调用方传入的是
+        # raw AI observation，也在此防御性合并当前已确认事实，杜绝 UI 被
+        # AI 原值回填覆盖（用户 700g 永远优先于 AI raw 600g）。
+        confirmed = self.session.confirmed_facts()
+        if confirmed:
+            display = AIObservation.from_dict(observation.to_dict())
+            apply_confirmed_facts(display, confirmed)
+            observation = display
         if "product_name" not in self.session.user_overrides:
             has_product_fact = bool(
                 observation.product_name
@@ -1489,6 +1502,13 @@ class CalculationPage(QWidget):
             "initial_ai_observation": initial_obs,
             "initial_ai_raw_payload": initial_obs.get("raw_payload", {}) if isinstance(initial_obs, dict) else {},
         }
+        # 记录本次重估的请求期快照（用户修正 / 硬事实 / 输入当前采用），
+        # 供完成时写入 reestimate_history（接受与拒绝都留档，后台校准证据）。
+        self._pending_reestimate_meta = {
+            "user_correction": user_correction,
+            "confirmed_facts": dict(confirmed_facts),
+            "input_current_adopted": dict(self._scenario_data(self.conservative_fields)),
+        }
         self._local_diagnostic_operation = self.context.diagnostic_logger.begin_operation("local-reestimate")
         self._local_diagnostic_operation.event("corrected_reestimate_requested")
         reestimate_svc = self.context.local_reestimate_service
@@ -1549,6 +1569,42 @@ class CalculationPage(QWidget):
         self._local_dialog = dialog
         dialog.show()
 
+    def _record_reestimate_attempt(self, result: Any, *, accepted: bool) -> None:
+        """把一次局部重估完整写入 session.reestimate_history（后台校准证据）。
+
+        保留：用户修正 / 确认事实快照 / 输入当前采用 / 文字 AI 原始提案 /
+        仲裁后采用提案 / 仲裁轨迹 / model / provider / prompt_version /
+        timestamp / accepted。重复 append 由 reestimate_id 去重。
+        """
+        meta = self._pending_reestimate_meta if isinstance(self._pending_reestimate_meta, dict) else {}
+        try:
+            prompt_version = str(self.context.local_reestimate_service.PROMPT_VERSION or "")
+        except Exception:
+            prompt_version = ""
+        entry: dict[str, Any] = {
+            "reestimate_id": uuid4().hex,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "user_correction": str(meta.get("user_correction") or ""),
+            "confirmed_facts": dict(meta.get("confirmed_facts") or {}),
+            "input_current_adopted": dict(meta.get("input_current_adopted") or {}),
+            "raw_reestimate_proposal": (
+                result.reestimate_raw_proposal.to_dict()
+                if getattr(result, "reestimate_raw_proposal", None) is not None
+                else None
+            ),
+            "adopted_reestimate_proposal": (
+                result.packaging_proposal.to_dict()
+                if getattr(result, "packaging_proposal", None) is not None
+                else None
+            ),
+            "arbitration_trace": dict(getattr(result, "arbitration_trace", None) or {}),
+            "model": str(getattr(result, "model", "") or ""),
+            "provider": str(getattr(result, "provider", "") or ""),
+            "prompt_version": prompt_version,
+            "accepted": bool(accepted),
+        }
+        self.session.append_reestimate(entry)
+
     @Slot(object)
     def _local_reestimate_completed(self, result: Any) -> None:
         if self._local_dialog is not None:
@@ -1570,6 +1626,9 @@ class CalculationPage(QWidget):
             message,
             confirm_text="采用此结果",
         )
+        # 每次局部重估都留档（接受与拒绝），供 Calibration Agent 读取完整纠偏过程；
+        # 重复 append 由 reestimate_id 去重拦截。
+        self._record_reestimate_attempt(result, accepted=bool(accepted))
         op = getattr(self, "_local_diagnostic_operation", None)
         provider_meta = {"provider": result.provider, "model": result.model, "provider_host": result.provider_host}
         if not accepted:
@@ -2040,6 +2099,11 @@ class CalculationPage(QWidget):
             "domestic_shipping_rmb": self.domestic_shipping.value(),
             "shein_quote_usd": profit_scenarios.get("shein_quote_usd", 0.0),
             "profit_scenarios": profit_scenarios,
+            # 局部重估完整轨迹走 _v2 附加块（attach_v2_block 会与 ai_initial /
+            # current_estimate 合并；create 与 update 都不丢、不重复）。
+            "_v2": {
+                "reestimate_history": [dict(entry) for entry in self.session.reestimate_history],
+            },
         }
 
     def save_record(self) -> None:
@@ -2263,6 +2327,7 @@ class CalculationPage(QWidget):
         self._ai_baseline = None
         self.initial_ai_snapshot = None
         self.current_feedback_id = None
+        self._pending_reestimate_meta = None
         self.user_correction.clear()
         if hasattr(self, "actual_first_mile_fee_edit"):
             self.actual_first_mile_fee_edit.clear()
@@ -2308,6 +2373,56 @@ class CalculationPage(QWidget):
         self.mark_saved()
         self.recalculate()
 
+    def _rebuild_session_facts_from_record(
+        self,
+        *,
+        ai_initial: dict[str, Any],
+        observation_raw: dict[str, Any],
+        bare: dict[str, Any],
+    ) -> None:
+        """从已保存记录重建 session 用户确认事实（统一数据优先级规则）。
+
+        每个裸品字段（长/宽/高/重）按以下优先级恢复确认事实：
+          1. ai_initial.confirmed_facts（用户首次识图前确认的硬事实）
+          2. adopted.bare 与 raw AI / bare_estimate 均不一致的值（识图后用户修正）
+        AI 程序化填入的值（与 raw 或 bare_estimate 一致）只显示、不升级为
+        "用户确认事实"；裸品 0 值仍代表未设置。
+        """
+        confirmed = ai_initial.get("confirmed_facts") if isinstance(ai_initial, dict) else {}
+        confirmed = confirmed if isinstance(confirmed, dict) else {}
+        raw_payload = observation_raw.get("raw_payload") if isinstance(observation_raw, dict) else {}
+        raw_payload = raw_payload if isinstance(raw_payload, dict) else {}
+        bare_estimate = raw_payload.get("bare_estimate") if isinstance(raw_payload.get("bare_estimate"), dict) else {}
+        bare_estimate = bare_estimate if isinstance(bare_estimate, dict) else {}
+
+        def _entry_value(entry: Any) -> Any:
+            if isinstance(entry, dict):
+                return entry.get("value")
+            return entry
+
+        for field in ("length_cm", "width_cm", "height_cm", "weight_g"):
+            confirmed_value = _entry_value(confirmed.get(field))
+            if confirmed_value not in (None, ""):
+                self.session.confirm_value(field, confirmed_value)
+                continue
+            adopted_value = bare.get(field)
+            if adopted_value in (None, 0):
+                continue
+            raw_value = observation_raw.get(field) if isinstance(observation_raw, dict) else None
+            estimate_value = bare_estimate.get(field)
+            # 与 raw AI 一致 → 图片识别值，不升级为用户确认
+            if raw_value not in (None, 0) and abs(float(adopted_value) - float(raw_value)) < 0.001:
+                continue
+            # raw 缺失但与 bare_estimate 一致 → AI 估算值，不升级为用户确认
+            if (
+                raw_value in (None, 0)
+                and estimate_value not in (None, 0)
+                and abs(float(adopted_value) - float(estimate_value)) < 0.001
+            ):
+                continue
+            # 与 raw / bare_estimate 均不同 → 用户手动修正，恢复为确认事实
+            self.session.confirm_value(field, adopted_value)
+
     def load_record_payload(self, record_id: str) -> None:
         self.context.diagnostic_logger.event("record_restore_requested", record_id=record_id)
         try:
@@ -2333,6 +2448,25 @@ class CalculationPage(QWidget):
         layers = record.get("layers", {})
         ai_raw = layers.get("ai_raw", {})
         observation_raw = ai_raw.get("observation") or {}
+        v2 = record.get("_v2") if isinstance(record.get("_v2"), dict) else {}
+        ai_initial = v2.get("ai_initial") if isinstance(v2.get("ai_initial"), dict) else {}
+        adopted = layers.get("adopted", {})
+        # 统一数据优先级规则：从记录重建 session 用户确认事实
+        # （ai_initial.confirmed_facts 优先，其次 adopted.bare 与 raw AI 不一致的
+        # 用户修正值），并恢复完整重估轨迹。这样历史重开后再 AI / 再重估时，
+        # 用户 700g 硬事实仍参与仲裁与重估上下文，绝不被 AI raw 600g 覆盖。
+        self.session.reset_facts()
+        self.session.reestimate_history = [
+            dict(entry) for entry in (v2.get("reestimate_history") or []) if isinstance(entry, dict)
+        ]
+        self._rebuild_session_facts_from_record(
+            ai_initial=ai_initial,
+            observation_raw=observation_raw,
+            bare=adopted.get("bare", {}) if isinstance(adopted, dict) else {},
+        )
+        # 成本字段是用户输入（0 是合法金额），历史恢复后同样作为确认事实参与链路
+        self.session.confirm_value("product_cost_rmb", float(record.get("product_cost_rmb", 0)))
+        self.session.confirm_value("domestic_shipping_rmb", float(record.get("domestic_shipping_rmb", 0)))
         if observation_raw:
             self.observation = AIObservation.from_dict(observation_raw)
             self._apply_observation(self.observation)
@@ -2343,7 +2477,6 @@ class CalculationPage(QWidget):
             except Exception:
                 self.proposal = None
                 self.session.adopted_packaging = None
-        adopted = layers.get("adopted", {})
         # 恢复历史记录后不再携带过期阻断：保存按钮随时可更新同一条记录
         self.packaging_stale = False
         bare = adopted.get("bare", {})
@@ -2398,14 +2531,18 @@ class CalculationPage(QWidget):
 
         if hasattr(self, "lbl_bare_weight_source"):
             self.lbl_bare_weight_source.setText(_source_for_field(_adopted_weight, _observed_weight, _estimate_weight))
-        # AI估算（左卡）：优先第一次 AI 结果（_v2.ai_initial），旧记录回退 adopted.normal
-        v2 = record.get("_v2") if isinstance(record.get("_v2"), dict) else {}
-        ai_initial = v2.get("ai_initial") if isinstance(v2.get("ai_initial"), dict) else {}
+        # AI估算（左卡）：优先第一次 AI 的原始发货提案（_v2.ai_initial.external_ai_packaging_proposal，
+        # 真·首次 raw AI），其次第一次本地仲裁结果（adopted_packaging），旧记录回退 adopted.normal。
         # 恢复第一次 AI 冻结门控：后续再次 AI 识图不得覆盖 AI估算/当前采用两卡；
         # 旧记录没有 ai_initial 时同样冻结（用空快照占位），历史更新由 V2Service 保留 ai_initial
         self.initial_ai_snapshot = dict(ai_initial) if ai_initial else {}
         ai_initial_pkg = ai_initial.get("adopted_packaging") if isinstance(ai_initial.get("adopted_packaging"), dict) else {}
-        left_raw = ai_initial_pkg.get("normal") if isinstance(ai_initial_pkg.get("normal"), dict) else None
+        external_pkg = ai_initial.get("external_ai_packaging_proposal") if isinstance(ai_initial.get("external_ai_packaging_proposal"), dict) else {}
+        left_raw = (
+            external_pkg.get("normal")
+            if isinstance(external_pkg.get("normal"), dict)
+            else (ai_initial_pkg.get("normal") if isinstance(ai_initial_pkg.get("normal"), dict) else None)
+        )
         self._fill_package_fields(self.normal_fields, left_raw or adopted.get("normal", {}))
         # 当前采用（右卡）：优先 current_estimate，旧记录回退 selected 槽（不伪造第一次 AI 数据）
         current_estimate = v2.get("current_estimate")

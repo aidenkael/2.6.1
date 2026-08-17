@@ -416,6 +416,60 @@ def _machine_user_feedback(feedback) -> dict[str, Any] | None:
     }
 
 
+# reestimate_history 单条白名单：只导出包装校准证据字段，禁止任何经济字段
+_REESTIMATE_ENTRY_FIELDS = frozenset({
+    "reestimate_id",
+    "sequence",
+    "timestamp",
+    "accepted",
+    "user_correction",
+    "confirmed_facts",
+    "arbitration_trace",
+    "model",
+    "provider",
+    "prompt_version",
+})
+
+
+def _machine_reestimate_history(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """machine_facts.reestimate_history：_v2.reestimate_history 的包装校准过滤块。
+
+    保留每次局部重估的纠偏过程证据（correction / confirmed_facts / raw proposal /
+    adopted proposal / arbitration trace / accepted / model / provider /
+    prompt_version / timestamp），供 Calibration Agent 看懂完整纠偏链。
+    经济字段由白名单 + 递归剔除双重防线排除；无重估时返回空列表（键始终存在）。
+    """
+    v2 = payload.get("_v2") if isinstance(payload.get("_v2"), dict) else {}
+    history = v2.get("reestimate_history")
+    if not isinstance(history, list):
+        return []
+    entries: list[dict[str, Any]] = []
+    for entry in history:
+        if not isinstance(entry, dict):
+            continue
+        out: dict[str, Any] = {key: entry.get(key) for key in _REESTIMATE_ENTRY_FIELDS}
+        for key in ("raw_reestimate_proposal", "adopted_reestimate_proposal"):
+            proposal = entry.get(key)
+            if isinstance(proposal, dict):
+                out[key] = {
+                    "normal": (
+                        _packaging_scenario_block(proposal["normal"])
+                        if isinstance(proposal.get("normal"), dict)
+                        else None
+                    ),
+                    "conservative": (
+                        _packaging_scenario_block(proposal["conservative"])
+                        if isinstance(proposal.get("conservative"), dict)
+                        else None
+                    ),
+                    "proposal_source": proposal.get("proposal_source"),
+                }
+            else:
+                out[key] = None
+        entries.append(_strip_forbidden_keys(out))
+    return entries
+
+
 def first_ai_short_name(payload: dict[str, Any]) -> str:
     """AI 第一次识别产生的简化商品名；没有真正的首次 AI 简名时返回空串。"""
     initial = _ai_initial_block(payload)
@@ -810,6 +864,7 @@ class CalibrationFeedbackExporter:
                             if feedback is not None
                             else None
                         ),
+                        "reestimate_history": _machine_reestimate_history(payload),
                     },
                 }
             )
