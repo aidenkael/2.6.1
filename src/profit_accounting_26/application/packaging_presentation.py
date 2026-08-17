@@ -57,14 +57,35 @@ def _main_name(observation: AIObservation) -> str:
     return _compact(raw, 14) or "商品"
 
 
+def _quantity_display(observation: AIObservation) -> str:
+    """稳定数量显示：优先结构化 purchase_quantity，不受 quantity_summary 文字长度影响。
+
+    - quantity_source == "assumed/unknown"：AI 未返回确认的 purchase_quantity
+      （quantity=1 只是占位）→ 回退短 quantity_summary 文本（仍受 _compact 截断保护）；
+    - quantity > 1：purchase_quantity 已确认 → 显示“数量 ×N”，长 quantity_summary
+      绝不能导致它不显示，也不重复显示 summary 文本；
+    - quantity == 1 且无来源证据（source 为 unknown / assumed/unknown / 空）：
+      视为未设置，走 summary 回退，保持旧记录/默认构造商品摘要显示不变。
+
+    quantity_summary 原始内容仍完整保留在 observation / history / manifest，
+    不改数据合同；本函数只负责主界面显示。
+    """
+    purchase_quantity = getattr(observation, "quantity", None)
+    source = str(getattr(observation, "quantity_source", "") or "")
+    if isinstance(purchase_quantity, int) and not isinstance(purchase_quantity, bool) and purchase_quantity > 0:
+        if purchase_quantity > 1 or source not in ("unknown", "assumed/unknown", ""):
+            return f"数量 ×{purchase_quantity}"
+    return _compact(getattr(observation, "quantity_summary", ""), 20)
+
+
 def product_summary(observation: AIObservation) -> str:
-    """Concise summary: AI title | quantity summary only. No structure/shipping preset."""
+    """Concise summary: AI title | quantity（数量稳定显示，不受 quantity_summary 长度影响）。"""
     title = _compact(observation.display_product_summary or observation.product_name, 30)
     if not title:
         title = _main_name(observation)
-    qsum = _compact(getattr(observation, "quantity_summary", ""), 20)
-    if qsum:
-        return f"{title}｜{qsum}"
+    quantity = _quantity_display(observation)
+    if quantity:
+        return f"{title}｜{quantity}"
     return title
 
 def _bulk_only(text: str) -> bool:
