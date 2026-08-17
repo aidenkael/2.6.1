@@ -93,7 +93,7 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-visual-v1.6"
+    PROMPT_VERSION = "2.6.1-visual-v1.7"
     RESPONSE_SCHEMA = {
         "type": "object",
         "additionalProperties": False,
@@ -215,31 +215,52 @@ class RecognitionService:
 
     @classmethod
     def _prompt(cls, image_count: int, *, include_json_shape: bool = True) -> str:
-        prompt = f"""
-跨境电商商品图片识别助手。本次共 {image_count} 张图片。
-只完成：商品标题、页面事实读取、数量判断、发货判断、最小物流结构语义。不计算费用或规则。
+        prompt = f"""跨境电商商品图片识别助手。本次共 {image_count} 张图片。
 
-返回：
-1. product_name：简短可搜索的商品名称。
-2. observed：页面价格/运费/裸品尺寸/裸重。看不清返回 null；价格和运费禁止猜测。
-3. bare_estimate：图片无明确标注时，可估算裸品近似值（不是图片事实）。
-4. shipment：商品真正交给物流时的外部尺寸、总重量和简短状态描述。
-   shipment.state 须同时说明物理形态+处理方式+包装方式，如"可折叠；袋装发货"。
-   禁止填写时效/包邮/货代/CAL/体积重/利润等。
-5. quantity：
-   先判断一个销售单位包含什么（证据仅限 SKU/规格文字、详情页、包装文字/形态、图片固定组合/共同包装）。
-   购买数量不能反推销售单位组成。主图多件不等于套装；无固定组合也不得机械按画面计数。
-   确定销售单位后，再应用当前购买数量判断最终发货状态。
-   purchase_quantity 能可靠识别则返回实际值；无法确认返回 null，shipment 按 1 个销售单位估算并在 note 注明。
-   库存/MOQ/销量/SKU选项数均非购买数量。禁止把单件 L/W/H 机械乘以数量。
-   返回 quantity_summary：一句简短中文数量摘要，如"1单位（共2件）"或"2单位（每单位3件，共6件）"。
-6. structure（可选）：仅当有图片/页面证据时填写。
-   保留字段：packaging_state_hint / rigidity / foldability / compressibility / requires_shape_retention / packing_actions / 硬结构布尔字段 / field_evidence。
-   合法值由 JSON Schema enum 约束，不在本提示中逐一列举。
-   展示状态≠运输状态；已自然收纳不要二次过压；硬结构必须有可定位证据，否则保持 null。
+职责：商品标题、页面事实、裸品估算、数量判断、发货判断。不计算费用或规则。
+
+1. product_name：简短、规范、可搜索的商品名称。
+
+2. observed：只读取页面/图片明确可见的事实。
+   - product_price_rmb（商品价格）
+   - page_shipping_rmb（页面运费）
+   - bare_dimensions_cm（裸品尺寸）
+   - bare_weight_g（裸品重量）
+   看不清或不确定返回 null。价格和运费禁止猜测。
+
+3. bare_estimate：页面无明确裸品尺寸/重量时，AI 可合理估算近似值。
+   必须与 observed 区分（observed 是页面事实，bare_estimate 是 AI 推测）。
+
+4. quantity：
+   - purchase_quantity：当前购买数量（非 SKU 选项数/库存/销量）
+   - quantity_source：判断依据
+   - quantity_summary：一句简短中文数量摘要
+
+5. shipment：AI 直接整体判断实际发货状态。
+   - 实际运输外部尺寸（长宽高 cm）
+   - 发货总重量（g）
+   - state：简短描述物理形态+处理方式+包装方式，如"可折叠；袋装发货"
+   禁止：裸品尺寸×数量、固定压缩率、时效/包邮/货代/CAL/体积重/利润。
+
+6. structure（可选，仅当有图片/页面证据时填写）：
+   - packaging_state_hint / rigidity / foldability / compressibility
+   - requires_shape_retention（布尔）
+   - packing_actions（字符串数组）
+   - 硬结构布尔字段：has_hard_bottom / has_hard_backboard / has_frame / has_rigid_insert
+   - retail_box_visible / hard_card_visible（布尔）
+   - field_evidence（证据定位）
+   无证据保持 null。
+
 7. note：仅写必要简短补充。
 
-优先级：用户确认事实 > 页面/图片事实 > AI 推测。不得输出费用/利润/CAL/规则编号等。
+通用原则：
+- 用户确认事实最高优先，不得修改。
+- 页面/图片明确事实高于 AI 推测。
+- 展示/支撑状态不等于实际运输状态。
+- 已处于合理自然收纳状态时，不要无依据重新展开或再次极端压缩。
+- 有可靠硬结构/保形证据时，不得无依据压扁或折叠。
+- 多数量商品要整体判断实际共同发货方式，不能机械放大 L/W/H。
+- 不确定的页面事实返回 null，不要编造。
 """.strip()
         if not include_json_shape:
             return prompt + "\n只返回符合给定 JSON Schema 的一个 JSON 对象，不要 Markdown。"
@@ -270,22 +291,18 @@ class RecognitionService:
                 "state": ""
               },
               "structure": {
-                "overall_form": None,
                 "packaging_state_hint": None,
                 "rigidity": None,
                 "foldability": None,
                 "compressibility": None,
                 "requires_shape_retention": None,
                 "packing_actions": [],
-                "packing_constraints": [],
                 "has_hard_bottom": None,
                 "has_hard_backboard": None,
                 "has_frame": None,
                 "has_rigid_insert": None,
-                "has_rigid_parts": None,
                 "retail_box_visible": None,
-                "hard_card_visible": None,
-                "protrusion_flattenable": None
+                "hard_card_visible": None
               },
               "quantity": {
                 "purchase_quantity": None,
@@ -487,13 +504,33 @@ class RecognitionService:
             normalized_payload["numeric_parse_issues"] = parse_issues
         # --- Structural + quantity + evidence field mapping (v1.5) ---
         structure = payload.get("structure") if isinstance(payload.get("structure"), dict) else {}
+        # 合法 canonical 值集合；不在此集合内的字符串 → None，不做近义词映射。
+        _STRUCT_CANONICAL: dict[str, frozenset[str]] = {
+            "overall_form": frozenset({
+                "unknown", "soft_flat", "soft_bulky", "flexible_chain",
+                "hard_flat", "hard_long", "hard_3d", "fragile_protruding", "mixed",
+            }),
+            "packaging_state_hint": frozenset({
+                "unknown", "full_flat_fold", "strong_compression",
+                "moderate_compression", "shape_retained",
+            }),
+            "rigidity": frozenset({"unknown", "soft", "semi_rigid", "hard"}),
+            "foldability": frozenset({"unknown", "none", "limited", "good"}),
+            "compressibility": frozenset({"unknown", "none", "limited", "good"}),
+        }
         _STRUCT_STR_FIELDS = (
             "overall_form", "packaging_state_hint", "rigidity", "foldability", "compressibility",
         )
         for fld in _STRUCT_STR_FIELDS:
             val = structure.get(fld)
             if isinstance(val, str) and val.strip():
-                raw_observation[fld] = val.strip()
+                canonical = val.strip()
+                allowed = _STRUCT_CANONICAL.get(fld)
+                if allowed is not None and canonical not in allowed:
+                    # 非法值 → 不写入，保持默认 unknown/None
+                    pass
+                else:
+                    raw_observation[fld] = canonical
         _STRUCT_BOOL_FIELDS = (
             "requires_shape_retention", "has_hard_bottom", "has_hard_backboard",
             "has_frame", "has_rigid_insert", "has_rigid_parts",

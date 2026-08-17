@@ -202,8 +202,7 @@ class _UserCorrectionEdit(QTextEdit):
     """
 
     EXAMPLE_TEXT = (
-        "填写用于重估的修正（本框内容优先）\n"
-        "若商品识别错误，请同时修改上方摘要"
+        "填写用于重估的修正（本框内容优先）"
     )
     MIN_HEIGHT = 68
     MAX_HEIGHT = 88
@@ -1028,6 +1027,20 @@ class CalculationPage(QWidget):
                 parts.append(label)
         return "；".join(dict.fromkeys(parts))
 
+    def _force_sync_confirmed_facts(self) -> None:
+        """用户点击 AI 前强制同步手写字段到 session。
+
+        修复 Bug：用户输入后立即点 AI，editingFinished 未触发导致 confirmed_facts 漏传。
+        通过清除焦点触发 FocusOut → editingFinished 链路；仅影响用户正在编辑的控件，
+        程序化 setValue 不会受影响（_programmatic 保护仍在）。
+        """
+        focused = self._root.focusWidget()
+        if focused is not None and focused is not self._root:
+            focused.clearFocus()
+            # 处理挂起事件，确保 editingFinished 在构建 confirmed_facts 前被分发
+            from PySide6.QtCore import QCoreApplication
+            QCoreApplication.processEvents()
+
     def _accept_bare_field(self, key: str) -> None:
         if not self._updating:
             self._accepted_bare_fields.add(key)
@@ -1186,6 +1199,8 @@ class CalculationPage(QWidget):
         if not image_items:
             QMessageBox.information(self, "没有图片", "请先导入至少一张图片。")
             return
+        # 强制同步：用户手写字段立即进入 session，不依赖 editingFinished/FocusOut。
+        self._force_sync_confirmed_facts()
         self._diagnostic_operation = self.context.diagnostic_logger.begin_operation("ai-recognition")
         images = [self.context.diagnostic_logger.image_metadata(item["path"]) for item in image_items]
         self._diagnostic_operation.event("image_attached", images=images)
@@ -1291,13 +1306,16 @@ class CalculationPage(QWidget):
     @Slot(object, object)
     def _recognition_completed(self, observation: AIObservation, external_proposal: PackagingProposal | None) -> None:
         is_first_visual_result = self.initial_ai_snapshot is None
+        # 获取真正的外部 AI 原始提案（未经 arbitrator）
+        raw_proposal = getattr(self.context.recognition_service, 'last_raw_proposal', None)
         conflicts = self.session.protect_confirmed_values(observation)
         self.session.ai_raw_response = observation.raw_payload
         self.session.ai_raw_observation = dict(observation.raw_payload.get("observation") or {})
         self.session.normalized_observation = observation
         self.session.money_candidates = list(observation.raw_payload.get("money_candidates") or [])
         if is_first_visual_result:
-            self.session.ai_packaging_proposal = external_proposal
+            # ai_packaging_proposal 必须存真正的 AI 原始提案，不得存 arbitrated 结果
+            self.session.ai_packaging_proposal = raw_proposal
         self.session.observation = observation
         self.observation = self.session.observation
         runtime_proposal = external_proposal or RecognitionService.proposal_from_shipment({})
@@ -1307,9 +1325,10 @@ class CalculationPage(QWidget):
             self._adopted_packaging().review_reasons.append("user confirmed facts conflict with image evidence")
         self._apply_observation(observation)
         self._refresh_display_summaries(observation, self._adopted_packaging())
-        self.apply_proposal(self._adopted_packaging())
+        self.apply_proposal(self._adopted_packaging(), raw_proposal=raw_proposal)
         if is_first_visual_result:
-            self._maybe_capture_initial_ai_snapshot(observation, external_proposal)
+            # 快照使用真正的 AI 原始提案
+            self._maybe_capture_initial_ai_snapshot(observation, raw_proposal)
             self._ai_baseline = {
                 "summary": self._current_summary(),
                 "product_summary": self.product_summary.text(),
@@ -1346,7 +1365,7 @@ class CalculationPage(QWidget):
         op.event("logistics_calculated" if self.current_quote else "logistics_skipped", reason=None if self.current_quote else "无可用包装尺寸和重量")
         op.event("page_updated", filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)])
         op.event("operation_completed")
-        op.summary(status="completed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing, field_evidence=observation.raw_payload.get("field_evidence",{}), raw_observation=observation.raw_payload.get("observation", {}), normalized_codes={"product_type_code": observation.product_type_code, "product_family_code": observation.product_family_code, "material_family_code": observation.material_family_code}, value_types={"product_cost": observation.product_cost_value_type, "domestic_shipping": observation.domestic_shipping_value_type}, value_sources={"dimensions": observation.dimension_value_source, "weight": observation.weight_value_source}, ai_packaging_proposal=external_proposal.to_dict() if external_proposal else None, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], generic_fallback=False, packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["AI未返回完整发货尺寸/重量，等待人工填写"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "无可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)], page_empty_fields=missing, warnings=adopted.review_reasons)
+        op.summary(status="completed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing, field_evidence=observation.raw_payload.get("field_evidence",{}), raw_observation=observation.raw_payload.get("observation", {}), normalized_codes={"product_type_code": observation.product_type_code, "product_family_code": observation.product_family_code, "material_family_code": observation.material_family_code}, value_types={"product_cost": observation.product_cost_value_type, "domestic_shipping": observation.domestic_shipping_value_type}, value_sources={"dimensions": observation.dimension_value_source, "weight": observation.weight_value_source}, ai_packaging_proposal=raw_proposal.to_dict() if raw_proposal else None, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], generic_fallback=False, packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["AI未返回完整发货尺寸/重量，等待人工填写"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "无可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)], page_empty_fields=missing, warnings=adopted.review_reasons)
 
     @Slot(str, str)
     def _recognition_failed(self, category: str, message: str) -> None:
@@ -1435,8 +1454,14 @@ class CalculationPage(QWidget):
         # Full initial AI context for reestimate (not just current_shipment + correction)
         initial_ai = self.initial_ai_snapshot or {}
         initial_obs = initial_ai.get("observation", {}) if isinstance(initial_ai, dict) else {}
+        # product_name 必须使用后台真实 observation.product_name，不是 UI 显示摘要
+        real_product_name = ""
+        if isinstance(initial_obs, dict):
+            real_product_name = str(initial_obs.get("product_name") or "").strip()
+        if not real_product_name:
+            real_product_name = self.product_summary.text().strip()
         context = {
-            "product_name": self.product_summary.text().strip(),
+            "product_name": real_product_name,
             "confirmed_facts": confirmed_facts,
             "current_shipment": self._scenario_data(self.conservative_fields),
             "user_correction": user_correction,
@@ -1590,21 +1615,24 @@ class CalculationPage(QWidget):
     # 包装应用与选择
     # ------------------------------------------------------------------
 
-    def apply_proposal(self, proposal: PackagingProposal) -> None:
+    def apply_proposal(self, proposal: PackagingProposal, *, raw_proposal: PackagingProposal | None = None) -> None:
         previous_updating = self._updating
         self._updating = True
-        # 只在第一次 AI（initial_ai_snapshot 尚未捕获）时写入两框：
-        # AI估算与当前采用复制完全相同的首次 AI 数据；
-        # 同会话再次 AI / 按修正重估不得静默覆盖已冻结的首次结果或用户已编辑的当前采用；
-        # 历史编辑模式下（含无 ai_initial 的旧记录）同样不得覆盖已恢复的两卡。
+        # 第一次 AI 识图时：左卡写入 raw AI 原始结果，右卡写入 arbitrated 结果。
+        # 左卡 = external_ai_packaging_proposal（只读、永不覆盖）
+        # 右卡 = 当前采用（用户可修改、物流利润唯一输入）
         if self.initial_ai_snapshot is None and self.editing_record_id is None:
-            for fields in (self.normal_fields, self.conservative_fields):
-                method_text = proposal.normal.packaging_method
-                fields["method"].setText(method_text)
-                fields["length"].setValue(proposal.normal.length_cm or 0)
-                fields["width"].setValue(proposal.normal.width_cm or 0)
-                fields["height"].setValue(proposal.normal.height_cm or 0)
-                fields["weight"].setValue(proposal.normal.weight_g or 0)
+            left_source = (raw_proposal or proposal).normal
+            right_source = proposal.normal
+            for fields, source in (
+                (self.normal_fields, left_source),
+                (self.conservative_fields, right_source),
+            ):
+                fields["method"].setText(source.packaging_method)
+                fields["length"].setValue(source.length_cm or 0)
+                fields["width"].setValue(source.width_cm or 0)
+                fields["height"].setValue(source.height_cm or 0)
+                fields["weight"].setValue(source.weight_g or 0)
         self._updating = previous_updating
         if proposal.needs_review:
             self.review_badge.setText("需要复核")

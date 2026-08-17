@@ -8,7 +8,7 @@ def test_prompt_scans_every_image_without_slot_restrictions():
     assert "2 \u5f20\u56fe\u7247" in prompt
     assert "shipment" in prompt
     assert "\u8fd0\u8d39" in prompt or "\u4ef7\u683c" in prompt
-    assert "\u4f18\u5148\u7ea7" in prompt
+    assert "优先" in prompt
     assert "rigidity" in prompt
     assert "quantity_summary" in prompt
 

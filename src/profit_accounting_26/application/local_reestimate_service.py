@@ -78,12 +78,29 @@ class LocalReestimateService:
                  initial_ai_observation: dict[str, Any] | None = None,
                  initial_ai_raw_payload: dict[str, Any] | None = None,
                  **_ignored: Any) -> str:
-        payload = {
+        payload: dict[str, Any] = {
             "product_name": str(product_name or "").strip(),
             "confirmed_facts": confirmed_facts,
             "current_shipment": current_shipment,
             "user_correction": str(user_correction or "").strip(),
         }
+        # 把第一次 AI 的有价值上下文传递给重估 AI，而非只传 current_shipment + correction
+        if initial_ai_observation and isinstance(initial_ai_observation, dict):
+            initial_context: dict[str, Any] = {}
+            # 第一次 AI 观察中的关键事实
+            for key in ("product_name", "product_type", "material", "quantity",
+                         "quantity_summary", "length_cm", "width_cm", "height_cm", "weight_g"):
+                val = initial_ai_observation.get(key)
+                if val is not None and val != "" and val != 0:
+                    initial_context[key] = val
+            # 第一次 AI raw payload 中的有价值块
+            raw = initial_ai_raw_payload if isinstance(initial_ai_raw_payload, dict) else {}
+            for key in ("observed", "bare_estimate", "shipment", "quantity"):
+                val = raw.get(key)
+                if isinstance(val, dict) and val:
+                    initial_context[f"initial_{key}"] = val
+            if initial_context:
+                payload["initial_ai_context"] = initial_context
         prompt = (
             "你是跨境电商发货判断助手。你看不到图片。"
             "根据输入重新判断一套最可能的实际发货状态、外部尺寸和发货总重量。"

@@ -45,12 +45,12 @@ class TestStructuralFieldParsing:
     def test_full_structure_fields_parsed(self):
         payload = _minimal_v1_payload(structure={
             "overall_form": "soft_flat",
-            "packaging_state_hint": "folded",
-            "rigidity": "flexible",
-            "foldability": "flat_fold",
-            "compressibility": "high",
+            "packaging_state_hint": "full_flat_fold",
+            "rigidity": "soft",
+            "foldability": "good",
+            "compressibility": "good",
             "requires_shape_retention": False,
-            "packing_actions": ["fold", "bag"],
+            "packing_actions": ["flat_fold", "bag"],
             "packing_constraints": ["do_not_bend"],
             "has_hard_bottom": False,
             "has_hard_backboard": False,
@@ -63,12 +63,12 @@ class TestStructuralFieldParsing:
         })
         obs, proposal = RecognitionService._parse_v1_payload(payload, model="test-model")
         assert obs.overall_form == "soft_flat"
-        assert obs.packaging_state_hint == "folded"
-        assert obs.rigidity == "flexible"
-        assert obs.foldability == "flat_fold"
-        assert obs.compressibility == "high"
+        assert obs.packaging_state_hint == "full_flat_fold"
+        assert obs.rigidity == "soft"
+        assert obs.foldability == "good"
+        assert obs.compressibility == "good"
         assert obs.requires_shape_retention is False
-        assert obs.packing_actions == ["fold", "bag"]
+        assert obs.packing_actions == ["flat_fold", "bag"]
         assert obs.packing_constraints == ["do_not_bend"]
         assert obs.has_hard_bottom is False
         assert obs.protrusion_flattenable is True
@@ -182,7 +182,7 @@ class TestObservationToDictIncludesNewFields:
     def test_to_dict_contains_structural_fields(self):
         payload = _minimal_v1_payload(
             structure={
-                "overall_form": "rolled",
+                "overall_form": "hard_long",
                 "rigidity": "semi_rigid",
                 "requires_shape_retention": True,
                 "packing_actions": ["roll", "wrap"],
@@ -192,7 +192,7 @@ class TestObservationToDictIncludesNewFields:
         )
         obs, _ = RecognitionService._parse_v1_payload(payload, model="m")
         d = obs.to_dict()
-        assert d["overall_form"] == "rolled"
+        assert d["overall_form"] == "hard_long"
         assert d["rigidity"] == "semi_rigid"
         assert d["requires_shape_retention"] is True
         assert d["packing_actions"] == ["roll", "wrap"]
@@ -217,7 +217,7 @@ class TestPromptContent:
         assert '"purchase_quantity"' in prompt
 
     def test_prompt_version_bumped(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.6"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.7"
 class TestBackwardCompatibility:
     """Old payloads without structure/quantity still work unchanged."""
 
@@ -255,8 +255,11 @@ class TestCanonicalVocabulary:
         prompt = RecognitionService._prompt(1, include_json_shape=True)
         assert "compressibility" in prompt
     def test_prompt_uses_canonical_overall_form(self):
+        """overall_form 从 v1.7 prompt 示例中移除（降低 AI 复杂度），仅在 schema 保留兼容。"""
         prompt = RecognitionService._prompt(1, include_json_shape=True)
-        assert "overall_form" in prompt
+        # overall_form 不再出现在 prompt 中（仅在 RESPONSE_SCHEMA 保留）
+        schema = RecognitionService.RESPONSE_SCHEMA
+        assert "overall_form" in schema["properties"]["structure"]["properties"]
     def test_prompt_uses_canonical_packing_actions(self):
         prompt = RecognitionService._prompt(1, include_json_shape=True)
         assert "packing_actions" in prompt
@@ -264,7 +267,7 @@ class TestCanonicalVocabulary:
         prompt = RecognitionService._prompt(1, include_json_shape=True)
         assert "packaging_state_hint" in prompt
     def test_prompt_version_is_v15(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.6"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.7"
 
 
 class TestFieldEvidence:

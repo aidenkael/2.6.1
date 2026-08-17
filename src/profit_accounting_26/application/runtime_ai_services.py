@@ -108,12 +108,17 @@ class RuntimeRecognitionService:
     ) -> None:
         self.base_service = base_service
         self.packaging_arbitrator = packaging_arbitrator
+        # 最近一次 recognize() 的原始 AI 提案（未经 arbitrator）；
+        # 供左卡"AI估算"和 ai_initial 快照使用。
+        self.last_raw_proposal: PackagingProposal | None = None
 
     def __getattr__(self, name: str):
         return getattr(self.base_service, name)
 
     def recognize(self, *args, **kwargs):
         observation, proposal = self.base_service.recognize(*args, **kwargs)
+        # 冻结原始 AI 提案，不被后续 arbitration 覆盖
+        self.last_raw_proposal = proposal
         if proposal is None:
             return observation, None
         arbitrated = self.packaging_arbitrator.estimate(
