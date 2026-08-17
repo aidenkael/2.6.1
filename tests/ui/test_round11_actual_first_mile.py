@@ -203,12 +203,14 @@ class TestSaveFeedback:
         try:
             record_id = _create_record(page.context)
             page.record_id = record_id
-            page.user_calibration_dirty = True
+            # 用户亲手修改当前采用（真实控件路径触发用户编辑捕获 → suggested_package）
+            page.conservative_fields["length"].spin.setValue(26.0)
             page._save_user_feedback()
             feedbacks = page.context.calibration_feedback_service.for_record(record_id)
             assert len(feedbacks) == 1
             assert feedbacks[0].suggested_package is not None
             assert feedbacks[0].suggested_package.evidence_level == "user_suggested"
+            assert feedbacks[0].suggested_package.length_cm == pytest.approx(26.0)
         finally:
             page.deleteLater()
             qapp.processEvents()

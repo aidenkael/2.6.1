@@ -519,21 +519,79 @@ def first_ai_shipment_text(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def user_calibration_text(feedback) -> str:
-    """只读真正用户层：user_note + 真正 user_suggested 的 suggested_package。"""
+def _suggested_dims(suggested) -> dict[str, float] | None:
+    """suggested_package 的四项数值；任一缺失返回 None（部分编辑视为真实用户输入）。"""
+    if suggested is None:
+        return None
+    dims = {
+        "length_cm": _num(getattr(suggested, "length_cm", None)),
+        "width_cm": _num(getattr(suggested, "width_cm", None)),
+        "height_cm": _num(getattr(suggested, "height_cm", None)),
+        "weight_g": _num(getattr(suggested, "weight_g", None)),
+    }
+    if any(value is None for value in dims.values()):
+        return None
+    return dims
+
+
+def _dims_equal(source: dict[str, Any], expected: dict[str, float]) -> bool:
+    for key, target in expected.items():
+        actual = _num(source.get(key))
+        if actual is None or abs(actual - target) > 1e-6:
+            return False
+    return True
+
+
+def is_ai_reestimate_polluted_suggestion(payload: dict[str, Any], suggested) -> bool:
+    """读取/导出层兼容：旧版本把 AI 重估结果误写成 user_suggested 的污染检测。
+
+    条件：suggested_package 四项数值完整，且与某条 reestimate_history 的
+    adopted_reestimate_proposal（或最终采用结果 current_estimate）完全一致，
+    且旧记录没有“用户手动字段来源”证据（旧版本不保存该证据）。
+    仅影响显示/导出（Excel 用户校准内容、历史页显示），绝不修改原始历史 JSON；
+    无法确定来源时返回 False 保持原数据。
+    """
+    dims = _suggested_dims(suggested)
+    if dims is None:
+        return False
+    v2 = payload.get("_v2") if isinstance(payload.get("_v2"), dict) else {}
+    history = v2.get("reestimate_history")
+    if isinstance(history, list):
+        for entry in history:
+            if not isinstance(entry, dict):
+                continue
+            proposal = entry.get("adopted_reestimate_proposal")
+            if isinstance(proposal, dict):
+                for tier in ("normal", "conservative"):
+                    scenario = proposal.get(tier)
+                    if isinstance(scenario, dict) and _dims_equal(scenario, dims):
+                        return True
+    current = v2.get("current_estimate")
+    if isinstance(current, dict) and _dims_equal(current, dims):
+        return True
+    return False
+
+
+def user_calibration_text(feedback, payload: dict[str, Any] | None = None) -> str:
+    """只读真正用户层：user_note + 真正 user_suggested 的 suggested_package。
+
+    payload 提供时执行旧版本污染兼容：suggested_package 与 AI 重估 adopted
+    完全一致且无用户手动来源证据时，不再把 AI 包装说明冒充用户校准。
+    """
     lines: list[str] = []
     note = str(getattr(feedback, "user_note", "") or "").strip().replace("\n", " ")
     if note:
         lines.append(f"用户反馈：{note}")
     suggested = getattr(feedback, "suggested_package", None)
     if suggested is not None and suggested.has_content():
-        text = _fmt_dims_weight(
-            suggested.length_cm, suggested.width_cm, suggested.height_cm, suggested.weight_g
-        )
-        method = str(suggested.packaging_method or "").strip()
-        if method:
-            text = f"{text}；{method}" if text else method
-        lines.append(f"建议包装：{text}")
+        if payload is None or not is_ai_reestimate_polluted_suggestion(payload, suggested):
+            text = _fmt_dims_weight(
+                suggested.length_cm, suggested.width_cm, suggested.height_cm, suggested.weight_g
+            )
+            method = str(suggested.packaging_method or "").strip()
+            if method:
+                text = f"{text}；{method}" if text else method
+            lines.append(f"建议包装：{text}")
     return "\n".join(lines)
 
 
@@ -761,7 +819,7 @@ class CalibrationFeedbackExporter:
                 str(payload.get("product_link") or ""),
                 "",  # 图片列只嵌入主图缩略图，不再写路径文本
                 first_ai_shipment_text(payload),
-                user_calibration_text(feedback) if feedback is not None else "",
+                user_calibration_text(feedback, payload) if feedback is not None else "",
                 actual_first_mile_text(feedback) if feedback is not None else "",
             ]
             sheet.append(row)
@@ -853,7 +911,7 @@ class CalibrationFeedbackExporter:
                     "main_image": relative_paths[0] if relative_paths else "",
                     "images": relative_paths,
                     "ai_initial_shipment": first_ai_shipment_text(payload),
-                    "user_calibration": user_calibration_text(feedback) if feedback is not None else "",
+                    "user_calibration": user_calibration_text(feedback, payload) if feedback is not None else "",
                     "actual_first_mile": actual_first_mile_text(feedback) if feedback is not None else "",
                     "machine_facts": {
                         "ai_initial": _machine_ai_initial(payload),

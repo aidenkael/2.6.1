@@ -58,7 +58,7 @@ class TestPromptSimplification:
             assert field in prompt, f"Core field missing: {field}"
 
     def test_prompt_version_bumped(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.0"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.1"
 
 
 class TestQuantitySummary:

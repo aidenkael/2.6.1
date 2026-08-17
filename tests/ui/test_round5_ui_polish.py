@@ -312,8 +312,8 @@ class TestHistoryTableRound5:
             stylesheet = page.table.styleSheet()
             assert "border-right" in stylesheet
             assert "1px solid" in stylesheet
-            # 不出现横向滚动条
-            assert page.table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            # 横向滚动策略：窄窗口下列宽不强制挤烂，允许出现横向滚动条
+            assert page.table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
         finally:
             page.deleteLater()
             qapp.processEvents()

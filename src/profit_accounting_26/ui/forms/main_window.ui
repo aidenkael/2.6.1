@@ -2544,7 +2544,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                             <bool>false</bool>
                            </property>
                            <property name="placeholderText">
-                            <string>正常档包装方式（由 AI / CAL 生成）</string>
+                            <string>AI 首次发货判断（只读）</string>
                            </property>
                            <property name="readOnly">
                             <bool>true</bool>
@@ -2553,7 +2553,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                             <bool>true</bool>
                            </property>
                            <property name="toolTip">
-                            <string>正常档包装方式为系统生成结果，不在此处直接编辑；预留两行显示空间</string>
+                            <string>AI 估算包装方式为 AI 首次生成结果，只读；不在此处直接编辑</string>
                            </property>
                           </widget>
                          </item>
@@ -3049,14 +3049,14 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                          <item row="0" column="0" colspan="3">
                           <widget class="QRadioButton" name="radioConservativePackage">
                            <property name="text">
-                            <string>保守档</string>
+                            <string>当前采用</string>
                            </property>
                           </widget>
                          </item>
                          <item row="1" column="0">
                           <widget class="QLabel" name="lblConservativeMethod">
                            <property name="text">
-                            <string>包装方式（冻结）</string>
+                            <string>包装方式</string>
                            </property>
                           </widget>
                          </item>
@@ -3084,10 +3084,10 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                             <bool>true</bool>
                            </property>
                            <property name="placeholderText">
-                            <string>保守档包装方式（由 AI / CAL 生成）</string>
+                            <string>当前采用包装方式</string>
                            </property>
                            <property name="toolTip">
-                            <string>保守档整体为冻结结果；可选择采用，但不可直接编辑字段</string>
+                            <string>当前采用 · 可直接修改，是物流与利润计算的唯一输入</string>
                            </property>
                           </widget>
                          </item>
@@ -3188,7 +3188,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                               <bool>true</bool>
                              </property>
                              <property name="toolTip">
-                              <string>保守档为冻结估算结果，不可直接编辑</string>
+                              <string>当前采用 · 可直接修改：物流与利润计算使用这里的尺寸/重量</string>
                              </property>
                             </widget>
                            </item>
@@ -3312,7 +3312,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                               <bool>true</bool>
                              </property>
                              <property name="toolTip">
-                              <string>保守档为冻结估算结果，不可直接编辑</string>
+                              <string>当前采用 · 可直接修改：物流与利润计算使用这里的尺寸/重量</string>
                              </property>
                             </widget>
                            </item>
@@ -3436,7 +3436,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                               <bool>true</bool>
                              </property>
                              <property name="toolTip">
-                              <string>保守档为冻结估算结果，不可直接编辑</string>
+                              <string>当前采用 · 可直接修改：物流与利润计算使用这里的尺寸/重量</string>
                              </property>
                             </widget>
                            </item>
@@ -3539,7 +3539,7 @@ QFrame#conservativePackageCard QLabel { color: #55657b; }
                               <bool>true</bool>
                              </property>
                              <property name="toolTip">
-                              <string>保守档为冻结估算结果，不可直接编辑</string>
+                              <string>当前采用 · 可直接修改：物流与利润计算使用这里的尺寸/重量</string>
                              </property>
                             </widget>
                            </item>

@@ -945,11 +945,37 @@ class ProductCollectionPage(QWidget):
     # ------------------------------------------------------------------
 
     def _load_ui(self) -> None:
-        """加载 .ui 静态布局，绑定控件引用和信号。"""
+        """加载 .ui 静态布局，绑定控件引用和信号。
+
+        缩窗策略（页面外层负责横向滚动，商品区负责纵向滚动）：
+        - 外层 QScrollArea 负责整页横向滚动：顶部搜索区/操作按钮/商品区在窗口
+          变窄时都可横向访问，不把 760px 搜索框等核心控件强行压窄；
+        - 商品卡片区 scrollProducts 继续负责商品列表纵向滚动；外层纵向滚动条
+          固定关闭，避免两个纵向滚动条抢鼠标滚轮；
+        - 页面自身最小尺寸设小，避免本页最小宽度把主窗口最小宽度撑出屏幕。
+        """
         form = load_ui(self)
+        # 页面外层横向滚动容器
+        outer_scroll = QScrollArea()
+        outer_scroll.setWidgetResizable(True)
+        outer_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        outer_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        outer_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        outer_scroll.setWidget(form)
+        # 整页设计最小宽度 = 布局真实最小宽度（搜索区/操作行控件最小宽度之和），
+        # 低于该宽度时由外层横向滚动条提供访问；高度交给商品区 scrollProducts 纵向滚动。
+        layout_min_w = form.layout().minimumSize().width() if form.layout() else 1520
+        form.setMinimumWidth(max(int(layout_min_w), 1180))
+        form.setMinimumHeight(0)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(form)
+        outer.setSpacing(0)
+        outer.addWidget(outer_scroll)
+        # 页面自身最小尺寸设小：窄窗口时由外层滚动条承担横向访问，
+        # 不让本页的最小宽度把主窗口最小宽度撑出屏幕。
+        self.setMinimumSize(320, 240)
+        self._outer_scroll = outer_scroll
+        self._form = form
 
         form.setStyleSheet(_PAGE_STYLESHEET)
 

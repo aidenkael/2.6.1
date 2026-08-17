@@ -309,7 +309,8 @@ class TestAdoptedFlow:
         assert page.conservative_fields["length"].value() == pytest.approx(46)
         assert page.conservative_fields["weight"].value() == pytest.approx(760)
         assert page.initial_ai_snapshot == initial
-        assert page.user_calibration_dirty is True
+        # 接受 AI 重估 ≠ 用户亲手修改：不得置 manual dirty（来源语义拆分）
+        assert page.user_calibration_dirty is False
         assert "当前采用" in page.manual_scenarios
 
     def test_corrected_reestimate_adopt_preserves_visual_raw_and_complete_current_metadata(self, page, monkeypatch):

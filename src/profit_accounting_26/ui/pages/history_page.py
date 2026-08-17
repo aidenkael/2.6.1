@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 from profit_accounting_26.application import AppContext
 from profit_accounting_26.application.calibration_export_service import (
     ExportIncompleteError,
+    is_ai_reestimate_polluted_suggestion,
 )
 from profit_accounting_26.application.data_contracts import record_from_payload
 from profit_accounting_26.application.profit_scenario_codec import extract_profit_scenarios
@@ -263,6 +264,8 @@ class HistoryPage(QWidget):
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+        # 窄窗口时允许横向滚动访问最右侧列（校准内容/操作区），列宽不强制挤烂
+        header.setMinimumSectionSize(96)
         self.table.setColumnWidth(0, 50)
         self.table.setColumnWidth(1, _THUMB_SIZE * 2 + 16)
         self.table.setColumnWidth(2, 290)
@@ -278,9 +281,9 @@ class HistoryPage(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        # 纵向分隔线：浅灰 1px，header 与数据区域视觉连续；不增加横向滚动条
+        # 纵向分隔线：浅灰 1px，header 与数据区域视觉连续；
+        # 横向滚动策略保持默认 AsNeeded：窄窗口下列宽不强制挤烂，出现横向滚动条。
         self.table.setShowGrid(False)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.table.setStyleSheet(
             "QTableWidget::item { border-right: 1px solid #DDE3EA; }"
             "QHeaderView::section { border-right: 1px solid #DDE3EA; }"
@@ -549,6 +552,11 @@ class HistoryPage(QWidget):
     def _packaging_rows(self, payload: dict[str, Any]) -> list[tuple]:
         """包装数据列 key/value 行：裸品 / AI首次 / 当前，左侧标题、右侧尺寸重量。
 
+        AI 首次与左卡、Excel 同一语义：优先第一次 external raw AI shipment
+        （ai_initial.external_ai_packaging_proposal.normal），只有旧记录确实
+        没有 external raw 时才回退 ai_initial.adopted_packaging（第一次本地仲裁），
+        绝不把本地 adopted 冒充 AI 首次。
+
         采用 _kv_cell 局部布局，三行标题左对齐、三行数据右对齐，
         不依赖空格模拟对齐，正常尺寸重量在列宽内不换行。
         """
@@ -560,9 +568,13 @@ class HistoryPage(QWidget):
         ai_initial = v2.ai_initial
         # 旧记录没有 ai_initial 时安全 fallback，不伪造第一次 AI 数据
         if isinstance(ai_initial, dict) and "legacy_layers_ai_raw" not in ai_initial:
-            adopted_packaging = ai_initial.get("adopted_packaging")
-            if isinstance(adopted_packaging, dict):
-                ai_text = _dims_text(adopted_packaging.get("normal"))
+            external = ai_initial.get("external_ai_packaging_proposal")
+            if isinstance(external, dict) and isinstance(external.get("normal"), dict):
+                ai_text = _dims_text(external.get("normal"))
+            else:
+                adopted_packaging = ai_initial.get("adopted_packaging")
+                if isinstance(adopted_packaging, dict):
+                    ai_text = _dims_text(adopted_packaging.get("normal"))
         current = _dims_text(v2.current_estimate)
         return [("裸品", bare), ("AI", ai_text), ("当前", current)]
 
@@ -575,14 +587,19 @@ class HistoryPage(QWidget):
         """用户层面只有两态：未反馈 / 已反馈 + dims + note + 真实头程。
 
         dims 优先级：实测 > 用户建议 > 当前采用。
+        连续局部重估（_v2.reestimate_history）显示轻量状态“已重估 N 次”
+        （无重估不显示），完整轨迹仍只在 manifest / Calibration Agent。
+        旧版本被污染的 suggested_package（与 AI 重估 adopted 完全一致的
+        AI 尺寸）不当作用户亲手建议显示。
         """
         v2 = record_from_payload(payload)
+        reestimate_count = len(v2.reestimate_history)
         if not v2.calibration_feedback_id:
-            return "未反馈"
+            return f"已重估 {reestimate_count} 次" if reestimate_count else "未反馈"
         try:
             feedback = self.context.calibration_feedback_service.load(v2.calibration_feedback_id)
         except KeyError:
-            return "未反馈"
+            return f"已重估 {reestimate_count} 次" if reestimate_count else "未反馈"
         has_user_content = (
             bool(feedback.user_note)
             or (feedback.suggested_package is not None and feedback.suggested_package.has_content())
@@ -590,7 +607,7 @@ class HistoryPage(QWidget):
             or feedback.structure.has_content()
         )
         if not has_user_content:
-            return "未反馈"
+            return f"已重估 {reestimate_count} 次" if reestimate_count else "未反馈"
         dims_raw: dict[str, Any] | None = None
         actual = feedback.actual_logistics
         # 真实头程本身不代表存在实测包装。仅在实际包装尺寸或重量确实
@@ -604,7 +621,12 @@ class HistoryPage(QWidget):
                 "weight_g": actual.actual_package_weight_g,
             }
         suggested = feedback.suggested_package
-        if dims_raw is None and suggested is not None and suggested.has_content():
+        if (
+            dims_raw is None
+            and suggested is not None
+            and suggested.has_content()
+            and not is_ai_reestimate_polluted_suggestion(payload, suggested)
+        ):
             dims_raw = {
                 "length_cm": suggested.length_cm,
                 "width_cm": suggested.width_cm,
@@ -614,6 +636,8 @@ class HistoryPage(QWidget):
         if dims_raw is None and isinstance(v2.current_estimate, dict):
             dims_raw = dict(v2.current_estimate)
         lines = ["已反馈"]
+        if reestimate_count:
+            lines.insert(0, f"已重估 {reestimate_count} 次")
         dims_text = _dims_text(dims_raw)
         if dims_text != "—":
             lines.append(dims_text)

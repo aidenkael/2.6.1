@@ -287,6 +287,10 @@ class CalculationPage(QWidget):
         # 用户校准 dirty：仅用户手动修改当前采用尺寸/重量或填写用户修正时置位；
         # AI 首次自动复制不置位（程序化 setValue 不发信号）。
         self.user_calibration_dirty = False
+        # 用户亲手修改过“当前采用”的字段集合（程序化 setValue / AI 识图回填 /
+        # AI 重估采用 / 历史恢复永不进入）：suggested_package 的唯一来源。
+        # 参考裸品 confirmed_facts 的成功做法：不靠数值比较猜用户是否编辑。
+        self._user_manual_package_fields: set[str] = set()
         self._recognized_image_fingerprint: tuple[tuple[str, str], ...] = ()
         self._accepted_bare_fields: set[str] = set()
         # 用户真正编辑过的裸字段（程序化 setValue 永不进入）。
@@ -845,7 +849,8 @@ class CalculationPage(QWidget):
         for name, fields in (("AI估算", self.normal_fields), ("当前采用", self.conservative_fields)):
             fields["method"].textChanged.connect(lambda _text, n=name: self._scenario_manually_changed(n))
             for key in ("length", "width", "height", "weight"):
-                fields[key].valueChanged.connect(lambda _value, n=name: self._scenario_manually_changed(n))
+                # 传入字段 key：用户亲手编辑当前采用的哪个字段会被显式记录
+                fields[key].valueChanged.connect(lambda _value, n=name, k=key: self._scenario_manually_changed(n, k))
 
         self.product_cost.editingFinished.connect(lambda: self._accept_numeric_field("product_cost_rmb", self.product_cost))
         self.domestic_shipping.editingFinished.connect(lambda: self._accept_numeric_field("domestic_shipping_rmb", self.domestic_shipping))
@@ -1432,6 +1437,7 @@ class CalculationPage(QWidget):
             }
             self._accepted_bare_fields.clear()
             self._user_edited_bare_fields.clear()
+            self._user_manual_package_fields.clear()
             self._pending_confirmed_normal = {}
         self._recognized_image_fingerprint = self._image_fingerprint()
         self.ai_button.setText("AI识图")
@@ -1715,7 +1721,9 @@ class CalculationPage(QWidget):
         finally:
             self._updating = previous_updating
         self.manual_scenarios.add("当前采用")
-        self.user_calibration_dirty = True
+        # 接受 AI 重估 ≠ 用户亲手修改：不置 manual dirty；右卡被本次 AI 结果
+        # 整体重写，先前的手动字段标记一并清除，AI 值绝不冒充 user_suggested。
+        self._user_manual_package_fields.clear()
         self.packaging_stale = False
         self.review_badge.setText("已采用修正重估 · 需要复核")
         self.review_badge.setProperty("warning", True)
@@ -1806,17 +1814,30 @@ class CalculationPage(QWidget):
         self.recalculate()
 
     def _user_calibration_changed(self) -> None:
-        """当前采用尺寸/重量或用户修正被用户手动修改 → 用户校准 dirty。"""
+        """用户修正文字被用户手动输入 → 用户校准 dirty（来源 A：user_note）。
+
+        当前采用尺寸/重量的人工修改走 _scenario_manually_changed（来源 B），
+        两者都置 dirty，但 suggested_package 只由 _user_manual_package_fields 决定。
+        """
         self.user_calibration_dirty = True
         self._mark_dirty()
 
-    def _scenario_manually_changed(self, name: str) -> None:
+    # 包装卡控件字段 key → session/反馈字段名
+    _SCENARIO_KEY_TO_FACT = {
+        "length": "length_cm", "width": "width_cm", "height": "height_cm", "weight": "weight_g",
+    }
+
+    def _scenario_manually_changed(self, name: str, field_key: str | None = None) -> None:
         if self._updating:
             return
         self.manual_scenarios.add(name)
-        # 当前采用是用户校准入口 A：手动修改计入用户校准 dirty；
-        # AI 首次自动复制走程序化 setValue，不会进入这里。
         if name == "当前采用":
+            # 用户亲手修改当前采用的字段才进入 user_manual_package_fields；
+            # 程序化 setValue（AI 首次复制 / 识图回填 / 重估采用 / 历史恢复）
+            # 被 self._updating 抑制，永不进入，也绝不升级为 user_suggested。
+            fact_key = self._SCENARIO_KEY_TO_FACT.get(field_key or "")
+            if fact_key:
+                self._user_manual_package_fields.add(fact_key)
             self.user_calibration_dirty = True
         self.review_badge.setText("人工修改 · 需要复核")
         self.review_badge.setProperty("warning", True)
@@ -2209,25 +2230,37 @@ class CalculationPage(QWidget):
             QMessageBox.information(self, "保存成功", f"记录已保存：{self.record_id}")
 
     def _save_user_feedback(self) -> None:
-        """把用户校准（当前采用 + 用户修正）保存为 CalibrationFeedback（source=user）。
+        """把用户校准保存为 CalibrationFeedback（source=user）。
+
+        来源语义拆分（不再用单个 user_calibration_dirty 代表所有事情）：
+          A user_note：用户在“用于重估的修正”文本框亲手输入的文字，
+            独立保存，可进 Excel 用户校准内容；
+          B user_manual_package_fields：只有用户亲手编辑过的“当前采用”字段
+            才进入 suggested_package（user_suggested），
+            程序化 setValue / AI 识图回填 / AI 重估采用 / 历史恢复永不进入；
+          C AI 重估采用：只更新当前采用 / current_estimate / reestimate_history /
+            物流计算，绝不自动变成 user_suggested。
 
         主界面的当前采用属于用户校准入口 A，不是实际发货实测：
         suggested_package 恒为 user_suggested，绝不写 actual_logistics，
-        也绝不标记 actual_measured。
-        仅当用户校准 dirty（手动改当前采用或填写用户修正）时才写建议值；
-        AI 首次自动复制不产生校准反馈。
+        也绝不标记 actual_measured。AI 首次自动复制不产生校准反馈。
         已有 feedback 时更新同一个 feedback_id，并保留其中已录入的
         建议值、实测数据与结构反馈，不重复创建。
+        current_estimate 由 record_service.save 从 layers.adopted 派生
+        （接受 AI 重估 / 用户手动修改都会反映在右卡），此处不再重复写入。
         """
         if not self.record_id:
             return
         note = self.user_correction.text().strip() or None
         adopted = self._card_package_dict(self.conservative_fields)
-        keys = ("packaging_method", "length_cm", "width_cm", "height_cm", "weight_g")
-        adopted_filled = any(adopted[key] is not None for key in keys)
         suggested = None
-        if self.user_calibration_dirty and adopted_filled:
-            suggested = dict(adopted)
+        manual_fields = {
+            field: adopted[field]
+            for field in ("length_cm", "width_cm", "height_cm", "weight_g")
+            if field in self._user_manual_package_fields and adopted[field] is not None
+        }
+        if manual_fields:
+            suggested = dict(manual_fields)
             suggested["evidence_level"] = "user_suggested"
         actual = self._actual_first_mile_dict()
         if note is None and suggested is None and not actual:
@@ -2262,9 +2295,6 @@ class CalculationPage(QWidget):
         if feedback_id != self.current_feedback_id:
             self.current_feedback_id = feedback_id
             self.context.history_record_v2_service.link_feedback(self.record_id, feedback_id)
-        # 用户校准入口 A 同步 current_estimate：与历史页“编辑校准”入口 B 更新同一条
-        if suggested is not None:
-            self.context.history_record_v2_service.update_current_estimate(self.record_id, dict(suggested))
 
     @staticmethod
     def _card_package_dict(fields: dict[str, Any]) -> dict[str, Any]:
@@ -2395,6 +2425,7 @@ class CalculationPage(QWidget):
         self._recognized_image_fingerprint = ()
         self._accepted_bare_fields.clear()
         self._user_edited_bare_fields.clear()
+        self._user_manual_package_fields.clear()
         self._pending_confirmed_normal = {}
         self.packaging_stale = False
         self.manual_scenarios.clear()
@@ -2495,6 +2526,7 @@ class CalculationPage(QWidget):
         self.manual_scenarios.clear()
         # 清除上个会话残留的“用户编辑过”标记：历史恢复的 AI 值绝不被误确认成用户输入
         self._user_edited_bare_fields.clear()
+        self._user_manual_package_fields.clear()
         self.record_id = record_id
         # 进入历史编辑模式：恢复后修改任何字段都允许直接重算并更新同一条记录
         self.editing_record_id = record_id

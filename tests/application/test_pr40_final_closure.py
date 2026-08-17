@@ -301,7 +301,7 @@ class TestPromptV19:
     def test_prompt_keeps_core_blocks(self):
         """包含：页面事实 / bare estimate / sales unit / quantity / shipment。"""
         prompt = self._text()
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.0"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.1"
         assert "observed" in prompt and "页面事实" in prompt
         assert "bare_estimate" in prompt
         assert "销售单位" in prompt and "purchase_quantity" in prompt
