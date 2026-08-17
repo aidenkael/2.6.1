@@ -201,7 +201,7 @@ def test_multi_image_payload_order_is_stable_for_product_and_weight_evidence(tmp
 def test_v13_prompt_keeps_schema_and_adds_shipment_quantity_guidance():
     prompt = RecognitionService._prompt(1, include_json_shape=False)
 
-    assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.9"
+    assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.0"
     assert set(RecognitionService.RESPONSE_SCHEMA["properties"]) == {
         "product_name", "observed", "bare_estimate", "shipment", "structure", "quantity", "field_evidence", "note"
     }

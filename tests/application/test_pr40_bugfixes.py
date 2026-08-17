@@ -79,16 +79,14 @@ class TestPromptV17:
         return RecognitionService._prompt(1, include_json_shape=True)
 
     def test_prompt_version_is_v17(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.9"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.0"
 
     def test_prompt_lighter_than_v16(self):
-        """v1.8 prompt 文本部分不含旧版冗长数量规则和具体示例。
+        """v2.0 prompt 文本部分不含旧版冗长数量规则和具体示例。
 
-        v1.8 比 v1.6 更精简的关键不在于字符总数，而在于：
-        1. 移除了 false enum 声明
-        2. 数量规则只保留一行销售单位逻辑（先理解一个销售单位包含什么）
-        3. 移除了具体商品示例
-        4. 添加了精简的通用原则
+        字符数不再是成功指标（v2.0 覆盖全品类运输可变性，文本 1.6k+ 字符）；
+        关键仍在于：不包含 false enum 声明、数量规则只保留一行销售单位逻辑、
+        不包含具体商品示例、不包含品类规则/数值规则。仅保留一个宽松上限防止失控膨胀。
         """
         prompt = self._prompt_text()
         # 只保留一行销售单位逻辑；详细流程仍不在
@@ -98,12 +96,12 @@ class TestPromptV17:
         assert "库存/MOQ/销量/SKU选项数均非购买数量" not in prompt
         # v1.6 的 false enum 声明不再出现
         assert "enum 约束" not in prompt
-        # prompt 文本部分（不含 JSON 示例）应在合理范围内
+        # prompt 文本部分（不含 JSON 示例）应有界（宽松上限，防止失控膨胀）
         text_end = prompt.find("\n严格按以下 JSON")
         if text_end < 0:
             text_end = prompt.find("\n只返回符合")
         prompt_text = prompt[:text_end] if text_end > 0 else prompt
-        assert len(prompt_text) < 1300, f"Prompt 文本仍过长: {len(prompt_text)} chars"
+        assert len(prompt_text) < 3000, f"Prompt 文本异常膨胀: {len(prompt_text)} chars"
 
     def test_prompt_no_concrete_product_examples(self):
         prompt = self._prompt_text()
@@ -466,11 +464,12 @@ class TestPromptJsonShape:
         json_text = prompt[idx + len(marker):]
         shape = json.loads(json_text)
         structure = shape.get("structure", {})
-        # 从 prompt JSON 示例中移除的字段
+        # 仍不进入 JSON 示例的字段（保留在 schema 中，兼容解析）
         assert "overall_form" not in structure
         assert "packing_constraints" not in structure
         assert "has_rigid_parts" not in structure
-        assert "protrusion_flattenable" not in structure
+        # protrusion_flattenable 已恢复 AI 观察能力（全品类运输外轮廓证据，非包类特判）
+        assert "protrusion_flattenable" in structure
         # 保留的核心字段
         assert "packaging_state_hint" in structure
         assert "rigidity" in structure

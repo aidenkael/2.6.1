@@ -93,7 +93,7 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-visual-v1.9"
+    PROMPT_VERSION = "2.6.1-visual-v2.0"
     RESPONSE_SCHEMA = {
         "type": "object",
         "additionalProperties": False,
@@ -227,13 +227,14 @@ class RecognitionService:
 
 4. quantity：先理解一个销售单位包含什么，再判断购买多少销售单位（purchase_quantity）。主图多件不能直接等于套装；库存/销量/MOQ/SKU数量不能当购买数量。无法确认时：shipment 按 1 个销售单位估算，quantity_source 填 assumed/unknown。
 
-5. shipment（重点）：基于图片、页面事实、商品材质与结构、裸品、数量，以及正常低成本电商仓库的实际发货行为，直接整体判断真实打包员最可能采取什么正常处理方式，并给出处理后的长宽高、总重量和包装/运输状态。
+5. shipment（重点，AI 拥有最终判断权）：基于图片、页面事实、商品材质与结构、裸品、数量，以及正常低成本电商仓库的实际发货行为，直接整体判断真实打包员最可能采取什么正常处理方式，并给出处理后的长宽高、总重量和包装/运输状态。
+   先判断商品从展示状态变成真实运输状态时，哪些部分可以合理改变形态：折叠、压平/轻度压缩、卷起、嵌套/套叠、自然收纳、可拆卸部件、可转向/可贴平部件；把手、肩带、线材、软突出部分能否折下/收进主体/贴平；空腔能否自然排气；哪些是真正刚性不可改变的结构；是否易碎/易损必须保护；多件商品如何最可能共同发货。
    在两个极端之间正常判断：不过度保形（不无依据塞满填充物、纸箱完全保形），也不无依据做损伤商品的极端压缩。
    目标是"正常真实仓库最可能怎么发"，不是"最安全怎么发"，也不是"最极限省体积怎么发"。
    shipment.state 直接写最可能行为，同时描述主要物理形态、处理方式与包装方式，例如：自然压平后袋装、轻度压缩袋装、自然折叠后袋装、保持主体形状后袋装、保持形状后箱装。
    禁止：发货时效、包邮、货代、CAL、体积重、利润。禁止裸尺寸×数量、机械放大 L/W/H、固定压缩率。
 
-6. structure（辅助观察，有明确证据才记录，无证据 null/unknown）：rigidity（soft/semi_rigid/hard）、foldability、compressibility、packaging_state_hint、requires_shape_retention、packing_actions（flat_fold/roll/coil/compress/nest/disassemble/retain_shape）、硬底/硬背板/框架/硬内衬/原盒/硬卡。
+6. structure（辅助观察，有明确证据才记录，无证据 null/unknown）：rigidity（soft/semi_rigid/hard）、foldability、compressibility、packaging_state_hint、requires_shape_retention、packing_actions（flat_fold/roll/coil/compress/nest/disassemble/retain_shape）、protrusion_flattenable（把手/肩带/线材/软突出部分能否折下、收进或贴平而不改变刚性主体）、硬底/硬背板/框架/硬内衬/原盒/硬卡。
    不得因为"看起来挺括"自动推出 requires_shape_retention=true；不得因为 semi_rigid 自动推出不能压缩。硬结构与保形判断需要真实图片/页面证据，并在 field_evidence 定位（图序号+区域+原文）。structure 只作辅助记录，不得机械推导 shipment。
 
 7. note：仅必要补充。
@@ -241,7 +242,8 @@ class RecognitionService:
 通用原则：
 - 用户确认事实最高优先，不得修改。
 - 页面/图片明确事实高于 AI 推测。
-- 展示/支撑状态不等于实际运输状态。
+- 展示态≠运输态：图片为展示而撑起、立起、展开的状态，不能自动视为物流运输外轮廓。把手立起、肩带展开、软边缘展开、空腔撑开、可折部件张开、可拆配件外挂、为展示保持立体——都要判断真实仓库发货时是否会折下、收进、贴平、转向、拆下、自然压平。
+- 存在真正刚性骨架、不可逆损伤、易碎或必须保形的证据时保护；不预设压缩，也不预设保形。
 - 已自然折叠/袋装/收纳状态不要无依据重新展开或再次极端处理。
 - 不确定的页面事实返回 null。
 """.strip()
@@ -280,6 +282,7 @@ class RecognitionService:
                 "compressibility": None,
                 "requires_shape_retention": None,
                 "packing_actions": [],
+                "protrusion_flattenable": None,
                 "has_hard_bottom": None,
                 "has_hard_backboard": None,
                 "has_frame": None,

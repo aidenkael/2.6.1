@@ -220,7 +220,7 @@ class TestPromptContent:
         assert '"purchase_quantity"' in prompt
 
     def test_prompt_version_bumped(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.9"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.0"
 class TestBackwardCompatibility:
     """Old payloads without structure/quantity still work unchanged."""
 
@@ -271,7 +271,7 @@ class TestCanonicalVocabulary:
         prompt = RecognitionService._prompt(1, include_json_shape=True)
         assert "packaging_state_hint" in prompt
     def test_prompt_version_is_v15(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.9"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.0"
 
 
 class TestFieldEvidence:

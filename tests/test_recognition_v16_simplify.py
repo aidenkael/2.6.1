@@ -43,9 +43,11 @@ class TestPromptSimplification:
         for cat in forbidden:
             assert cat not in prompt, f"Prompt must not contain category: {cat}"
 
-    def test_prompt_shorter_than_v15(self):
+    def test_prompt_bounded_sanity_length(self):
+        """v2.0 不再以字符数下降为目标；仅保留宽松上限防止失控膨胀。"""
         prompt = RecognitionService._prompt(1, include_json_shape=False)
-        assert len(prompt) < 1500, f"Prompt too long: {len(prompt)} chars"
+        assert len(prompt) < 3000, f"Prompt too long: {len(prompt)} chars"
+        assert len(prompt) > 1500, "Prompt 已覆盖全品类运输可变性必要内容"
 
     def test_prompt_core_fields_present(self):
         prompt = RecognitionService._prompt(1, include_json_shape=True)
@@ -56,7 +58,7 @@ class TestPromptSimplification:
             assert field in prompt, f"Core field missing: {field}"
 
     def test_prompt_version_bumped(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.9"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.0"
 
 
 class TestQuantitySummary:

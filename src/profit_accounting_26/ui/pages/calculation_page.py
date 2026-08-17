@@ -289,6 +289,10 @@ class CalculationPage(QWidget):
         self.user_calibration_dirty = False
         self._recognized_image_fingerprint: tuple[tuple[str, str], ...] = ()
         self._accepted_bare_fields: set[str] = set()
+        # 用户真正编辑过的裸字段（程序化 setValue 永不进入）。
+        # confirmed_facts 捕获主机制：用户编辑数值的瞬间（valueChanged）即记录，
+        # 点击 AI 时再从这些字段按控件当前值落盘，不依赖 editingFinished/失焦。
+        self._user_edited_bare_fields: set[str] = set()
         self._pending_confirmed_normal: dict[str, Any] = {}
 
         self._load_ui_widgets()
@@ -849,6 +853,11 @@ class CalculationPage(QWidget):
             widget.editingFinished.connect(self._upstream_changed)
         for key, widget in (("length_cm", self.bare_length), ("width_cm", self.bare_width), ("height_cm", self.bare_height), ("weight_g", self.bare_weight)):
             widget.editingFinished.connect(lambda k=key: self._accept_bare_field(k))
+        # 用户编辑瞬间即捕获（主机制）：非程序化 valueChanged → 记录“用户编辑过此字段”
+        # 并即时写入 session。程序化 setValue 由 _SpinAdapter._programmatic 抑制，
+        # 永不进入这里（程序化 AI 回填不会升级为用户确认）。
+        for key, widget in (("length_cm", self.bare_length), ("width_cm", self.bare_width), ("height_cm", self.bare_height), ("weight_g", self.bare_weight)):
+            widget.valueChanged.connect(lambda value, k=key: self._on_bare_user_edited(k, value))
         self.product_summary.textChanged.connect(lambda _text: self._upstream_changed())
         # product_summary is now read-only; no editing override
         self.material_summary.textChanged.connect(lambda _text: self._upstream_changed())
@@ -1032,11 +1041,12 @@ class CalculationPage(QWidget):
         return "；".join(dict.fromkeys(parts))
 
     def _force_sync_confirmed_facts(self) -> None:
-        """用户点击 AI 前强制同步手写字段到 session。
+        """互补安全网：清焦触发 editingFinished，落盘仍在编辑中的编辑器。
 
-        修复 Bug：用户输入后立即点 AI，editingFinished 未触发导致 confirmed_facts 漏传。
-        通过清除焦点触发 FocusOut → editingFinished 链路；仅影响用户正在编辑的控件，
-        程序化 setValue 不会受影响（_programmatic 保护仍在）。
+        主机制是 _on_bare_user_edited（用户编辑瞬间即确认）+
+        _ai_request_confirmed_facts（点击 AI 时按控件当前值再落盘一次），
+        不依赖失焦；此方法仅作为多余保险（如正在编辑的非裸字段编辑器）。
+        程序化 setValue 不受影响（_programmatic 保护仍在）。
         """
         focused = self._root.focusWidget()
         if focused is not None and focused is not self._root:
@@ -1060,6 +1070,53 @@ class CalculationPage(QWidget):
             elif key == "weight_g":
                 if hasattr(self, "lbl_bare_weight_source"):
                     self.lbl_bare_weight_source.setText("\u7528\u6237\u786e\u8ba4")
+
+    def _on_bare_user_edited(self, key: str, value: float) -> None:
+        """用户编辑裸字段（非程序化 valueChanged）→ 记录“用户编辑过此字段”并即时确认。
+
+        confirmed_facts 捕获主机制：不依赖 editingFinished / 失焦 / clearFocus。
+        用户真正编辑数值的瞬间（键入、粘贴、步进）即进入 session；
+        程序化 setValue（AI 回填 / 历史恢复 / 清空）被 _SpinAdapter._programmatic
+        与 self._updating 双重抑制，永不升级为用户确认。0 尺寸/0 重量仍表示未设置。
+        """
+        if self._updating:
+            return
+        self._user_edited_bare_fields.add(key)
+        self.session.confirm_value(key, value if value > 0 else None)
+        if key in ("length_cm", "width_cm", "height_cm"):
+            if hasattr(self, "lbl_bare_dim_source"):
+                self.lbl_bare_dim_source.setText("\u7528\u6237\u786e\u8ba4")
+        elif key == "weight_g":
+            if hasattr(self, "lbl_bare_weight_source"):
+                self.lbl_bare_weight_source.setText("\u7528\u6237\u786e\u8ba4")
+
+    def _sync_user_edited_bare_fields(self) -> None:
+        """AI 点击前的最终落盘：把用户编辑过的裸字段当前控件值同步进 session。
+
+        用户在输入框内键入后立即点击 AI（焦点仍在输入框、从未失焦）时，
+        控件值已由 keyboardTracking 实时更新；这里以控件当前值为准再确认一次，
+        覆盖中间值竞态，保证 700g 一定进入 AI 请求。0 仍归一为未设置。
+        """
+        for key, widget in (
+            ("length_cm", self.bare_length),
+            ("width_cm", self.bare_width),
+            ("height_cm", self.bare_height),
+            ("weight_g", self.bare_weight),
+        ):
+            if key not in self._user_edited_bare_fields:
+                continue
+            value = widget.value()
+            self.session.confirm_value(key, value if value > 0 else None)
+
+    def _ai_request_confirmed_facts(self) -> dict[str, dict[str, Any]]:
+        """AI 请求前的权威事实快照：识图与重估共用的唯一入口。
+
+        语义（权威事实层）：用户 confirmed > 页面明确事实 > AI 估算 > 未知。
+        先落盘用户正在编辑的裸字段，再返回完整 confirmed_facts 集合；
+        raw AI 永不修改，程序化回填永不升级。
+        """
+        self._sync_user_edited_bare_fields()
+        return self._confirmed_facts()
 
     def _accept_numeric_field(self, key: str, widget: Any) -> None:
         if self._updating:
@@ -1212,12 +1269,14 @@ class CalculationPage(QWidget):
         if not image_items:
             QMessageBox.information(self, "没有图片", "请先导入至少一张图片。")
             return
-        # 强制同步：用户手写字段立即进入 session，不依赖 editingFinished/FocusOut。
+        # 权威事实快照：用户编辑字段在 valueChanged 瞬间已进 session，此处再按
+        # 控件当前值落盘一次，不依赖 clearFocus/editingFinished；
+        # _force_sync_confirmed_facts 仅作互补安全网。
         self._force_sync_confirmed_facts()
         self._diagnostic_operation = self.context.diagnostic_logger.begin_operation("ai-recognition")
         images = [self.context.diagnostic_logger.image_metadata(item["path"]) for item in image_items]
         self._diagnostic_operation.event("image_attached", images=images)
-        confirmed_facts = self._confirmed_facts()
+        confirmed_facts = self._ai_request_confirmed_facts()
         self._diagnostic_operation.event("user_confirmed_facts", confirmed_facts=confirmed_facts)
         self._diagnostic_operation.event("ai_request_started")
         self._show_recognition_dialog()
@@ -1372,6 +1431,7 @@ class CalculationPage(QWidget):
                 "normal_packaging": self._scenario_data(self.normal_fields),
             }
             self._accepted_bare_fields.clear()
+            self._user_edited_bare_fields.clear()
             self._pending_confirmed_normal = {}
         self._recognized_image_fingerprint = self._image_fingerprint()
         self.ai_button.setText("AI识图")
@@ -1480,7 +1540,7 @@ class CalculationPage(QWidget):
             QMessageBox.information(self, "需要用户修正", "请先填写修正原因，再点击“按修正重估”。")
             return
         current = self.collect_observation()
-        session_facts = self.session.confirmed_facts()
+        session_facts = self._ai_request_confirmed_facts()
         confirmed_facts: dict[str, Any] = {}
         for field in ("length_cm", "width_cm", "height_cm", "weight_g"):
             if field in session_facts:
@@ -2334,6 +2394,7 @@ class CalculationPage(QWidget):
             self._reload_actual_forwarder_combo()
         self._recognized_image_fingerprint = ()
         self._accepted_bare_fields.clear()
+        self._user_edited_bare_fields.clear()
         self._pending_confirmed_normal = {}
         self.packaging_stale = False
         self.manual_scenarios.clear()
@@ -2432,6 +2493,8 @@ class CalculationPage(QWidget):
             return
         self._updating = True
         self.manual_scenarios.clear()
+        # 清除上个会话残留的“用户编辑过”标记：历史恢复的 AI 值绝不被误确认成用户输入
+        self._user_edited_bare_fields.clear()
         self.record_id = record_id
         # 进入历史编辑模式：恢复后修改任何字段都允许直接重算并更新同一条记录
         self.editing_record_id = record_id
