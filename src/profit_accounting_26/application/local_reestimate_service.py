@@ -91,7 +91,8 @@ class LocalReestimateService:
             initial_context: dict[str, Any] = {}
             # 第一次 AI 观察中的关键事实
             for key in ("product_name", "product_type", "material", "quantity",
-                         "quantity_summary", "length_cm", "width_cm", "height_cm", "weight_g"):
+                         "quantity_unit", "quantity_summary",
+                         "length_cm", "width_cm", "height_cm", "weight_g"):
                 val = initial_ai_observation.get(key)
                 if val is not None and val != "" and val != 0:
                     initial_context[key] = val

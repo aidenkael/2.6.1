@@ -93,7 +93,7 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-visual-v2.1"
+    PROMPT_VERSION = "2.6.1-visual-v2.2"
     RESPONSE_SCHEMA = {
         "type": "object",
         "additionalProperties": False,
@@ -103,10 +103,22 @@ class RecognitionService:
             "observed": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["product_price_rmb", "page_shipping_rmb", "bare_dimensions_cm", "bare_weight_g"],
+                "required": ["product_unit_price_rmb", "product_total_cost_rmb", "product_cost_value_type",
+                             "page_shipping_rmb", "page_shipping_value_type", "bare_dimensions_cm", "bare_weight_g"],
                 "properties": {
+                    # 旧字段 product_price_rmb 只作解析兼容（单价语义），新合同优先 unit/total。
                     "product_price_rmb": {"type": ["number", "null"]},
+                    "product_unit_price_rmb": {"type": ["number", "null"]},
+                    "product_total_cost_rmb": {"type": ["number", "null"]},
+                    "product_cost_value_type": {
+                        "type": ["string", "null"],
+                        "enum": ["exact", "estimated", "starting_from", "range_min", "unknown"],
+                    },
                     "page_shipping_rmb": {"type": ["number", "null"]},
+                    "page_shipping_value_type": {
+                        "type": ["string", "null"],
+                        "enum": ["exact", "estimated", "starting_from", "range_min", "unknown"],
+                    },
                     "bare_dimensions_cm": {
                         "type": "object",
                         "additionalProperties": False,
@@ -147,13 +159,27 @@ class RecognitionService:
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "overall_form": {"type": ["string", "null"]},
-                    "packaging_state_hint": {"type": ["string", "null"]},
-                    "rigidity": {"type": ["string", "null"]},
-                    "foldability": {"type": ["string", "null"]},
-                    "compressibility": {"type": ["string", "null"]},
+                    "overall_form": {
+                        "type": ["string", "null"],
+                        "enum": ["unknown", "soft_flat", "soft_bulky", "flexible_chain",
+                                 "hard_flat", "hard_long", "hard_3d", "fragile_protruding", "mixed"],
+                    },
+                    "packaging_state_hint": {
+                        "type": ["string", "null"],
+                        "enum": ["unknown", "full_flat_fold", "strong_compression",
+                                 "moderate_compression", "shape_retained"],
+                    },
+                    "rigidity": {"type": ["string", "null"], "enum": ["unknown", "soft", "semi_rigid", "hard"]},
+                    "foldability": {"type": ["string", "null"], "enum": ["unknown", "none", "limited", "good"]},
+                    "compressibility": {"type": ["string", "null"], "enum": ["unknown", "none", "limited", "good"]},
                     "requires_shape_retention": {"type": ["boolean", "null"]},
-                    "packing_actions": {"type": ["array", "null"], "items": {"type": "string"}},
+                    "packing_actions": {
+                        "type": ["array", "null"],
+                        "items": {
+                            "type": "string",
+                            "enum": ["flat_fold", "roll", "coil", "compress", "nest", "disassemble", "retain_shape"],
+                        },
+                    },
                     "packing_constraints": {"type": ["array", "null"], "items": {"type": "string"}},
                     "has_hard_bottom": {"type": ["boolean", "null"]},
                     "has_hard_backboard": {"type": ["boolean", "null"]},
@@ -171,13 +197,19 @@ class RecognitionService:
                 "properties": {
                     "purchase_quantity": {"type": ["integer", "null"]},
                     "quantity_source": {"type": ["string", "null"]},
+                    "quantity_unit": {"type": ["string", "null"]},
                     "quantity_summary": {"type": ["string", "null"]}
                 }
             },
             "field_evidence": {
                 "type": "object",
                 "additionalProperties": True,
-                "description": "Optional located evidence for structure booleans. Keys are field names (e.g. has_hard_bottom). Values are objects with source_image_index, region_description or raw_text, and source.",
+                "description": ("Located evidence. Keys are field names (e.g. has_hard_bottom, "
+                                "product_total_cost_rmb, dimensions). Values follow the canonical shape "
+                                "{\"source_image_index\": int, \"region\": str, \"raw_text\": str, "
+                                "\"meaning\": str}: raw_text may be empty for pure visual evidence, but "
+                                "source_image_index and region (or meaning) are required; never fabricate "
+                                "evidence without a locatable source."),
                 "properties": {}
             },
             "note": {"type": "string"},
@@ -222,10 +254,12 @@ class RecognitionService:
 1. product_name：简短、规范、可搜索。
 
 2. observed：只读取图片/页面明确事实（商品价格、页面/国内运费、裸尺寸、裸重）；看不清返回 null，禁止猜测。
+   价格必须区分单价与本次购买总价：页面明确显示“已选总价/合计”等 → product_total_cost_rmb；页面只显示明确单价 → product_unit_price_rmb；不要输出旧字段 product_price_rmb（解析器只作旧兼容）。
+   value_type（product_cost_value_type / page_shipping_value_type）只允许 exact / estimated / starting_from / range_min / unknown：明确选中SKU或明确合计 → exact；“约/预计/approx” → estimated；“起/起步/from” → starting_from；明确区间 → range_min（只存下限）；看不清 → unknown。不得因为数字非空就标 exact。
 
 3. bare_estimate：observed 缺失时合理估算裸品长宽高/裸重（observed=页面事实，bare_estimate=AI推测，必须区分）。
 
-4. quantity：先理解一个销售单位包含什么，再判断购买多少销售单位（purchase_quantity）。主图多件不能直接等于套装；库存/销量/MOQ/SKU数量不能当购买数量。无法确认时：shipment 按 1 个销售单位估算，quantity_source 填 assumed/unknown。
+4. quantity：先理解一个销售单位包含什么，再判断购买多少销售单位（purchase_quantity）。quantity_unit 是 purchase_quantity 对应的销售单位中文简称（例如：双、件、套、个、包、盒、组、卷），从页面销售关系判断；看不清返回 null/空；不得根据商品类型猜测单位。quantity_summary 保留完整解释（如“2套，共6件”），不参与物流计算。主图多件不能直接等于套装；库存/销量/MOQ/SKU数量不能当购买数量。无法确认时：shipment 按 1 个销售单位估算，quantity_source 填 assumed/unknown。
 
 5. shipment（重点，AI 拥有最终判断权）：基于图片、页面事实、商品材质与结构、裸品、数量，以及正常低成本电商仓库的实际发货行为，直接整体判断真实打包员最可能采取什么正常处理方式，并给出处理后的长宽高、总重量和包装/运输状态。
    先判断商品从展示状态变成真实运输状态时，哪些部分可以合理改变形态：折叠、压平/轻度压缩、卷起、嵌套/套叠、自然收纳、可拆卸部件、可转向/可贴平部件；把手、肩带、线材、软突出部分能否折下/收进主体/贴平；空腔能否自然排气；哪些是真正刚性不可改变的结构；是否易碎/易损必须保护；多件商品如何最可能共同发货。
@@ -234,8 +268,14 @@ class RecognitionService:
    shipment.state 直接写最可能行为，同时描述主要物理形态、处理方式与包装方式，例如：自然压平后袋装、轻度压缩袋装、自然折叠后袋装、保持主体形状后袋装、保持形状后箱装。
    禁止：发货时效、包邮、货代、CAL、体积重、利润。禁止裸尺寸×数量、机械放大 L/W/H、固定压缩率。
 
-6. structure（辅助观察，有明确证据才记录，无证据 null/unknown）：rigidity（soft/semi_rigid/hard）、foldability、compressibility、packaging_state_hint、requires_shape_retention、packing_actions（flat_fold/roll/coil/compress/nest/disassemble/retain_shape）、protrusion_flattenable（把手/肩带/线材/软突出部分能否折下、收进或贴平而不改变刚性主体）、硬底/硬背板/框架/硬内衬/原盒/硬卡。
-   不得因为"看起来挺括"自动推出 requires_shape_retention=true；不得因为 semi_rigid 自动推出不能压缩。硬结构与保形判断需要真实图片/页面证据，并在 field_evidence 定位（图序号+区域+原文）。structure 只作辅助记录，不得机械推导 shipment。
+6. structure（辅助观察，有明确证据才记录，无证据 null/unknown）：只输出以下正式值，不要输出其它写法——
+   rigidity：soft / semi_rigid / hard；foldability 与 compressibility：none / limited / good；
+   packaging_state_hint：full_flat_fold / strong_compression / moderate_compression / shape_retained；
+   packing_actions：flat_fold / roll / coil / compress / nest / disassemble / retain_shape（自然叠放/堆叠用 shipment.state 描述，不要输出 stack）。
+   requires_shape_retention、protrusion_flattenable（把手/肩带/线材/软突出部分能否折下、收进或贴平而不改变刚性主体）、硬底/硬背板/框架/硬内衬/原盒/硬卡按实际证据判断。
+   不得因为"看起来挺括"自动推出 requires_shape_retention=true；不得因为 semi_rigid 自动推出不能压缩。硬结构与保形判断需要真实图片/页面证据，并在 field_evidence 定位。
+   field_evidence 统一格式：{{"source_image_index": 图序号, "region": "区域", "raw_text": "页面原文(可空)", "meaning": "含义"}}；纯视觉证据 raw_text 可空，但必须有 source_image_index 与 region/meaning；无明确证据不要伪造 evidence。
+   structure 只作辅助记录，不得机械推导 shipment。
 
 7. note：仅必要补充。
 
@@ -254,8 +294,11 @@ class RecognitionService:
             {
               "product_name": "",
               "observed": {
-                "product_price_rmb": None,
+                "product_unit_price_rmb": None,
+                "product_total_cost_rmb": None,
+                "product_cost_value_type": None,
                 "page_shipping_rmb": None,
+                "page_shipping_value_type": None,
                 "bare_dimensions_cm": {
                   "length": None,
                   "width": None,
@@ -294,9 +337,17 @@ class RecognitionService:
               "quantity": {
                 "purchase_quantity": None,
                 "quantity_source": None,
+                "quantity_unit": None,
                 "quantity_summary": None
               },
-              "field_evidence": {},
+              "field_evidence": {
+                "has_hard_bottom": {
+                  "source_image_index": 1,
+                  "region": "商品主体底部",
+                  "raw_text": "",
+                  "meaning": "可见硬质底板"
+                }
+              },
               "note": ""
             },
             ensure_ascii=False,
@@ -421,6 +472,134 @@ class RecognitionService:
             calibration_version="",
         )
 
+    # ------------------------------------------------------------------
+    # v2.2 数据合同：value_type / structure 有限 alias（小型、明确、无歧义）
+    # ------------------------------------------------------------------
+
+    COST_VALUE_TYPES: frozenset[str] = frozenset({
+        "exact", "estimated", "starting_from", "range_min", "unknown",
+    })
+
+    # structure 正式 canonical 值集合（Prompt / JSON 示例 / Schema / Parser / 内部存储统一）。
+    STRUCT_CANONICAL: dict[str, frozenset[str]] = {
+        "overall_form": frozenset({
+            "unknown", "soft_flat", "soft_bulky", "flexible_chain",
+            "hard_flat", "hard_long", "hard_3d", "fragile_protruding", "mixed",
+        }),
+        "packaging_state_hint": frozenset({
+            "unknown", "full_flat_fold", "strong_compression",
+            "moderate_compression", "shape_retained",
+        }),
+        "rigidity": frozenset({"unknown", "soft", "semi_rigid", "hard"}),
+        "foldability": frozenset({"unknown", "none", "limited", "good"}),
+        "compressibility": frozenset({"unknown", "none", "limited", "good"}),
+    }
+    PACKING_ACTIONS_CANONICAL: frozenset[str] = frozenset({
+        "flat_fold", "roll", "coil", "compress", "nest", "disassemble", "retain_shape",
+    })
+
+    # 有限 alias：只映射语义明显的常见模型输出；归一后 raw 仍保留在 raw_payload。
+    # 不在映射内的值 → normalized 保持 unknown + parse issue（绝不猜）。
+    STRUCT_ALIASES: dict[str, dict[str, str]] = {
+        "rigidity": {
+            "rigid": "hard",
+            "flexible": "soft",
+            "medium": "semi_rigid",
+            "moderate": "semi_rigid",
+        },
+        "foldability": {
+            "highly_foldable": "good",
+            "high": "good",
+            "foldable": "good",
+            "moderate": "limited",
+            "medium": "limited",
+            "not_foldable": "none",
+            "non_foldable": "none",
+            "no_fold": "none",
+        },
+        "compressibility": {
+            "highly_compressible": "good",
+            "high": "good",
+            "compressible": "good",
+            "moderate": "limited",
+            "medium": "limited",
+            "not_compressible": "none",
+            "non_compressible": "none",
+        },
+        "packaging_state_hint": {
+            "flat_fold": "full_flat_fold",
+            "shape_retention": "shape_retained",
+            "retain_shape": "shape_retained",
+        },
+    }
+    PACKING_ACTIONS_ALIASES: dict[str, str] = {
+        "rolling": "roll",
+        "coiling": "coil",
+        "compressing": "compress",
+        "nesting": "nest",
+    }
+
+    @classmethod
+    def _normalize_value_type(cls, value: Any, *, field_name: str,
+                              parse_issues: dict[str, dict[str, Any]]) -> str:
+        """只接受正式 value_type；非正式值 → unknown + parse issue（不猜测、不默认 exact）。"""
+        if isinstance(value, str) and value.strip() in cls.COST_VALUE_TYPES:
+            return value.strip()
+        if value not in (None, ""):
+            parse_issues[field_name] = {"raw_value": value, "reason": "non_canonical_value_type"}
+        return "unknown"
+
+    @staticmethod
+    def _infer_value_type_from_evidence(evidence: Any) -> str:
+        """页面原文推断 value_type；无风险信号返回 unknown（绝不默认 exact）。
+
+        “起/起步/from” → starting_from；“约/预计/approx” → estimated；
+        明确区间 → range_min。
+        """
+        text = ""
+        if isinstance(evidence, dict):
+            text = " ".join(
+                str(evidence.get(key) or "") for key in ("raw_text", "meaning", "semantic_note")
+            )
+        lowered = text.lower()
+        if any(token in lowered for token in ("estimate", "approx", "about", "around")) \
+                or "约" in text or "预计" in text or "左右" in text:
+            return "estimated"
+        if "starting" in lowered or "from" in lowered or "起" in text:
+            return "starting_from"
+        if "range" in lowered or "区间" in text or bool(re.search(r"\d+\s*[-~/]\s*\d+", text)):
+            return "range_min"
+        return "unknown"
+
+    @classmethod
+    def _resolve_cost_value_type(cls, *, ai_value_type: Any, field_name: str,
+                                 evidence: Any, parse_issues: dict[str, dict[str, Any]]) -> str:
+        """AI 显式 value_type 优先（含显式 unknown）；AI 未给出时按 evidence 推断；
+        再无信号 → unknown（绝不自动 exact）。"""
+        if isinstance(ai_value_type, str) and ai_value_type.strip() in cls.COST_VALUE_TYPES:
+            return ai_value_type.strip()
+        if ai_value_type not in (None, ""):
+            parse_issues[field_name] = {"raw_value": ai_value_type, "reason": "non_canonical_value_type"}
+        return cls._infer_value_type_from_evidence(evidence)
+
+    @classmethod
+    def _normalize_structure_value(cls, field: str, value: Any,
+                                   parse_issues: dict[str, dict[str, Any]]) -> str | None:
+        """structure 字符串字段归一：canonical 直通 → 有限 alias → 否则 None + parse issue。"""
+        if not isinstance(value, str) or not value.strip():
+            return None
+        raw = value.strip()
+        canonical = cls.STRUCT_CANONICAL.get(field)
+        if canonical is not None and raw in canonical:
+            return raw
+        alias = cls.STRUCT_ALIASES.get(field, {}).get(raw.lower())
+        if alias is not None:
+            return alias
+        parse_issues[f"structure.{field}"] = {
+            "raw_value": raw, "reason": "non_canonical_structure_value",
+        }
+        return None
+
     @classmethod
     def _parse_v1_payload(cls, payload: dict[str, Any], *, model: str) -> tuple[AIObservation, PackagingProposal]:
         observed = payload.get("observed") if isinstance(payload.get("observed"), dict) else {}
@@ -430,17 +609,43 @@ class RecognitionService:
             else {}
         )
         parse_issues: dict[str, dict[str, Any]] = {}
-        raw_observation = {
+        field_evidence = payload.get("field_evidence") if isinstance(payload.get("field_evidence"), dict) else {}
+        # --- 商品成本（v2.2 合同）：单价 / 总价分离 ---
+        # 旧字段 product_price_rmb 视为单价语义，仅旧兼容。
+        unit_price = cls._parse_optional_number(
+            observed.get("product_unit_price_rmb", observed.get("product_price_rmb")),
+            field_name="observed.product_unit_price_rmb", parse_issues=parse_issues,
+        )
+        total_cost = cls._parse_optional_number(
+            observed.get("product_total_cost_rmb"), field_name="observed.product_total_cost_rmb",
+            parse_issues=parse_issues,
+        )
+        cost_value_type = cls._resolve_cost_value_type(
+            ai_value_type=observed.get("product_cost_value_type"),
+            field_name="observed.product_cost_value_type",
+            evidence=field_evidence.get("product_cost_rmb") or field_evidence.get("product_total_cost_rmb")
+            or field_evidence.get("product_unit_price_rmb"),
+            parse_issues=parse_issues,
+        )
+        shipping_value_type = cls._resolve_cost_value_type(
+            ai_value_type=observed.get("page_shipping_value_type"),
+            field_name="observed.page_shipping_value_type",
+            evidence=field_evidence.get("domestic_shipping_rmb") or field_evidence.get("page_shipping_rmb"),
+            parse_issues=parse_issues,
+        )
+        raw_observation: dict[str, Any] = {
             "product_name": str(payload.get("product_name") or "").strip(),
             "display_product_summary": str(payload.get("product_name") or "").strip(),
-            "product_cost_rmb": cls._parse_optional_number(
-                observed.get("product_price_rmb"), field_name="observed.product_price_rmb",
-                parse_issues=parse_issues,
-            ),
+            # product_cost_rmb 恒为“本次购买总商品成本”；在数量解析完成后统一计算。
+            "product_cost_rmb": None,
+            "product_cost_value_type": cost_value_type,
+            "product_unit_price_rmb": unit_price,
+            "product_total_cost_rmb": total_cost,
             "domestic_shipping_rmb": cls._parse_optional_number(
                 observed.get("page_shipping_rmb"), field_name="observed.page_shipping_rmb",
                 parse_issues=parse_issues,
             ),
+            "domestic_shipping_value_type": shipping_value_type,
             "length_cm": cls._parse_optional_number(
                 dimensions.get("length"), field_name="observed.bare_dimensions_cm.length",
                 parse_issues=parse_issues,
@@ -482,46 +687,16 @@ class RecognitionService:
                 parse_issues=parse_issues,
             ),
         }
-        if raw_observation["product_cost_rmb"] is not None:
-            raw_observation["product_cost_value_type"] = "exact"
-        if raw_observation["domestic_shipping_rmb"] is not None:
-            raw_observation["domestic_shipping_value_type"] = "exact"
         normalized_payload = dict(payload)
-        if parse_issues:
-            normalized_payload["numeric_parse_issues"] = parse_issues
-        # --- Structural + quantity + evidence field mapping (v1.5) ---
+        # --- Structural + quantity + evidence field mapping (v1.5 / v2.2) ---
         structure = payload.get("structure") if isinstance(payload.get("structure"), dict) else {}
-        # 合法 canonical 值集合；不在此集合内的字符串 → None，不做近义词映射。
-        _STRUCT_CANONICAL: dict[str, frozenset[str]] = {
-            "overall_form": frozenset({
-                "unknown", "soft_flat", "soft_bulky", "flexible_chain",
-                "hard_flat", "hard_long", "hard_3d", "fragile_protruding", "mixed",
-            }),
-            "packaging_state_hint": frozenset({
-                "unknown", "full_flat_fold", "strong_compression",
-                "moderate_compression", "shape_retained",
-            }),
-            "rigidity": frozenset({"unknown", "soft", "semi_rigid", "hard"}),
-            "foldability": frozenset({"unknown", "none", "limited", "good"}),
-            "compressibility": frozenset({"unknown", "none", "limited", "good"}),
-        }
-        # packing_actions 只接受正式允许值；非法值不进入规则控制层。
-        _PACKING_ACTIONS_CANONICAL = frozenset({
-            "flat_fold", "roll", "coil", "compress", "nest", "disassemble", "retain_shape",
-        })
         _STRUCT_STR_FIELDS = (
             "overall_form", "packaging_state_hint", "rigidity", "foldability", "compressibility",
         )
         for fld in _STRUCT_STR_FIELDS:
-            val = structure.get(fld)
-            if isinstance(val, str) and val.strip():
-                canonical = val.strip()
-                allowed = _STRUCT_CANONICAL.get(fld)
-                if allowed is not None and canonical not in allowed:
-                    # 非法值 → 不写入，保持默认 unknown/None
-                    pass
-                else:
-                    raw_observation[fld] = canonical
+            normalized = cls._normalize_structure_value(fld, structure.get(fld), parse_issues=parse_issues)
+            if normalized is not None:
+                raw_observation[fld] = normalized
         _STRUCT_BOOL_FIELDS = (
             "requires_shape_retention", "has_hard_bottom", "has_hard_backboard",
             "has_frame", "has_rigid_insert", "has_rigid_parts",
@@ -538,15 +713,27 @@ class RecognitionService:
                 cleaned = [str(v).strip() for v in val if isinstance(v, str) and str(v).strip()]
                 if cleaned:
                     raw_observation[fld] = cleaned
-        # packing_actions 仅接受正式允许值；非法值不进入规则控制层。
+        # packing_actions：正式值直通，有限 alias 归一，其余丢弃并记录 parse issue（不静默丢信息）。
         actions = structure.get("packing_actions")
         if isinstance(actions, list):
-            cleaned_actions = [
-                str(v).strip() for v in actions
-                if isinstance(v, str) and str(v).strip() in _PACKING_ACTIONS_CANONICAL
-            ]
+            cleaned_actions: list[str] = []
+            dropped_actions: list[str] = []
+            for value in actions:
+                if not isinstance(value, str) or not value.strip():
+                    continue
+                token = value.strip()
+                if token in cls.PACKING_ACTIONS_CANONICAL:
+                    cleaned_actions.append(token)
+                elif token.lower() in cls.PACKING_ACTIONS_ALIASES:
+                    cleaned_actions.append(cls.PACKING_ACTIONS_ALIASES[token.lower()])
+                else:
+                    dropped_actions.append(token)
             if cleaned_actions:
                 raw_observation["packing_actions"] = cleaned_actions
+            if dropped_actions:
+                parse_issues.setdefault("structure.packing_actions", {
+                    "raw_values": dropped_actions, "reason": "non_canonical_packing_action",
+                })
         # Quantity block：先判断一个销售单位包含什么，再判断购买数量。
         qty_block = payload.get("quantity") if isinstance(payload.get("quantity"), dict) else {}
         pq = qty_block.get("purchase_quantity")
@@ -564,13 +751,48 @@ class RecognitionService:
             # 不得在历史和校准数据中伪装成"真实购买数量=1"。
             raw_observation["quantity"] = 1
             raw_observation["quantity_source"] = "assumed/unknown"
+        # quantity_unit：purchase_quantity 对应的销售单位中文简称（AI 判断，本地不猜）。
+        qunit = qty_block.get("quantity_unit")
+        if isinstance(qunit, str) and qunit.strip():
+            raw_observation["quantity_unit"] = qunit.strip()
         qsum = qty_block.get("quantity_summary")
         if isinstance(qsum, str) and qsum.strip():
             raw_observation["quantity_summary"] = qsum.strip()
-        # Field evidence for structure booleans
-        fe = payload.get("field_evidence") if isinstance(payload.get("field_evidence"), dict) else {}
-        if fe:
-            normalized_payload["field_evidence"] = fe
+        # --- 商品成本最终值（规则 A-D）：product_cost_rmb 恒为本次购买总商品成本 ---
+        cost_audit: dict[str, Any] = {}
+        quantity_for_cost = raw_observation["quantity"] if quantity_confirmed else None
+        if total_cost is not None:
+            # A. 页面明确“已选总价/合计”→ 直接采用 total（无需数量）。
+            raw_observation["product_cost_rmb"] = total_cost
+            if unit_price is not None and quantity_for_cost is not None:
+                unit_times_quantity = round(unit_price * quantity_for_cost, 2)
+                if abs(unit_times_quantity - total_cost) > max(0.5, total_cost * 0.05):
+                    # D. unit × quantity 与页面 total 明显数学冲突：记录 warning，不静默选错值。
+                    cost_audit["unit_total_conflict"] = {
+                        "unit_price": unit_price, "quantity": quantity_for_cost,
+                        "unit_times_quantity": unit_times_quantity, "page_total": total_cost,
+                        "adopted": "page_total",
+                    }
+                    parse_issues["cost.unit_total_conflict"] = {
+                        "reason": "unit_times_quantity_conflicts_with_page_total",
+                        **cost_audit["unit_total_conflict"],
+                    }
+        elif unit_price is not None and quantity_for_cost is not None:
+            # B. 页面只显示明确单价 + 数量已确认：本地做确定性乘法（页面明确数字的乘法，非 AI 包装估算）。
+            raw_observation["product_cost_rmb"] = round(unit_price * quantity_for_cost, 2)
+        elif unit_price is not None:
+            # C. 数量不确定：不得把单价伪装成本次购买总成本。
+            cost_audit["unit_price_without_quantity"] = {
+                "unit_price": unit_price, "reason": "quantity_unconfirmed_unit_price_not_total",
+            }
+            parse_issues["cost.unit_price_without_quantity"] = cost_audit["unit_price_without_quantity"]
+        if cost_audit:
+            normalized_payload["cost_audit"] = cost_audit
+        if parse_issues:
+            normalized_payload["numeric_parse_issues"] = parse_issues
+        # Field evidence for structure booleans / costs
+        if field_evidence:
+            normalized_payload["field_evidence"] = field_evidence
         # Snapshot observation AFTER all structural/quantity/evidence fields are mapped
         normalized_payload["observation"] = dict(raw_observation)
         observation = AIObservation.from_dict(raw_observation)
@@ -628,17 +850,11 @@ class RecognitionService:
             payload["dimension_semantic_issue"] = "dimension_evidence_not_outer_dimensions"
         for field, type_field in (("product_cost_rmb", "product_cost_value_type"), ("domestic_shipping_rmb", "domestic_shipping_value_type")):
             if getattr(observation, field) is not None and getattr(observation, type_field) == "unknown":
-                evidence = payload.get("field_evidence", {}).get(field, {})
-                text = str(evidence.get("raw_text") or "").lower()
-                if any(token in text for token in ("\u9884\u4f30", "estimate", "approx", "about", "\u7ea6")):
-                    value_type = "estimated"
-                elif any(token in text for token in ("\u8d77", "starting", "from")):
-                    value_type = "starting_from"
-                elif any(token in text for token in ("range", "\u533a\u95f4")):
-                    value_type = "range_min"
-                else:
-                    value_type = "exact"
-                setattr(observation, type_field, value_type)
+                # v2.2：AI 未显式给 value_type 时按 evidence 推断；无风险信号保持 unknown，
+                # 绝不因为数值非空就自动标 exact。
+                setattr(observation, type_field, cls._infer_value_type_from_evidence(
+                    payload.get("field_evidence", {}).get(field),
+                ))
         observation.source = "vision_api"
         observation.model = model
         observation.prompt_version = cls.PROMPT_VERSION

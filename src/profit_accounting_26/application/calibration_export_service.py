@@ -94,6 +94,7 @@ _OBSERVATION_FIELDS = frozenset({
     "weight_scope",
     "quantity",
     "quantity_source",
+    "quantity_unit",
     "quantity_summary",
     "source",
     "model",
@@ -127,6 +128,7 @@ _EVIDENCE_FIELDS = frozenset({
     "packing_actions",
     "packing_constraints",
     "quantity",
+    "quantity_unit",
 })
 
 _SHIPMENT_FIELDS = frozenset({
@@ -152,6 +154,7 @@ _FORBIDDEN_KEY_PARTS = (
     "calculation_snapshot",
     "profit_scenarios",
     "product_cost",
+    "unit_price",
     "domestic_shipping",
     "system_cost",
     "exchange_rate",

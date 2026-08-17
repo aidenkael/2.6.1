@@ -583,7 +583,7 @@ class TestTooltips:
 
 class TestPromptV21:
     def test_version_v21(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.1"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.2"
 
     def test_soft_thin_foldable_principle_present(self):
         """18. 全品类软/薄/可折/可盘绕运输原则。"""

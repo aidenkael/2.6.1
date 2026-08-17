@@ -1057,11 +1057,33 @@ class PackagingEstimationService:
 
         if rejected:
             review.extend(f"{source} rejected: {', '.join(reasons)}" for source, reasons in rejected.items())
+        # needs_review 不再是机械 True（v2.2 合同）：只有真实存在「用户有必要知道/处理」
+        # 的问题才标记复核——AI shipment 缺失/非正数、硬事实冲突、明确语义冲突、
+        # 结构修正、校准调整、候选被拒、AI 未返回发货估算而本地补全。
+        # 普通完整合法 AI 结果、structure 未知字段、无校准命中、单纯“AI 估算”都不触发。
+        vision_completion = bool(observation.raw_payload and observation.raw_payload.get("vision_packaging_completion"))
+        if vision_completion:
+            review.append("AI未返回发货估算，当前采用本地结构补全，请复核")
+        needs_review = bool(
+            rejected
+            or structural_adjustments
+            or cal_trace["adjusted_fields"]
+            or bool(ai_warnings)
+            or vision_completion
+            or source in {"ai_candidate_needs_review", "no_valid_candidate", "cal_candidate"}
+        )
+        # 档位级 needs_review 与 proposal 级保持一致（真实问题才 True）。
+        if not needs_review:
+            normal.needs_review = False
+            conservative.needs_review = False
+        else:
+            normal.needs_review = True
+            conservative.needs_review = True
         original = {"normal": ai_normal.to_dict(), "conservative": ai_conservative.to_dict()} if ai_normal and ai_conservative else {}
         local = {"normal": normal.to_dict(), "conservative": conservative.to_dict()}
         return PackagingProposal(
             normal=normal, conservative=conservative, proposal_source=source,
-            needs_review=True, review_reasons=review, original_scenarios=original,
+            needs_review=needs_review, review_reasons=review, original_scenarios=original,
             local_proposed_scenarios=local, adjusted_scenarios=local,
             conflicts=[reason for reasons in rejected.values() for reason in reasons],
             applied_profile_ids=list(dict.fromkeys(applied_ids)), candidate_records=records,

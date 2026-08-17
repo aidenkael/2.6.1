@@ -143,7 +143,8 @@ def test_complete_external_ai_candidate_is_adopted_after_validation(tmp_path: Pa
     assert proposal.local_proposed_scenarios["normal"]["packaging_method"] == "AI袋装"
     assert proposal.adjusted_scenarios["normal"]["packaging_method"] == "AI袋装"
     assert proposal.proposal_source == "ai_candidate"
-    assert proposal.needs_review
+    # v2.2：完整合法 AI shipment、无冲突 → 不再机械 needs_review（普通完整AI结果不提示复核）
+    assert proposal.needs_review is False
 
 
 def test_soft_item_without_matching_samples_is_not_auto_compressed(tmp_path: Path):

@@ -58,12 +58,12 @@ def _main_name(observation: AIObservation) -> str:
 
 
 def _quantity_display(observation: AIObservation) -> str:
-    """稳定数量显示：优先结构化 purchase_quantity，不受 quantity_summary 文字长度影响。
+    """稳定数量显示：优先结构化 purchase_quantity + quantity_unit，不受 summary 长度影响。
 
     - quantity_source == "assumed/unknown"：AI 未返回确认的 purchase_quantity
       （quantity=1 只是占位）→ 回退短 quantity_summary 文本（仍受 _compact 截断保护）；
-    - quantity > 1：purchase_quantity 已确认 → 显示“数量 ×N”，长 quantity_summary
-      绝不能导致它不显示，也不重复显示 summary 文本；
+    - quantity 已确认且有 quantity_unit → “数量 2双/3套”（销售单位中文简称，AI 判断）；
+    - quantity 已确认但无 unit → “数量 ×2”；
     - quantity == 1 且无来源证据（source 为 unknown / assumed/unknown / 空）：
       视为未设置，走 summary 回退，保持旧记录/默认构造商品摘要显示不变。
 
@@ -74,8 +74,38 @@ def _quantity_display(observation: AIObservation) -> str:
     source = str(getattr(observation, "quantity_source", "") or "")
     if isinstance(purchase_quantity, int) and not isinstance(purchase_quantity, bool) and purchase_quantity > 0:
         if purchase_quantity > 1 or source not in ("unknown", "assumed/unknown", ""):
+            unit = str(getattr(observation, "quantity_unit", "") or "").strip()
+            if unit:
+                return f"数量 {purchase_quantity}{unit}"
             return f"数量 ×{purchase_quantity}"
     return _compact(getattr(observation, "quantity_summary", ""), 20)
+
+
+def cost_review_warnings(observation: AIObservation | None) -> list[str]:
+    """非精确商品成本/国内运费 → 明确的复核原因（纯函数，供页面 badge 合并）。
+
+    - starting_from / range_min：影响利润的非精确成本 → 明确 warning（允许计算，不阻止保存）；
+    - estimated：轻量提示为估算值。
+    返回空列表表示没有成本风险信号。
+    """
+    if observation is None:
+        return []
+    warnings: list[str] = []
+    cost = getattr(observation, "product_cost_rmb", None)
+    cost_type = str(getattr(observation, "product_cost_value_type", "") or "")
+    if cost is not None and float(cost) > 0:
+        if cost_type in ("starting_from", "range_min"):
+            warnings.append("商品成本为起价/区间下限，实际成本可能更高")
+        elif cost_type == "estimated":
+            warnings.append("商品成本为估算值")
+    shipping = getattr(observation, "domestic_shipping_rmb", None)
+    shipping_type = str(getattr(observation, "domestic_shipping_value_type", "") or "")
+    if shipping is not None and float(shipping) > 0:
+        if shipping_type in ("starting_from", "range_min"):
+            warnings.append("国内运费为起价/区间下限，实际成本可能更高")
+        elif shipping_type == "estimated":
+            warnings.append("国内运费为估算值")
+    return warnings
 
 
 def product_summary(observation: AIObservation) -> str:
