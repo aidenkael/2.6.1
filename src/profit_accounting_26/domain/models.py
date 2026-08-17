@@ -217,6 +217,7 @@ class AIObservation:
     weight_scope: str = "unknown"
     quantity: int = 1
     quantity_source: str = "unknown"
+    quantity_summary: str = ""
     source: str = "manual"
     model: str = ""
     prompt_version: str = ""

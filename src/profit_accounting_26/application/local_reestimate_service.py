@@ -75,6 +75,8 @@ class LocalReestimateService:
     def _context(cls, *, product_name: str, confirmed_facts: dict[str, Any],
                  current_shipment: dict[str, Any], user_correction: str,
                  include_json_shape: bool = True,
+                 initial_ai_observation: dict[str, Any] | None = None,
+                 initial_ai_raw_payload: dict[str, Any] | None = None,
                  **_ignored: Any) -> str:
         payload = {
             "product_name": str(product_name or "").strip(),

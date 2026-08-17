@@ -93,7 +93,7 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-visual-v1.5"
+    PROMPT_VERSION = "2.6.1-visual-v1.6"
     RESPONSE_SCHEMA = {
         "type": "object",
         "additionalProperties": False,
@@ -170,7 +170,8 @@ class RecognitionService:
                 "additionalProperties": False,
                 "properties": {
                     "purchase_quantity": {"type": ["integer", "null"]},
-                    "quantity_source": {"type": ["string", "null"]}
+                    "quantity_source": {"type": ["string", "null"]},
+                    "quantity_summary": {"type": ["string", "null"]}
                 }
             },
             "field_evidence": {
@@ -215,102 +216,84 @@ class RecognitionService:
     @classmethod
     def _prompt(cls, image_count: int, *, include_json_shape: bool = True) -> str:
         prompt = f"""
-你是跨境电商商品图片识别助手。本次共有 {image_count} 张图片。
+跨境电商商品图片识别助手。本次共 {image_count} 张图片。
+只完成：商品标题、页面事实读取、数量判断、发货判断、最小物流结构语义。不计算费用或规则。
 
-只完成商品识别、图片事实读取、数量/套装判断、物流结构语义判断和发货判断。不要计算或推理其余事项。
+返回：
+1. product_name：简短可搜索的商品名称。
+2. observed：页面价格/运费/裸品尺寸/裸重。看不清返回 null；价格和运费禁止猜测。
+3. bare_estimate：图片无明确标注时，可估算裸品近似值（不是图片事实）。
+4. shipment：商品真正交给物流时的外部尺寸、总重量和简短状态描述。
+   shipment.state 须同时说明物理形态+处理方式+包装方式，如"可折叠；袋装发货"。
+   禁止填写时效/包邮/货代/CAL/体积重/利润等。
+5. quantity：
+   先判断一个销售单位包含什么（证据仅限 SKU/规格文字、详情页、包装文字/形态、图片固定组合/共同包装）。
+   购买数量不能反推销售单位组成。主图多件不等于套装；无固定组合也不得机械按画面计数。
+   确定销售单位后，再应用当前购买数量判断最终发货状态。
+   purchase_quantity 能可靠识别则返回实际值；无法确认返回 null，shipment 按 1 个销售单位估算并在 note 注明。
+   库存/MOQ/销量/SKU选项数均非购买数量。禁止把单件 L/W/H 机械乘以数量。
+   返回 quantity_summary：一句简短中文数量摘要，如"1单位（共2件）"或"2单位（每单位3件，共6件）"。
+6. structure（可选）：仅当有图片/页面证据时填写。
+   保留字段：packaging_state_hint / rigidity / foldability / compressibility / requires_shape_retention / packing_actions / 硬结构布尔字段 / field_evidence。
+   合法值由 JSON Schema enum 约束，不在本提示中逐一列举。
+   展示状态≠运输状态；已自然收纳不要二次过压；硬结构必须有可定位证据，否则保持 null。
+7. note：仅写必要简短补充。
 
-逐张查看全部图片，但图片顺序和图片框类型不代表字段职责。返回：
-1. product_name：简短、规范、可搜索的商品名称，不复制供应商 SEO 长标题。
-2. observed：只填写图片中能可靠读到的页面价格、页面运费、裸品尺寸和裸重。看不清就返回 null；价格和运费禁止凭经验猜测；只确认部分裸尺寸时其余维度保持 null。
-3. bare_estimate：当图片没有明确标注裸品尺寸或裸重时，可根据商品本身估算 bare_estimate。bare_estimate 是 AI 推测，不是图片事实。最终 shipment 判断应结合用户确认事实、图片事实及必要的 bare_estimate。
-4. shipment：独立判断商品真正交给物流时最可能的外部尺寸、总重量和简短发货状态。即使图片没有标注尺寸，也应根据商品本身尽量给出一套完整判断。
-shipment.state 是面向用户的一句简短"AI发货判断"，必须同时描述商品交给物流时的主要物理形态/处理状态、处理方式和简单包装方式，例如"可折叠；袋装发货"。不要只返回"折叠""压缩""保持原形"等单一处理词。
-shipment.state 禁止填写发货时效、48小时发货、现货、包邮、快递速度、商家履约、物流费用、货代、CAL、体积重或利润。
-【数量与套装判定（强制）】
-第一步：判断"一个销售单位包含什么"。
-  证据仅限：当前 SKU/规格文字、详情页说明、包装文字/包装形态、图片中的固定组合/共同包装/成组证据。
-  "当前购买数量"不能用于反推一个销售单位包含几件。
-  - 主图同时出现多个商品：不能仅凭图片数量自动认定为 N 件套；也不能因为文字没有明确写 N 件套就自动认定为单件展示。
-  - 仅有"图片里摆了很多个"但没有固定组合/共同包装/规格支持时，不得直接当多件套。
-  - 图片能看出明显固定组合或共同包装但文字信息不足时，可将视觉证据纳入综合判断，但不能仅按画面中出现几个就机械计数。
-  - 袜子、手套等天然成双商品：无相反证据时一双可作为一个销售单位；页面明确单只、几双装、几件套时以页面事实为准。
-  - 无法可靠确认一个销售单位具体包含几件时：不凭经验猜具体件数；在 note 中简短说明。
-第二步：确定销售单位后，应用当前购买数量判断最终共同发货状态。
-  - purchase_quantity 能可靠识别（页面明确显示用户实际选择/购买数量）：quantity.purchase_quantity 返回实际数量；shipment 按实际数量的销售单位判断。
-  - purchase_quantity 无法可靠确认：quantity.purchase_quantity 返回 null；shipment 按 1 个销售单位估算；note 简短注明"购买数量未确认，按1个销售单位估算"。
-  - 库存、MOQ、起订量、销量、SKU数量、规格选项数均不是购买数量，禁止用于 shipment 合并计算或赋值 purchase_quantity。
-  - 禁止把单件 L/W/H 分别机械乘以数量。shipment 必须判断叠放、折叠、套装、共同包装后的实际外廓。
-J. 在 quantity 块中返回 purchase_quantity 和 quantity_source（sku_text / detail_page / packaging_label / visual_grouping / default），便于审计。
-如果详情页明确显示或写明袋装、OPP 袋、盒装、吸塑、原包装或纸卡等包装方式，shipment.state 应优先遵守该页面事实。页面明确包装方式不等于页面明确包装尺寸；若包装尺寸或总重量未展示，仍可合理估算，但不得把包装方式错误当作实测包装尺寸。
-5. structure：根据图片/页面证据填写物流结构语义字段。所有字段均为可选。**必须使用以下规范词汇**：
-- overall_form：仅限 soft_flat / hard_flat / flexible_chain / rigid_box / irregular / assembled / rolled。
-- packaging_state_hint：仅限 full_flat_fold / strong_compression / moderate_compression / shape_retained / unknown。
-- rigidity：仅限 soft / semi_rigid / rigid / unknown。
-- foldability：仅限 good / limited / none / unknown。
-- compressibility：仅限 good / limited / none / unknown。
-- requires_shape_retention：true / false / null。
-- packing_actions：仅限 flat_fold / roll / coil / compress / nest / disassemble / retain_shape / wrap / bag / box / stack。涉及引擎判断的动作必须使用前述规范词（如用 flat_fold 而非 fold）。
-- packing_constraints：仅限 do_not_compress / rigid_outline / do_not_bend / keep_upright / retain_shape。
-- has_hard_bottom / has_hard_backboard / has_frame / has_rigid_insert / has_rigid_parts / retail_box_visible / hard_card_visible / protrusion_flattenable：仅在图片/页面有明确可定位证据时填 true，并在 field_evidence 中提供对应证据；无证据时必须返回 null。
-- field_evidence：当任一硬结构布尔字段为 true 时，必须在此提供对应 key 的证据对象，包含 source_image_index（图片序号）、region_description 或 raw_text（证据描述/原文）、source（image / merchant_text）。没有可定位证据的结构布尔字段不得填 true。
-重要原则：
-A. 展示状态不等于运输状态。撑开、展开、立体展示不代表运输时必须保持完全展开。
-B. 已处于自然折叠、盘卷、装袋、套叠等合理收纳状态时，不要为了"压缩"再次虚构更激进的折叠/压扁。
-C. 硬结构、保形要求等必须有图片/页面证据；不能因为商品类别经验就自动判定。
-D. 不确定时保持 null / []，不要为填满字段而猜测。
-6. note：仅写必要的简短补充。
-
-confirmed_facts 是用户已经确认的数据，优先级最高，不得修改。observed 是裸品/页面事实，bare_estimate 是 AI 推测的裸品近似值（不是图片事实），shipment 是发货外廓和发货总重量，三者不得混淆。
-不得输出或计算体积重、计费重、头程、固定服务费、尾程、总成本、利润、利润率、货代选择、CAL、规则编号、多候选方案或复杂分类字段。
+优先级：用户确认事实 > 页面/图片事实 > AI 推测。不得输出费用/利润/CAL/规则编号等。
 """.strip()
         if not include_json_shape:
             return prompt + "\n只返回符合给定 JSON Schema 的一个 JSON 对象，不要 Markdown。"
         return prompt + "\n严格按以下 JSON 结构返回一个对象，不要 Markdown：\n" + json.dumps(
             {
-                "product_name": "",
-                "observed": {
-                    "product_price_rmb": None,
-                    "page_shipping_rmb": None,
-                    "bare_dimensions_cm": {"length": None, "width": None, "height": None},
-                    "bare_weight_g": None,
+              "product_name": "",
+              "observed": {
+                "product_price_rmb": None,
+                "page_shipping_rmb": None,
+                "bare_dimensions_cm": {
+                  "length": None,
+                  "width": None,
+                  "height": None
                 },
-                "bare_estimate": {
-                    "length_cm": None,
-                    "width_cm": None,
-                    "height_cm": None,
-                    "weight_g": None,
-                },
-                "shipment": {
-                    "length_cm": 0,
-                    "width_cm": 0,
-                    "height_cm": 0,
-                    "weight_g": 0,
-                    "state": "",
-                },
-                "structure": {
-                    "overall_form": None,
-                    "packaging_state_hint": None,
-                    "rigidity": None,
-                    "foldability": None,
-                    "compressibility": None,
-                    "requires_shape_retention": None,
-                    "packing_actions": [],
-                    "packing_constraints": [],
-                    "has_hard_bottom": None,
-                    "has_hard_backboard": None,
-                    "has_frame": None,
-                    "has_rigid_insert": None,
-                    "has_rigid_parts": None,
-                    "retail_box_visible": None,
-                    "hard_card_visible": None,
-                    "protrusion_flattenable": None
-                },
-                "quantity": {
-                    "purchase_quantity": None,
-                    "quantity_source": None
-                },
-                "field_evidence": {},
-                "note": "",
+                "bare_weight_g": None
+              },
+              "bare_estimate": {
+                "length_cm": None,
+                "width_cm": None,
+                "height_cm": None,
+                "weight_g": None
+              },
+              "shipment": {
+                "length_cm": 0,
+                "width_cm": 0,
+                "height_cm": 0,
+                "weight_g": 0,
+                "state": ""
+              },
+              "structure": {
+                "overall_form": None,
+                "packaging_state_hint": None,
+                "rigidity": None,
+                "foldability": None,
+                "compressibility": None,
+                "requires_shape_retention": None,
+                "packing_actions": [],
+                "packing_constraints": [],
+                "has_hard_bottom": None,
+                "has_hard_backboard": None,
+                "has_frame": None,
+                "has_rigid_insert": None,
+                "has_rigid_parts": None,
+                "retail_box_visible": None,
+                "hard_card_visible": None,
+                "protrusion_flattenable": None
+              },
+              "quantity": {
+                "purchase_quantity": None,
+                "quantity_source": None,
+                "quantity_summary": None
+              },
+              "field_evidence": {},
+              "note": ""
             },
             ensure_ascii=False,
             indent=2,
@@ -537,6 +520,9 @@ confirmed_facts 是用户已经确认的数据，优先级最高，不得修改�
         qs = qty_block.get("quantity_source")
         if isinstance(qs, str) and qs.strip():
             raw_observation["quantity_source"] = qs.strip()
+        qsum = qty_block.get("quantity_summary")
+        if isinstance(qsum, str) and qsum.strip():
+            raw_observation["quantity_summary"] = qsum.strip()
         # Field evidence for structure booleans
         fe = payload.get("field_evidence") if isinstance(payload.get("field_evidence"), dict) else {}
         if fe:

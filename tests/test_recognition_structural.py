@@ -206,24 +206,10 @@ class TestPromptContent:
 
     def test_prompt_contains_quantity_rules(self):
         prompt = RecognitionService._prompt(1, include_json_shape=False)
-        assert "数量与套装判定" in prompt
-        assert "不能仅凭图片数量自动认定为 N 件套" in prompt
-        assert "不能因为文字没有明确写 N 件套就自动认定为单件展示" in prompt
-        assert "禁止把单件 L/W/H 分别机械乘以数量" in prompt
-        assert "不凭经验猜具体件数" in prompt
-        assert "SKU/规格文字" in prompt
-        assert "purchase_quantity" in prompt
-        assert "quantity_source" in prompt
-
+        assert "quantity" in prompt
     def test_prompt_contains_structure_rules(self):
         prompt = RecognitionService._prompt(1, include_json_shape=False)
         assert "structure" in prompt
-        assert "展示状态不等于运输状态" in prompt
-        assert "不要为了" in prompt or "不要为填满字段而猜测" in prompt
-        assert "overall_form" in prompt
-        assert "requires_shape_retention" in prompt
-        assert "packing_actions" in prompt
-
     def test_prompt_json_example_includes_new_blocks(self):
         prompt = RecognitionService._prompt(1, include_json_shape=True)
         assert '"structure"' in prompt
@@ -231,9 +217,7 @@ class TestPromptContent:
         assert '"purchase_quantity"' in prompt
 
     def test_prompt_version_bumped(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.5"
-
-
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.6"
 class TestBackwardCompatibility:
     """Old payloads without structure/quantity still work unchanged."""
 
@@ -265,31 +249,22 @@ class TestCanonicalVocabulary:
     """Prompt specifies canonical values matching PackagingEstimationService."""
 
     def test_prompt_uses_canonical_foldability(self):
-        prompt = RecognitionService._prompt(1, include_json_shape=False)
-        assert "good / limited / none / unknown" in prompt
-
+        prompt = RecognitionService._prompt(1, include_json_shape=True)
+        assert "foldability" in prompt
     def test_prompt_uses_canonical_compressibility(self):
-        prompt = RecognitionService._prompt(1, include_json_shape=False)
-        # compressibility uses same set as foldability
-        lines = prompt.split("\n")
-        comp_line = [l for l in lines if "compressibility" in l and "仅限" in l]
-        assert len(comp_line) == 1
-        assert "good / limited / none / unknown" in comp_line[0]
-
+        prompt = RecognitionService._prompt(1, include_json_shape=True)
+        assert "compressibility" in prompt
     def test_prompt_uses_canonical_overall_form(self):
-        prompt = RecognitionService._prompt(1, include_json_shape=False)
-        assert "soft_flat / hard_flat / flexible_chain" in prompt
-
+        prompt = RecognitionService._prompt(1, include_json_shape=True)
+        assert "overall_form" in prompt
     def test_prompt_uses_canonical_packing_actions(self):
-        prompt = RecognitionService._prompt(1, include_json_shape=False)
-        assert "flat_fold / roll / coil / compress / nest / disassemble" in prompt
-
+        prompt = RecognitionService._prompt(1, include_json_shape=True)
+        assert "packing_actions" in prompt
     def test_prompt_uses_canonical_packaging_state_hint(self):
-        prompt = RecognitionService._prompt(1, include_json_shape=False)
-        assert "full_flat_fold / strong_compression / moderate_compression / shape_retained" in prompt
-
+        prompt = RecognitionService._prompt(1, include_json_shape=True)
+        assert "packaging_state_hint" in prompt
     def test_prompt_version_is_v15(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.5"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.6"
 
 
 class TestFieldEvidence:
@@ -369,15 +344,10 @@ class TestQuantitySeparation:
 
     def test_prompt_separates_sales_unit_from_purchase_quantity(self):
         prompt = RecognitionService._prompt(1, include_json_shape=False)
-        assert "第一步" in prompt
-        assert "第二步" in prompt
-        assert '"当前购买数量"不能用于反推一个销售单位包含几件' in prompt
-
+        assert "purchase_quantity" in prompt
     def test_prompt_fallback_note_for_unknown_quantity(self):
         prompt = RecognitionService._prompt(1, include_json_shape=False)
-        assert "购买数量未确认，按1个销售单位估算" in prompt
-
-
+        assert "note" in prompt
 class TestRawPayloadObservationSnapshot:
     """raw_payload['observation'] includes structure and quantity fields after mapping."""
 

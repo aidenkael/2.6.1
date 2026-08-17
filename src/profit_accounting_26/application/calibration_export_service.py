@@ -94,6 +94,7 @@ _OBSERVATION_FIELDS = frozenset({
     "weight_scope",
     "quantity",
     "quantity_source",
+    "quantity_summary",
     "source",
     "model",
     "prompt_version",

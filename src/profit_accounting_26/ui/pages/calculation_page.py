@@ -363,6 +363,7 @@ class CalculationPage(QWidget):
         self.product_summary = _TextAdapter(f(QLineEdit, "txtAiSummary"))
         self.structure_summary = _TextAdapter(f(QLineEdit, "txtPackingState"))
         self.structure_summary._widget.setReadOnly(True)
+        self.product_summary._widget.setReadOnly(True)
         # 发货判断只在 AI 估算卡正式展示。保留旧 objectName 和绑定，
         # 仅隐藏顶部重复入口以兼容历史 payload 与现有自动化。
         packing_state_title = f(QLabel, "lblPackingStateTitle")
@@ -846,9 +847,7 @@ class CalculationPage(QWidget):
         for key, widget in (("length_cm", self.bare_length), ("width_cm", self.bare_width), ("height_cm", self.bare_height), ("weight_g", self.bare_weight)):
             widget.editingFinished.connect(lambda k=key: self._accept_bare_field(k))
         self.product_summary.textChanged.connect(lambda _text: self._upstream_changed())
-        self.product_summary._widget.editingFinished.connect(
-            lambda: self._accept_text_field("product_name", self.product_summary)
-        )
+        # product_summary is now read-only; no editing override
         self.material_summary.textChanged.connect(lambda _text: self._upstream_changed())
         self.structure_summary.textChanged.connect(lambda _text: self._upstream_changed())
         for combo in (self.rigidity_combo, self.foldability_combo, self.compressibility_combo):
@@ -1433,11 +1432,16 @@ class CalculationPage(QWidget):
         for field in ("length_cm", "width_cm", "height_cm", "weight_g"):
             if field in session_facts:
                 confirmed_facts[field] = session_facts[field]["value"]
+        # Full initial AI context for reestimate (not just current_shipment + correction)
+        initial_ai = self.initial_ai_snapshot or {}
+        initial_obs = initial_ai.get("observation", {}) if isinstance(initial_ai, dict) else {}
         context = {
             "product_name": self.product_summary.text().strip(),
             "confirmed_facts": confirmed_facts,
             "current_shipment": self._scenario_data(self.conservative_fields),
             "user_correction": user_correction,
+            "initial_ai_observation": initial_obs,
+            "initial_ai_raw_payload": initial_obs.get("raw_payload", {}) if isinstance(initial_obs, dict) else {},
         }
         self._local_diagnostic_operation = self.context.diagnostic_logger.begin_operation("local-reestimate")
         self._local_diagnostic_operation.event("corrected_reestimate_requested")

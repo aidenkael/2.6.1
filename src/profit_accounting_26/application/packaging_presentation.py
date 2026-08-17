@@ -58,27 +58,14 @@ def _main_name(observation: AIObservation) -> str:
 
 
 def product_summary(observation: AIObservation) -> str:
-    supplied = _compact(observation.display_product_summary, 30)
-    if supplied:
-        return supplied
-    form = {
-        "soft_flat": "柔软", "soft_bulky": "蓬松", "flexible_chain": "柔性链状",
-        "hard_flat": "扁平硬质", "hard_long": "硬质", "hard_3d": "硬质",
-        "hollow_crushable": "易压变形", "fragile_protruding": "易碎", "mixed": "混合结构",
-    }.get(observation.overall_form, {"soft": "柔软", "semi_rigid": "半硬", "hard": "硬质"}.get(observation.rigidity, ""))
-    actions = set(observation.packing_actions or [])
-    if "coil" in actions:
-        handling = "可盘绕"
-    elif "flat_fold" in actions or observation.foldability == "good":
-        handling = "可折叠"
-    elif observation.foldability == "none" or "longest_nonfoldable_axis" in set(observation.packing_constraints or []):
-        handling = "不可折叠"
-    elif "compress" in actions or observation.compressibility == "good":
-        handling = "可压缩"
-    else:
-        handling = ""
-    return "；".join(part for part in (_main_name(observation), form, handling) if part)[:30]
-
+    """Concise summary: AI title | quantity summary only. No structure/shipping preset."""
+    title = _compact(observation.display_product_summary or observation.product_name, 30)
+    if not title:
+        title = _main_name(observation)
+    qsum = _compact(getattr(observation, "quantity_summary", ""), 20)
+    if qsum:
+        return f"{title}｜{qsum}"
+    return title
 
 def _bulk_only(text: str) -> bool:
     value = str(text or "")

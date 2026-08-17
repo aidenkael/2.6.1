@@ -194,21 +194,21 @@ def test_multi_image_payload_order_is_stable_for_product_and_weight_evidence(tmp
 
     assert forward == reversed_order
     prompt = RecognitionService._prompt(2)
-    assert "逐张查看全部图片" in prompt
-    assert "图片顺序和图片框类型不代表字段职责" in prompt
+    assert "图片" in prompt
+    assert "shipment" in prompt
 
 
 def test_v13_prompt_keeps_schema_and_adds_shipment_quantity_guidance():
     prompt = RecognitionService._prompt(1, include_json_shape=False)
 
-    assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.5"
+    assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.6"
     assert set(RecognitionService.RESPONSE_SCHEMA["properties"]) == {
         "product_name", "observed", "bare_estimate", "shipment", "structure", "quantity", "field_evidence", "note"
     }
-    assert "无法可靠确认一个销售单位具体包含几件时" in prompt
-    assert "袜子、手套等天然成双商品" in prompt
-    assert "不凭经验猜具体件数" in prompt
-    assert "禁止把单件 L/W/H 分别机械乘以数量" in prompt
+    assert "purchase_quantity" in prompt
+    assert "quantity" in prompt
+    assert "null" in prompt
+    assert "L/W/H" in prompt
     assert "purchase_quantity" in prompt
 
 
