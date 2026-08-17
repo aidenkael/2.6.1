@@ -94,12 +94,12 @@ def test_local_effect_classification(baseline_service):
     case = _synthetic("syn_01_acrylic_coaster")
     score = score_case(replay_case(case, baseline_service), case.ground_truth)
     assert score.local_effect == "unchanged"
-    # syn_02: AI 正确但 salvage 后 FINAL 错误 -> degraded（post_ai_degradation 案例）
+    # syn_02: AI 正确；本地不再用 salvage 覆盖完整 AI shipment -> unchanged
     case = _synthetic("syn_02_adjustable_leash")
     score = score_case(replay_case(case, baseline_service), case.ground_truth)
     assert score.ai.correct is True
-    assert score.final.correct is False
-    assert score.local_effect == "degraded"
+    assert score.final.correct is True
+    assert score.local_effect == "unchanged"
 
 
 def test_replay_failure_scores_not_graded():

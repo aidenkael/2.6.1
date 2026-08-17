@@ -79,21 +79,20 @@ class TestPromptV17:
         return RecognitionService._prompt(1, include_json_shape=True)
 
     def test_prompt_version_is_v17(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.7"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.8"
 
     def test_prompt_lighter_than_v16(self):
-        """v1.7 prompt 文本部分不含旧版冗长数量规则和具体示例。
+        """v1.8 prompt 文本部分不含旧版冗长数量规则和具体示例。
 
-        v1.7 比 v1.6 更精简的关键不在于字符总数，而在于：
+        v1.8 比 v1.6 更精简的关键不在于字符总数，而在于：
         1. 移除了 false enum 声明
-        2. 移除了详细数量规则（销售单位判断流程等）
+        2. 数量规则只保留一行销售单位逻辑（先理解一个销售单位包含什么）
         3. 移除了具体商品示例
         4. 添加了精简的通用原则
         """
         prompt = self._prompt_text()
-        # 验证 v1.6 中的冗长内容已移除
-        # v1.6 包含的详细数量判断流程不再出现
-        assert "销售单位包含什么" not in prompt
+        # 只保留一行销售单位逻辑；详细流程仍不在
+        assert "先理解一个销售单位包含什么" in prompt
         assert "购买数量不能反推销售单位组成" not in prompt
         assert "主图多件不等于套装" not in prompt
         assert "库存/MOQ/销量/SKU选项数均非购买数量" not in prompt

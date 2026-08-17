@@ -211,11 +211,52 @@ def test_runtime_recognition_keeps_frozen_ai_then_applies_local_arbitration():
     )
     runtime = RuntimeRecognitionService(base, arbiter)
 
-    returned_observation, returned_proposal = runtime.recognize([])
+    outcome = runtime.recognize([])
 
-    assert returned_observation is observation
-    assert returned_proposal.proposal_source == "safety"
+    # RecognitionOutcome 契约：raw AI 冻结 + adopted 仲裁结果分离
+    assert outcome.raw_observation is observation
+    assert outcome.raw_ai_proposal is raw
+    assert outcome.adopted_proposal.proposal_source == "safety"
+    assert outcome.arbitration_observation is not observation
     assert runtime.PROMPT_VERSION == "frozen-test"
+
+
+def test_runtime_recognition_applies_confirmed_facts_before_arbitration():
+    """用户确认裸重 700g、AI raw 650g：raw 保留 650g，仲裁使用 700g 硬事实。"""
+    observation = AIObservation(product_name="bag", weight_g=650.0, weight_scope="unknown")
+    raw = _proposal("raw", weight=650.0)
+
+    class _CapturingSafety(_FakePackagingService):
+        def __init__(self):
+            super().__init__("safety")
+            self.observation = None
+
+        def estimate(self, observation, *, external_proposal):
+            self.observation = observation
+            return super().estimate(observation, external_proposal=external_proposal)
+
+    safety = _CapturingSafety()
+    base = _FakeRecognitionService(observation, raw)
+    arbiter = RuntimePackagingArbitrator(
+        _FakePackagingService("formal"),
+        _Manager({"metadata": {"builtin": True}}),
+        safety_service=safety,
+    )
+    runtime = RuntimeRecognitionService(base, arbiter)
+
+    outcome = runtime.recognize(
+        [],
+        user_context={"confirmed_facts": {"weight_g": {"value": 700.0, "source": "user_confirmed"}}},
+    )
+
+    # raw AI 永久保留 650g
+    assert outcome.raw_observation.weight_g == 650.0
+    # 仲裁副本已应用 700g 硬事实
+    assert safety.observation.weight_g == 700.0
+    assert safety.observation.weight_scope == "net_weight"
+    assert outcome.arbitration_trace["conflicts"]["weight_g"] == {
+        "user_confirmed": 700.0, "ai_returned": 650.0,
+    }
 
 
 def test_runtime_local_reestimate_applies_safety_and_preserves_confirmed_facts():

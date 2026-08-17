@@ -93,7 +93,7 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-visual-v1.7"
+    PROMPT_VERSION = "2.6.1-visual-v1.8"
     RESPONSE_SCHEMA = {
         "type": "object",
         "additionalProperties": False,
@@ -219,47 +219,37 @@ class RecognitionService:
 
 职责：商品标题、页面事实、裸品估算、数量判断、发货判断。不计算费用或规则。
 
-1. product_name：简短、规范、可搜索的商品名称。
+1. product_name：简短、规范、可搜索。
 
-2. observed：只读取页面/图片明确可见的事实。
-   - product_price_rmb（商品价格）
-   - page_shipping_rmb（页面运费）
-   - bare_dimensions_cm（裸品尺寸）
-   - bare_weight_g（裸品重量）
-   看不清或不确定返回 null。价格和运费禁止猜测。
+2. observed：只读页面/图片明确事实（价格、页面运费、裸品长宽高、裸品重量）；看不清返回 null，禁止猜测。
 
-3. bare_estimate：页面无明确裸品尺寸/重量时，AI 可合理估算近似值。
-   必须与 observed 区分（observed 是页面事实，bare_estimate 是 AI 推测）。
+3. bare_estimate：页面无明确裸品尺寸/重量时合理估算（observed=页面事实，bare_estimate=AI推测，必须区分）。
 
-4. quantity：
-   - purchase_quantity：当前购买数量（非 SKU 选项数/库存/销量）
-   - quantity_source：判断依据
-   - quantity_summary：一句简短中文数量摘要
+4. quantity：先理解一个销售单位包含什么，再判断当前购买数量。
+   purchase_quantity 是实际购买的销售单位数量（非库存/销量/MOQ/SKU选项数）。
+   无法确认时：shipment 按 1 个销售单位估算，quantity_source 填 assumed/unknown。
 
-5. shipment：AI 直接整体判断实际发货状态。
-   - 实际运输外部尺寸（长宽高 cm）
-   - 发货总重量（g）
-   - state：简短描述物理形态+处理方式+包装方式，如"可折叠；袋装发货"
-   禁止：裸品尺寸×数量、固定压缩率、时效/包邮/货代/CAL/体积重/利润。
+5. shipment：整体判断实际交给物流时的长宽高、总重量、物理形态+处理方式+包装方式（如"可折叠；袋装发货"）。
+   禁止：裸尺寸×数量、机械放大 L/W/H、固定压缩率、时效/包邮/货代/CAL/体积重/利润。
 
-6. structure（可选，仅当有图片/页面证据时填写）：
-   - packaging_state_hint / rigidity / foldability / compressibility
-   - requires_shape_retention（布尔）
-   - packing_actions（字符串数组）
-   - 硬结构布尔字段：has_hard_bottom / has_hard_backboard / has_frame / has_rigid_insert
-   - retail_box_visible / hard_card_visible（布尔）
-   - field_evidence（证据定位）
-   无证据保持 null。
+6. structure（有图片/页面证据才填，无证据 null）：
+   rigidity: unknown / soft / semi_rigid / hard
+   foldability: unknown / none / limited / good
+   compressibility: unknown / none / limited / good
+   packaging_state_hint: unknown / full_flat_fold / strong_compression / moderate_compression / shape_retained
+   requires_shape_retention: true / false / null
+   packing_actions: 仅允许 flat_fold / roll / coil / compress / nest / disassemble / retain_shape
+   has_hard_bottom / has_hard_backboard / has_frame / has_rigid_insert / retail_box_visible / hard_card_visible: true / false / null
+   field_evidence：硬结构/保形判断的证据定位（图序号+区域+原文）。
 
-7. note：仅写必要简短补充。
+7. note：仅必要补充。
 
 通用原则：
 - 用户确认事实最高优先，不得修改。
 - 页面/图片明确事实高于 AI 推测。
 - 展示/支撑状态不等于实际运输状态。
-- 已处于合理自然收纳状态时，不要无依据重新展开或再次极端压缩。
+- 已处于合理自然收纳/折叠状态且无更强包装证据时，不要无依据重新展开或二次压缩。
 - 有可靠硬结构/保形证据时，不得无依据压扁或折叠。
-- 多数量商品要整体判断实际共同发货方式，不能机械放大 L/W/H。
 - 不确定的页面事实返回 null，不要编造。
 """.strip()
         if not include_json_shape:
@@ -518,6 +508,10 @@ class RecognitionService:
             "foldability": frozenset({"unknown", "none", "limited", "good"}),
             "compressibility": frozenset({"unknown", "none", "limited", "good"}),
         }
+        # packing_actions 只接受正式允许值；非法值不进入规则控制层。
+        _PACKING_ACTIONS_CANONICAL = frozenset({
+            "flat_fold", "roll", "coil", "compress", "nest", "disassemble", "retain_shape",
+        })
         _STRUCT_STR_FIELDS = (
             "overall_form", "packaging_state_hint", "rigidity", "foldability", "compressibility",
         )
@@ -540,23 +534,39 @@ class RecognitionService:
             val = structure.get(fld)
             if isinstance(val, bool):
                 raw_observation[fld] = val
-        _STRUCT_LIST_FIELDS = ("packing_actions", "packing_constraints")
+        _STRUCT_LIST_FIELDS = ("packing_constraints",)
         for fld in _STRUCT_LIST_FIELDS:
             val = structure.get(fld)
             if isinstance(val, list):
                 cleaned = [str(v).strip() for v in val if isinstance(v, str) and str(v).strip()]
                 if cleaned:
                     raw_observation[fld] = cleaned
-        # Quantity block
+        # packing_actions 仅接受正式允许值；非法值不进入规则控制层。
+        actions = structure.get("packing_actions")
+        if isinstance(actions, list):
+            cleaned_actions = [
+                str(v).strip() for v in actions
+                if isinstance(v, str) and str(v).strip() in _PACKING_ACTIONS_CANONICAL
+            ]
+            if cleaned_actions:
+                raw_observation["packing_actions"] = cleaned_actions
+        # Quantity block：先判断一个销售单位包含什么，再判断购买数量。
         qty_block = payload.get("quantity") if isinstance(payload.get("quantity"), dict) else {}
         pq = qty_block.get("purchase_quantity")
-        if isinstance(pq, int) and pq > 0:
+        quantity_confirmed = isinstance(pq, int) and pq > 0
+        if not quantity_confirmed and isinstance(pq, float) and pq > 0 and pq == int(pq):
+            pq = int(pq)
+            quantity_confirmed = True
+        if quantity_confirmed:
             raw_observation["quantity"] = pq
-        elif isinstance(pq, float) and pq > 0 and pq == int(pq):
-            raw_observation["quantity"] = int(pq)
-        qs = qty_block.get("quantity_source")
-        if isinstance(qs, str) and qs.strip():
-            raw_observation["quantity_source"] = qs.strip()
+            qs = qty_block.get("quantity_source")
+            if isinstance(qs, str) and qs.strip():
+                raw_observation["quantity_source"] = qs.strip()
+        else:
+            # 数量无法确认：shipment 按 1 个销售单位估算，但必须明确标记 assumed/unknown，
+            # 不得在历史和校准数据中伪装成"真实购买数量=1"。
+            raw_observation["quantity"] = 1
+            raw_observation["quantity_source"] = "assumed/unknown"
         qsum = qty_block.get("quantity_summary")
         if isinstance(qsum, str) and qsum.strip():
             raw_observation["quantity_summary"] = qsum.strip()

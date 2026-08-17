@@ -65,7 +65,7 @@ from profit_accounting_26.ui.input_editing import install_blank_click_focus_filt
 
 
 class RecognitionWorker(QObject):
-    completed = Signal(object, object)
+    completed = Signal(object)
     failed = Signal(str, str)
 
     def __init__(self, service, image_items: list[dict[str, str]], cancellation: RecognitionCancellation, diagnostic_operation=None, user_context=None) -> None:
@@ -79,7 +79,7 @@ class RecognitionWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            observation, proposal = self._service.recognize(
+            outcome = self._service.recognize(
                 self._image_items,
                 cancellation=self._cancellation,
                 diagnostic_operation=self._diagnostic_operation,
@@ -94,7 +94,7 @@ class RecognitionWorker(QObject):
         except Exception as exc:
             self.failed.emit("failed", str(exc))
         else:
-            self.completed.emit(observation, proposal)
+            self.completed.emit(outcome)
 
 
 class LocalReestimateWorker(QObject):
@@ -1272,7 +1272,11 @@ class CalculationPage(QWidget):
         observation: AIObservation,
         external_proposal: PackagingProposal | None,
     ) -> dict[str, Any]:
-        """第一次完整视觉识图成功后捕获 AI 初始快照；无法可靠获得的字段不写、不猜。"""
+        """第一次完整视觉识图成功后捕获 AI 初始快照；无法可靠获得的字段不写、不猜。
+
+        ``observation`` 必须是真正的原始 AI observation（raw_observation），
+        不允许携带用户确认事实；用户确认事实单独记录在 ``confirmed_facts``。
+        """
         adopted = self._adopted_packaging()
         metadata_proposal = adopted or external_proposal
         provider = None
@@ -1283,6 +1287,7 @@ class CalculationPage(QWidget):
                 provider = getattr(profile, "provider", None)
         except Exception:
             provider = None
+        confirmed_facts = self._confirmed_facts()
         return {
             "provider": str(provider).strip() or None,
             "model": observation.model or None,
@@ -1290,6 +1295,7 @@ class CalculationPage(QWidget):
             "engine_version": metadata_proposal.engine_version if metadata_proposal else "vision-runtime-v1",
             "calibration_version": metadata_proposal.calibration_version if metadata_proposal else "",
             "observation": observation.to_dict(),
+            "confirmed_facts": confirmed_facts,
             "external_ai_packaging_proposal": external_proposal.to_dict() if external_proposal else None,
             "adopted_packaging": adopted.to_dict() if adopted else None,
         }
@@ -1303,39 +1309,52 @@ class CalculationPage(QWidget):
         if self.initial_ai_snapshot is None:
             self.initial_ai_snapshot = self._capture_initial_ai_snapshot(observation, external_proposal)
 
-    @Slot(object, object)
-    def _recognition_completed(self, observation: AIObservation, external_proposal: PackagingProposal | None) -> None:
+    @Slot(object)
+    def _recognition_completed(self, outcome: Any) -> None:
+        """一次完整识图结果：raw AI 冻结 + 本地仲裁 + 页面采用。
+
+        ``outcome`` 是 RecognitionOutcome 契约：
+        - raw_observation / raw_ai_proposal：纯外部 AI，永久冻结（左卡 / ai_initial）；
+        - arbitration_observation：应用 confirmed_facts 后的副本（展示用）；
+        - adopted_proposal：本地仲裁后的最终采用（右卡 / 物流唯一输入）。
+        """
+        raw_observation = outcome.raw_observation
+        raw_proposal = outcome.raw_ai_proposal
+        adopted = outcome.adopted_proposal
+        arbitration_observation = outcome.arbitration_observation
         is_first_visual_result = self.initial_ai_snapshot is None
-        # 获取真正的外部 AI 原始提案（未经 arbitrator）
-        raw_proposal = getattr(self.context.recognition_service, 'last_raw_proposal', None)
-        conflicts = self.session.protect_confirmed_values(observation)
-        self.session.ai_raw_response = observation.raw_payload
-        self.session.ai_raw_observation = dict(observation.raw_payload.get("observation") or {})
-        self.session.normalized_observation = observation
-        self.session.money_candidates = list(observation.raw_payload.get("money_candidates") or [])
+        conflicts = outcome.arbitration_trace.get("conflicts") or {}
+        # raw 原值永久保留，不被用户事实覆盖
+        self.session.ai_raw_response = raw_observation.raw_payload
+        self.session.ai_raw_observation = dict(raw_observation.raw_payload.get("observation") or {})
+        self.session.normalized_observation = raw_observation
+        # 页面展示用仲裁副本（已应用用户确认事实），与 raw 历史分离；
+        # 再次应用当前 session 已确认事实，保证展示与用户输入一致（raw 不受影响）。
+        self.session.observation = arbitration_observation
+        self.session.protect_confirmed_values(arbitration_observation)
+        self.observation = self.session.observation
+        self.session.money_candidates = list(raw_observation.raw_payload.get("money_candidates") or [])
         if is_first_visual_result:
             # ai_packaging_proposal 必须存真正的 AI 原始提案，不得存 arbitrated 结果
             self.session.ai_packaging_proposal = raw_proposal
-        self.session.observation = observation
-        self.observation = self.session.observation
-        runtime_proposal = external_proposal or RecognitionService.proposal_from_shipment({})
+        runtime_proposal = adopted or RecognitionService.proposal_from_shipment({})
         if is_first_visual_result:
             self._adopt_packaging(runtime_proposal)
         if conflicts:
             self._adopted_packaging().review_reasons.append("user confirmed facts conflict with image evidence")
-        self._apply_observation(observation)
-        self._refresh_display_summaries(observation, self._adopted_packaging())
+        self._apply_observation(arbitration_observation)
+        self._refresh_display_summaries(arbitration_observation, self._adopted_packaging())
         self.apply_proposal(self._adopted_packaging(), raw_proposal=raw_proposal)
         if is_first_visual_result:
-            # 快照使用真正的 AI 原始提案
-            self._maybe_capture_initial_ai_snapshot(observation, raw_proposal)
+            # 快照使用真正的 AI 原始提案与原始 observation
+            self._maybe_capture_initial_ai_snapshot(raw_observation, raw_proposal)
             self._ai_baseline = {
                 "summary": self._current_summary(),
                 "product_summary": self.product_summary.text(),
                 "packaging_summary": self.structure_summary.text(),
                 "bare_spec": {
-                    "length_cm": observation.length_cm, "width_cm": observation.width_cm,
-                    "height_cm": observation.height_cm, "weight_g": observation.weight_g,
+                    "length_cm": arbitration_observation.length_cm, "width_cm": arbitration_observation.width_cm,
+                    "height_cm": arbitration_observation.height_cm, "weight_g": arbitration_observation.weight_g,
                 },
                 "normal_packaging": self._scenario_data(self.normal_fields),
             }
@@ -1349,23 +1368,25 @@ class CalculationPage(QWidget):
             self.manual_scenarios.clear()
         self._mark_dirty()
         self.recalculate()
-        payload = observation.to_dict()
+        payload = raw_observation.to_dict()
         missing = [key for key in ("product_cost_rmb", "domestic_shipping_rmb", "length_cm", "width_cm", "height_cm", "weight_g") if payload.get(key) in (None, "", "unknown")]
         op = self._diagnostic_operation
         adopted = self._adopted_packaging()
-        if observation.raw_payload.get("vision_packaging_completion"):
-            op.event("vision_packaging_estimate_missing", completion=observation.raw_payload["vision_packaging_completion"])
+        if raw_observation.raw_payload.get("vision_packaging_completion"):
+            op.event("vision_packaging_estimate_missing", completion=raw_observation.raw_payload["vision_packaging_completion"])
         salvage = adopted.candidate_records.get("candidate_field_salvage", {})
         if salvage:
             op.event("candidate_field_salvage", **dict(salvage.get("diagnostic") or {}),
                      final_source=adopted.proposal_source, adjustments=salvage.get("adjustments", []))
+        op.event("arbitration", raw_ai=raw_proposal.to_dict() if raw_proposal else None,
+                 adopted=adopted.to_dict(), trace=outcome.arbitration_trace)
         op.event("ai_request_completed"); op.event("ai_response_parsed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing); op.event("calibration_bypassed", reason="CAL77 runtime shipment arbitration disabled")
         generated=adopted.normal.is_complete() and adopted.conservative.is_complete()
         op.event("packaging_generated" if generated else "packaging_skipped", skip_reason=None if generated else "AI未返回完整发货尺寸/重量，等待人工填写")
         op.event("logistics_calculated" if self.current_quote else "logistics_skipped", reason=None if self.current_quote else "无可用包装尺寸和重量")
         op.event("page_updated", filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)])
         op.event("operation_completed")
-        op.summary(status="completed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing, field_evidence=observation.raw_payload.get("field_evidence",{}), raw_observation=observation.raw_payload.get("observation", {}), normalized_codes={"product_type_code": observation.product_type_code, "product_family_code": observation.product_family_code, "material_family_code": observation.material_family_code}, value_types={"product_cost": observation.product_cost_value_type, "domestic_shipping": observation.domestic_shipping_value_type}, value_sources={"dimensions": observation.dimension_value_source, "weight": observation.weight_value_source}, ai_packaging_proposal=raw_proposal.to_dict() if raw_proposal else None, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], generic_fallback=False, packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["AI未返回完整发货尺寸/重量，等待人工填写"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "无可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)], page_empty_fields=missing, warnings=adopted.review_reasons)
+        op.summary(status="completed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing, field_evidence=raw_observation.raw_payload.get("field_evidence",{}), raw_observation=raw_observation.raw_payload.get("observation", {}), normalized_codes={"product_type_code": raw_observation.product_type_code, "product_family_code": raw_observation.product_family_code, "material_family_code": raw_observation.material_family_code}, value_types={"product_cost": raw_observation.product_cost_value_type, "domestic_shipping": raw_observation.domestic_shipping_value_type}, value_sources={"dimensions": raw_observation.dimension_value_source, "weight": raw_observation.weight_value_source}, ai_packaging_proposal=raw_proposal.to_dict() if raw_proposal else None, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], generic_fallback=False, packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["AI未返回完整发货尺寸/重量，等待人工填写"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "无可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)], page_empty_fields=missing, warnings=adopted.review_reasons)
 
     @Slot(str, str)
     def _recognition_failed(self, category: str, message: str) -> None:
@@ -1585,6 +1606,9 @@ class CalculationPage(QWidget):
         self.recalculate()
         if op:
             op.event("corrected_reestimate_adopted", elapsed_ms=result.elapsed_ms)
+            op.event("arbitration", reestimate_raw=(
+                result.reestimate_raw_proposal.to_dict() if getattr(result, "reestimate_raw_proposal", None) else None
+            ), adopted=scenario.to_dict(), trace=getattr(result, "arbitration_trace", None))
             op.event("calibration_bypassed", reason="CAL77 runtime shipment arbitration disabled")
             op.event("operation_completed")
             op.response(provider_raw_response=None, normalized_result={"shipment": scenario.to_dict()}, parse_error=None, elapsed_ms=result.elapsed_ms, **provider_meta)

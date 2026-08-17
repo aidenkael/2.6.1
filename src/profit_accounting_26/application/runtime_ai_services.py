@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import copy
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from profit_accounting_26.application.local_reestimate_service import (
@@ -11,6 +11,57 @@ from profit_accounting_26.application.local_reestimate_service import (
 from profit_accounting_26.application.packaging_estimation_service import PackagingEstimationService
 from profit_accounting_26.application.recognition_service import RecognitionService
 from profit_accounting_26.domain.models import AIObservation, PackagingProposal
+
+
+def apply_confirmed_facts(observation: AIObservation, confirmed_facts: dict[str, Any]) -> dict[str, Any]:
+    """Apply user-confirmed facts onto an observation copy (user > page > AI).
+
+    ``confirmed_facts`` entries are ``{"value": X, "source": "user_confirmed"}``
+    or plain values.  Returns per-field conflicts; never mutates a raw AI
+    observation because callers always pass a copy.
+    """
+    if not isinstance(confirmed_facts, dict):
+        return {}
+    conflicts: dict[str, Any] = {}
+    for field, entry in confirmed_facts.items():
+        if field not in observation.__dataclass_fields__:
+            continue
+        if isinstance(entry, dict) and "value" in entry:
+            value = entry["value"]
+        else:
+            value = entry
+        if value is None or value == "":
+            continue
+        ai_value = getattr(observation, field)
+        if ai_value is not None and ai_value != value:
+            conflicts[field] = {"user_confirmed": value, "ai_returned": ai_value}
+        setattr(observation, field, value)
+        if field == "product_name":
+            observation.display_product_summary = str(value)
+    if "weight_g" in confirmed_facts:
+        observation.weight_scope = "net_weight"
+    if any(field in confirmed_facts for field in ("length_cm", "width_cm", "height_cm")):
+        observation.dimension_scope = "product_size"
+    if conflicts:
+        observation.raw_payload.setdefault("user_confirmed_conflicts", {}).update(conflicts)
+    return conflicts
+
+
+@dataclass(slots=True)
+class RecognitionOutcome:
+    """Minimal result contract of one recognition run.
+
+    ``raw_observation`` / ``raw_ai_proposal`` are the pure external AI result,
+    frozen before any local rule.  ``arbitration_observation`` is the copy with
+    confirmed facts applied (user > page > AI); ``adopted_proposal`` is the
+    final local-arbitrated proposal.  UI never reverse-reads service state.
+    """
+
+    raw_observation: AIObservation
+    raw_ai_proposal: PackagingProposal | None
+    adopted_proposal: PackagingProposal | None
+    arbitration_observation: AIObservation
+    arbitration_trace: dict[str, Any] = field(default_factory=dict)
 
 
 class RuntimePackagingArbitrator:
@@ -99,7 +150,11 @@ class RuntimePackagingArbitrator:
 
 
 class RuntimeRecognitionService:
-    """Run frozen visual recognition first, then deterministic local arbitration."""
+    """Run frozen visual recognition first, then deterministic local arbitration.
+
+    Returns a single ``RecognitionOutcome``: the raw AI result is frozen before
+    arbitration, and the UI never reads "the last result" back from the service.
+    """
 
     def __init__(
         self,
@@ -108,24 +163,43 @@ class RuntimeRecognitionService:
     ) -> None:
         self.base_service = base_service
         self.packaging_arbitrator = packaging_arbitrator
-        # 最近一次 recognize() 的原始 AI 提案（未经 arbitrator）；
-        # 供左卡"AI估算"和 ai_initial 快照使用。
-        self.last_raw_proposal: PackagingProposal | None = None
 
     def __getattr__(self, name: str):
         return getattr(self.base_service, name)
 
-    def recognize(self, *args, **kwargs):
-        observation, proposal = self.base_service.recognize(*args, **kwargs)
-        # 冻结原始 AI 提案，不被后续 arbitration 覆盖
-        self.last_raw_proposal = proposal
-        if proposal is None:
-            return observation, None
-        arbitrated = self.packaging_arbitrator.estimate(
-            observation,
-            external_proposal=proposal,
+    def recognize(self, *args, **kwargs) -> RecognitionOutcome:
+        user_context = kwargs.get("user_context") or {}
+        if not isinstance(user_context, dict):
+            user_context = {}
+        # Accept the previous wrapper for callers still on the old contract.
+        if set(user_context) == {"confirmed_facts"} and isinstance(user_context["confirmed_facts"], dict):
+            user_context = dict(user_context["confirmed_facts"])
+
+        raw_observation, raw_ai_proposal = self.base_service.recognize(*args, **kwargs)
+        # 复制一份用于仲裁：raw_observation 保持原始值，永不被用户事实覆盖。
+        arbitration_observation = copy(raw_observation)
+        arbitration_observation.raw_payload = dict(raw_observation.raw_payload or {})
+        conflicts = apply_confirmed_facts(arbitration_observation, user_context)
+        adopted: PackagingProposal | None = None
+        if raw_ai_proposal is not None:
+            adopted = self.packaging_arbitrator.estimate(
+                arbitration_observation,
+                external_proposal=raw_ai_proposal,
+            )
+        return RecognitionOutcome(
+            raw_observation=raw_observation,
+            raw_ai_proposal=raw_ai_proposal,
+            adopted_proposal=adopted,
+            arbitration_observation=arbitration_observation,
+            arbitration_trace={
+                "confirmed_facts_applied": {
+                    key: entry.get("value") if isinstance(entry, dict) else entry
+                    for key, entry in user_context.items()
+                    if key in arbitration_observation.__dataclass_fields__
+                },
+                "conflicts": conflicts,
+            },
         )
-        return observation, arbitrated
 
 
 class RuntimeLocalReestimateService:
@@ -187,4 +261,14 @@ class RuntimeLocalReestimateService:
             result,
             shipment=scenario,
             packaging_proposal=arbitrated,
+            # 保留文字 AI 原始提案，与仲裁后 adopted 可区分
+            reestimate_raw_proposal=proposal,
+            arbitration_trace={
+                "confirmed_facts_applied": {
+                    key: (entry.get("value") if isinstance(entry, dict) else entry)
+                    for key, entry in (context.get("confirmed_facts") or {}).items()
+                    if key in observation.__dataclass_fields__
+                },
+                "source": "local_reestimate_arbitration",
+            },
         )

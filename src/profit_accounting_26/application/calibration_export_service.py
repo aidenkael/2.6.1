@@ -355,6 +355,42 @@ def _machine_ai_initial(payload: dict[str, Any]) -> dict[str, Any] | None:
     return block or None
 
 
+def _machine_local_adopted(initial: dict[str, Any]) -> dict[str, Any] | None:
+    """machine_facts.local_adopted：第一次本地仲裁后的最终采用结果。
+
+    只从 ai_initial.adopted_packaging 读取（AI 首次识图时的本地仲裁输出），
+    保存尺寸/重量、proposal_source、applied rule ids、conflicts、adjustments
+    与 engine/calibration version，供 Logistics-calibration 判断
+    “AI 错了？本地规则改错了？用户后来改了？”。
+    """
+    adopted = initial.get("adopted_packaging") if isinstance(initial, dict) else None
+    if not isinstance(adopted, dict):
+        return None
+    conservative = adopted.get("conservative")
+    normal = adopted.get("normal")
+    tier = conservative if isinstance(conservative, dict) else normal
+    if not isinstance(tier, dict):
+        return None
+    block: dict[str, Any] = {}
+    shipment = _packaging_scenario_block(tier)
+    if shipment:
+        block["shipment"] = shipment
+    for key in ("proposal_source", "engine_version", "calibration_version"):
+        value = adopted.get(key)
+        if value not in (None, ""):
+            block[key] = value
+    applied = adopted.get("applied_profile_ids")
+    if isinstance(applied, list):
+        block["applied_rule_ids"] = [str(rule_id) for rule_id in applied if str(rule_id)]
+    conflicts = adopted.get("conflicts")
+    if isinstance(conflicts, list):
+        block["conflicts"] = list(conflicts)
+    adjustments = adopted.get("adjustments")
+    if isinstance(adjustments, list):
+        block["adjustments"] = list(adjustments)
+    return block or None
+
+
 def _machine_user_feedback(feedback) -> dict[str, Any] | None:
     """machine_facts.user_feedback：直接读取 linked feedback 的精确字段。
 
@@ -767,7 +803,13 @@ class CalibrationFeedbackExporter:
                     "actual_first_mile": actual_first_mile_text(feedback) if feedback is not None else "",
                     "machine_facts": {
                         "ai_initial": _machine_ai_initial(payload),
+                        "local_adopted": _machine_local_adopted(_ai_initial_block(payload)),
                         "user_feedback": _machine_user_feedback(feedback),
+                        "actual_logistics": (
+                            _machine_user_feedback(feedback).get("actual_logistics")
+                            if feedback is not None
+                            else None
+                        ),
                     },
                 }
             )

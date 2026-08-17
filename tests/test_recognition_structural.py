@@ -68,7 +68,8 @@ class TestStructuralFieldParsing:
         assert obs.foldability == "good"
         assert obs.compressibility == "good"
         assert obs.requires_shape_retention is False
-        assert obs.packing_actions == ["flat_fold", "bag"]
+        # v1.8: packing_actions 只接受正式允许值；"bag" 非法值被过滤
+        assert obs.packing_actions == ["flat_fold"]
         assert obs.packing_constraints == ["do_not_bend"]
         assert obs.has_hard_bottom is False
         assert obs.protrusion_flattenable is True
@@ -129,7 +130,8 @@ class TestQuantityFieldParsing:
         payload = _minimal_v1_payload()
         obs, _ = RecognitionService._parse_v1_payload(payload, model="m")
         assert obs.quantity == 1
-        assert obs.quantity_source == "unknown"
+        # v1.8: 数量无法确认 → 明确标记 assumed/unknown，不伪装成真实数量 1
+        assert obs.quantity_source == "assumed/unknown"
 
     def test_null_quantity_keeps_default(self):
         payload = _minimal_v1_payload(quantity={
@@ -138,7 +140,7 @@ class TestQuantityFieldParsing:
         })
         obs, _ = RecognitionService._parse_v1_payload(payload, model="m")
         assert obs.quantity == 1
-        assert obs.quantity_source == "unknown"
+        assert obs.quantity_source == "assumed/unknown"
 
     def test_zero_quantity_keeps_default(self):
         payload = _minimal_v1_payload(quantity={
@@ -147,7 +149,7 @@ class TestQuantityFieldParsing:
         })
         obs, _ = RecognitionService._parse_v1_payload(payload, model="m")
         assert obs.quantity == 1  # 0 is not > 0
-        assert obs.quantity_source == "default"
+        assert obs.quantity_source == "assumed/unknown"
 
     def test_negative_quantity_keeps_default(self):
         payload = _minimal_v1_payload(quantity={
@@ -173,7 +175,7 @@ class TestQuantityFieldParsing:
         })
         obs, _ = RecognitionService._parse_v1_payload(payload, model="m")
         assert obs.quantity == 1
-        assert obs.quantity_source == "unknown"
+        assert obs.quantity_source == "assumed/unknown"
 
 
 class TestObservationToDictIncludesNewFields:
@@ -195,7 +197,8 @@ class TestObservationToDictIncludesNewFields:
         assert d["overall_form"] == "hard_long"
         assert d["rigidity"] == "semi_rigid"
         assert d["requires_shape_retention"] is True
-        assert d["packing_actions"] == ["roll", "wrap"]
+        # v1.8: "wrap" 非法值被过滤，只保留正式允许值 "roll"
+        assert d["packing_actions"] == ["roll"]
         assert d["has_frame"] is True
         assert d["quantity"] == 2
         assert d["quantity_source"] == "detail_page"
@@ -217,7 +220,7 @@ class TestPromptContent:
         assert '"purchase_quantity"' in prompt
 
     def test_prompt_version_bumped(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.7"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.8"
 class TestBackwardCompatibility:
     """Old payloads without structure/quantity still work unchanged."""
 
@@ -232,7 +235,8 @@ class TestBackwardCompatibility:
         # Defaults intact
         assert obs.overall_form == "unknown"
         assert obs.quantity == 1
-        assert obs.quantity_source == "unknown"
+        # v1.8: 旧 payload 无数量 → assumed/unknown，不伪装成真实数量 1
+        assert obs.quantity_source == "assumed/unknown"
 
     def test_structure_non_dict_ignored(self):
         payload = _minimal_v1_payload(structure="not_a_dict")
@@ -267,7 +271,7 @@ class TestCanonicalVocabulary:
         prompt = RecognitionService._prompt(1, include_json_shape=True)
         assert "packaging_state_hint" in prompt
     def test_prompt_version_is_v15(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.7"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.8"
 
 
 class TestFieldEvidence:
@@ -343,7 +347,8 @@ class TestQuantitySeparation:
         })
         obs, _ = RecognitionService._parse_v1_payload(payload, model="m")
         assert obs.quantity == 1  # default
-        assert obs.quantity_source == "default"
+        # v1.8: 数量无法确认 → 明确标记 assumed/unknown
+        assert obs.quantity_source == "assumed/unknown"
 
     def test_prompt_separates_sales_unit_from_purchase_quantity(self):
         prompt = RecognitionService._prompt(1, include_json_shape=False)

@@ -18,6 +18,20 @@ class PackagingEstimationService:
 
     ENGINE_VERSION = "packaging-estimation-v2-candidate-arbitration"
     CALIBRATION_VERSION = "local-calibration-v3-77-samples-rules-v1"
+
+    # 本地可介入的硬事实原因：用户确认事实 / 页面商家硬事实 / 无效候选。
+    # 只有这些原因允许本地修改或拒绝完整 AI shipment；
+    # 其余（软语义冲突）只记录 warning + needs_review，不替换 AI 数值。
+    HARD_AI_REJECTION_REASONS = frozenset({
+        "missing_or_nonpositive_dimensions_or_weight",
+        "conservative_below_normal",
+        "conflicts_with_merchant_shipping_dimensions",
+        "packaged_weight_below_confirmed_net_weight",
+        "violates_do_not_compress",
+        "shorter_than_nonfoldable_axis",
+        "violates_rigid_outline",
+        "dimension_evidence_not_outer_dimensions",
+    })
     _BOX_CONTAINER_MARKERS = (
         "包装盒", "硬质包装盒", "盒装", "纸盒", "纸箱", "礼盒", "外包装箱",
         "carton", "box", "retail box",
@@ -739,6 +753,44 @@ class PackagingEstimationService:
                                       f"{source} candidate", confidence, True, ids)
         return normal, conservative
 
+    def _apply_hard_fact_corrections(
+        self,
+        ai_normal: PackagingScenario | None,
+        ai_conservative: PackagingScenario | None,
+        observation: AIObservation,
+        hard_reasons: list[str],
+    ) -> tuple[PackagingScenario | None, PackagingScenario | None]:
+        """Deterministic corrections for hard facts only.
+
+        本地不创造数值：只有「用户确认裸重下限」这类存在确定正确值的硬事实
+        才做修正；其余硬事实冲突只标记 needs_review，保留 AI 原有字段。
+        """
+        if ai_normal is None or ai_conservative is None:
+            return ai_normal, ai_conservative
+        corrected_normal = replace(ai_normal)
+        corrected_conservative = replace(ai_conservative)
+
+        weight_floor = None
+        if (
+            "packaged_weight_below_confirmed_net_weight" in hard_reasons
+            and observation.weight_scope != "packaged_weight"
+            and observation.weight_g and observation.weight_g > 0
+        ):
+            user_weight = float(observation.weight_g)
+            weight_floor = max(
+                user_weight,
+                user_weight + max(20.0, min(300.0, user_weight * 0.08)),
+            )
+            for scenario in (corrected_normal, corrected_conservative):
+                if scenario.weight_g is None or float(scenario.weight_g) < weight_floor:
+                    scenario.weight_g = round(weight_floor, 1)
+                scenario.needs_review = True
+
+        if not weight_floor:
+            corrected_normal.needs_review = True
+            corrected_conservative.needs_review = True
+        return corrected_normal, corrected_conservative
+
     def estimate(self, observation: AIObservation, *, external_proposal: PackagingProposal | None = None) -> PackagingProposal:
         records: dict[str, dict[str, Any]] = {}
         rejected: dict[str, list[str]] = {}
@@ -777,12 +829,19 @@ class PackagingEstimationService:
                 ai_reasons.append("cal_structure_conflict_requires_evidence")
             if shipping_dims and ai_normal.is_complete() and tuple(round(float(value), 1) for value in (ai_normal.length_cm, ai_normal.width_cm, ai_normal.height_cm)) != tuple(round(float(value), 1) for value in obs_dims):
                 ai_reasons.append("conflicts_with_merchant_shipping_dimensions")
+            # 软语义冲突（structure 词不够理想等）只记录 warning，不拒绝完整 AI shipment。
+            hard_reasons = [reason for reason in ai_reasons if reason in self.HARD_AI_REJECTION_REASONS]
+            soft_reasons = [reason for reason in ai_reasons if reason not in self.HARD_AI_REJECTION_REASONS]
+            ai_warnings = soft_reasons
             records["ai_candidate"] = self._record("ai_candidate", ai_normal, ai_conservative,
                                                     confidence=ai_normal.confidence, evidence=["vision_packaging_proposal"],
                                                     matched_rule_ids=external_proposal.applied_profile_ids,
-                                                    rejection_reasons=ai_reasons)
-            if ai_reasons:
-                rejected["ai_candidate"] = ai_reasons
+                                                    rejection_reasons=hard_reasons)
+            records["ai_candidate"]["warnings"] = list(ai_warnings)
+            if hard_reasons:
+                rejected["ai_candidate"] = hard_reasons
+        else:
+            ai_warnings = []
 
         observed_base_dims = (
             self._transport_outline(tuple(float(value) for value in obs_dims), observation)
@@ -855,9 +914,11 @@ class PackagingEstimationService:
                 "rejection_reasons": ["cal_structure_conflict_requires_evidence"],
                 "adjustments": [],
             }
-        valid_ai_candidate = ai_normal and ai_conservative and "ai_candidate" not in rejected
-        usable_ai_normal = ai_normal if valid_ai_candidate else salvaged_normal
-        usable_ai_conservative = ai_conservative if valid_ai_candidate else salvaged_conservative
+        # AI proposal is the only usable packaging authority.  Salvage/generic
+        # completion is no longer a production selection; CAL coordination and
+        # hard-fact corrections operate on the AI proposal directly.
+        usable_ai_normal = ai_normal
+        usable_ai_conservative = ai_conservative
         base_dims = observed_base_dims
         base_weight = observed_base_weight
         if not base_dims and usable_ai_normal and usable_ai_normal.is_complete():
@@ -949,6 +1010,12 @@ class PackagingEstimationService:
                     records["cal_coordination"]["adjusted_fields"] = cal_trace["adjusted_fields"]
 
         # The selected output stays a single PackagingProposal for UI, logistics and history.
+        # 裁判合同：完整合法的 AI shipment 默认直接通过。
+        # 只有硬事实（用户确认 / 页面商家硬事实 / validated 规则）允许本地介入；
+        # 软语义冲突只记录 warning + needs_review，不替换 AI 数值；
+        # AI 缺失/非正数时保留其有效字段，标记复核，不自动生成精确固定尺寸进入正式物流。
+        ai_complete = bool(ai_normal and ai_conservative and ai_normal.is_complete() and ai_conservative.is_complete())
+        hard_reasons = rejected.get("ai_candidate") or []
         if merchant_normal and merchant_conservative:
             source, normal, conservative = "merchant_candidate", merchant_normal, merchant_conservative
             review.append("merchant shipping package facts adopted")
@@ -956,27 +1023,37 @@ class PackagingEstimationService:
             source = "ai_cal_coordinated" if usable_ai_normal and usable_ai_conservative else "cal_candidate_completed"
             normal, conservative = coordinated_normal, coordinated_conservative
             review.append(f"{cal_strength} CAL match adjusted selected packaging fields")
-        elif ai_normal and ai_conservative and "ai_candidate" not in rejected:
+        elif ai_complete and not hard_reasons:
             source, normal, conservative = "ai_candidate", ai_normal, ai_conservative
             review.append("complete AI packaging candidate adopted after local validation")
-        elif salvaged_normal and salvaged_conservative and "salvaged_ai_candidate" not in rejected:
-            source, normal, conservative = "ai_candidate_salvaged", salvaged_normal, salvaged_conservative
-            review.append("reliable AI candidate fields preserved; missing fields completed locally")
+            for warning in ai_warnings:
+                review.append(f"warning: {warning}")
+        elif ai_complete and hard_reasons:
+            # 硬事实冲突：只做确定性修正（如用户确认裸重下限），不自行创造其它数值。
+            corrected_normal, corrected_conservative = self._apply_hard_fact_corrections(
+                ai_normal, ai_conservative, observation, hard_reasons,
+            )
+            source, normal, conservative = "ai_candidate_hard_facts", corrected_normal, corrected_conservative
+            review.append(f"AI shipment kept but hard facts applied: {', '.join(hard_reasons)}")
+            for warning in ai_warnings:
+                review.append(f"warning: {warning}")
+        elif ai_normal and ai_conservative:
+            # AI shipment 缺失/非正数：最小失败处理，优先人工补充/复核。
+            # 仍应用硬事实确定性修正（如用户确认裸重下限），不自行创造其它数值。
+            corrected_normal, corrected_conservative = self._apply_hard_fact_corrections(
+                ai_normal, ai_conservative, observation, hard_reasons,
+            )
+            source, normal, conservative = "ai_candidate_needs_review", corrected_normal, corrected_conservative
+            review.append("AI发货尺寸或重量不完整，请人工补充/复核")
         elif cal_normal and cal_conservative and cal_normal.is_complete() and cal_conservative.is_complete() and "cal_candidate" not in rejected:
             source, normal, conservative = "cal_candidate", cal_normal, cal_conservative
             review.append("AI candidate unavailable or invalid; compatible CAL candidate adopted")
             applied_ids.extend(cal_rule_ids)
-        elif generic_normal and generic_conservative and "generic_candidate" not in rejected:
-            source, normal, conservative = "generic_candidate", generic_normal, generic_conservative
-            review.append("AI and CAL could not form a valid candidate; generic physical-form fallback adopted")
-            if records.get("generic_candidate", {}).get("adjustments"):
-                review.append("full generic fallback used because no reliable fields were available")
-            applied_ids.append("GENERIC")
         else:
             source = "no_valid_candidate"
             normal = self._scenario("正常档", PackagingState.UNKNOWN, "", None, None, "no valid candidate", "low", True)
             conservative = self._scenario("保守档", PackagingState.UNKNOWN, "", None, None, "no valid candidate", "low", True)
-            review.append("no complete packaging candidate could be generated")
+            review.append("没有可用的 AI 发货判断，请人工填写尺寸和重量")
 
         if rejected:
             review.extend(f"{source} rejected: {', '.join(reasons)}" for source, reasons in rejected.items())

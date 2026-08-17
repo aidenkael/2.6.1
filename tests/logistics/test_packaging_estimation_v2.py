@@ -56,10 +56,12 @@ def test_conservative_never_lower_than_normal(tmp_path: Path):
                         rigidity="soft", foldability="good", compressibility="good",
                         length_cm=20, width_cm=10, height_cm=4, weight_g=30, **no_hard_kwargs())
     p = s.estimate(obs)
-    assert p.conservative.length_cm >= p.normal.length_cm
-    assert p.conservative.width_cm >= p.normal.width_cm
-    assert p.conservative.height_cm >= p.normal.height_cm
-    assert p.conservative.weight_g >= p.normal.weight_g
+    # 无外部 AI shipment → no_valid_candidate（不自动生成 generic 精确尺寸）
+    assert p.proposal_source == "no_valid_candidate"
+    assert p.needs_review
+    # 空的 normal/conservative 不允许进入物流
+    assert not p.normal.is_complete()
+    assert not p.conservative.is_complete()
 
 
 def test_recognizable_soft_main_image_without_measurements_uses_generic_fallback(tmp_path: Path):
@@ -67,10 +69,11 @@ def test_recognizable_soft_main_image_without_measurements_uses_generic_fallback
     obs = AIObservation(product_name="袜子", product_type="socks", product_family_code="hosiery",
                         rigidity="soft", foldability="good", compressibility="good", **no_hard_kwargs())
     proposal = s.estimate(obs)
-    assert proposal.proposal_source == "generic_candidate"
-    assert proposal.normal.is_complete()
-    assert proposal.conservative.is_complete()
-    assert "GENERIC" in proposal.applied_profile_ids
+    # 本地不得再生成 generic 兜底尺寸；优先人工补充/复核
+    assert proposal.proposal_source == "no_valid_candidate"
+    assert not proposal.normal.is_complete()
+    assert not proposal.conservative.is_complete()
+    assert "GENERIC" not in proposal.applied_profile_ids
 
 
 def test_unrecognizable_input_does_not_invent_a_package(tmp_path: Path):
