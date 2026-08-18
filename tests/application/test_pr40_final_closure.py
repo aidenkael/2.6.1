@@ -301,7 +301,7 @@ class TestPromptV19:
     def test_prompt_keeps_core_blocks(self):
         """包含：页面事实 / bare estimate / sales unit / quantity / shipment。"""
         prompt = self._text()
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.2"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.3"
         assert "observed" in prompt and "页面事实" in prompt
         assert "bare_estimate" in prompt
         assert "销售单位" in prompt and "purchase_quantity" in prompt
@@ -339,12 +339,13 @@ class TestPromptV19:
         """v2.0 不再以字符数下降为目标；仅保留宽松上限防止失控膨胀。
 
         真正约束由内容测试保证（运输可变性 / 展示态≠运输态 / 无品类规则）。
+        v2.3 新增裸重/裸尺寸作用域说明（合计净重 + 单销售单位尺寸），上限放宽到 3800。
         """
         prompt = RecognitionService._prompt(1, include_json_shape=True)
         marker = "\n严格按以下 JSON"
         idx = prompt.find(marker)
         text = prompt[:idx] if idx >= 0 else prompt
-        assert len(text) < 3000, f"Prompt 文本异常膨胀: {len(text)} chars"
+        assert len(text) < 3800, f"Prompt 文本异常膨胀: {len(text)} chars"
         assert len(text) > 1300, "Prompt 已具备覆盖全品类运输可变性的必要内容"
 
 

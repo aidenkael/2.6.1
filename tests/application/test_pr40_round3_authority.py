@@ -371,7 +371,7 @@ class TestPromptV20:
         return RecognitionService._prompt(1, include_json_shape=False)
 
     def test_version_v20(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.2"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.3"
 
     def test_display_state_not_transport_state(self):
         """展示态≠运输态恢复为强通用原则，并给出具体处理动作。"""

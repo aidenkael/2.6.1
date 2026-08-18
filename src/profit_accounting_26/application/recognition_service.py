@@ -93,7 +93,7 @@ class RecognitionService:
     observation.raw_payload for audit and automatic UI fill.
     """
 
-    PROMPT_VERSION = "2.6.1-visual-v2.2"
+    PROMPT_VERSION = "2.6.1-visual-v2.3"
     RESPONSE_SCHEMA = {
         "type": "object",
         "additionalProperties": False,
@@ -256,10 +256,13 @@ class RecognitionService:
 2. observed：只读取图片/页面明确事实（商品价格、页面/国内运费、裸尺寸、裸重）；看不清返回 null，禁止猜测。
    价格必须区分单价与本次购买总价：页面明确显示“已选总价/合计”等 → product_total_cost_rmb；页面只显示明确单价 → product_unit_price_rmb；不要输出旧字段 product_price_rmb（解析器只作旧兼容）。
    value_type（product_cost_value_type / page_shipping_value_type）只允许 exact / estimated / starting_from / range_min / unknown：明确选中SKU或明确合计 → exact；“约/预计/approx” → estimated；“起/起步/from” → starting_from；明确区间 → range_min（只存下限）；看不清 → unknown。不得因为数字非空就标 exact。
+   作用域：bare_weight_g 表示当前页面实际购买/选择的全部商品合计净重（不含快递包装材料），不要再用数量相乘；裸品长宽高表示一个销售单位本身的自然未包装裸品尺寸，禁止裸尺寸×购买数量。
 
 3. bare_estimate：observed 缺失时合理估算裸品长宽高/裸重（observed=页面事实，bare_estimate=AI推测，必须区分）。
+   作用域：bare_estimate.weight_g 与 bare_weight_g 同一语义——当前购买全部商品合计净重（一个销售单位本身是多件套时，按整套全部组成商品净重合计），不要再乘 purchase_quantity；裸品长宽高表示一个销售单位本身的自然裸品尺寸，禁止裸尺寸×购买数量。若一个销售单位是无法用单一外廓描述的组合套装：裸尺寸允许 null，不要编造，由 shipment 结合全部商品、数量与摆放方式整体判断。
 
 4. quantity：先理解一个销售单位包含什么，再判断购买多少销售单位（purchase_quantity）。quantity_unit 是 purchase_quantity 对应的销售单位中文简称（例如：双、件、套、个、包、盒、组、卷），从页面销售关系判断；看不清返回 null/空；不得根据商品类型猜测单位。quantity_summary 保留完整解释（如“2套，共6件”），不参与物流计算。主图多件不能直接等于套装；库存/销量/MOQ/SKU数量不能当购买数量。无法确认时：shipment 按 1 个销售单位估算，quantity_source 填 assumed/unknown。
+   裸重与裸尺寸作用域见第2/3条：重量是当前购买全部商品合计净重、尺寸是一个销售单位的裸品尺寸，均不再按数量相乘。
 
 5. shipment（重点，AI 拥有最终判断权）：基于图片、页面事实、商品材质与结构、裸品、数量，以及正常低成本电商仓库的实际发货行为，直接整体判断真实打包员最可能采取什么正常处理方式，并给出处理后的长宽高、总重量和包装/运输状态。
    先判断商品从展示状态变成真实运输状态时，哪些部分可以合理改变形态：折叠、压平/轻度压缩、卷起、嵌套/套叠、自然收纳、可拆卸部件、可转向/可贴平部件；把手、肩带、线材、软突出部分能否折下/收进主体/贴平；空腔能否自然排气；哪些是真正刚性不可改变的结构；是否易碎/易损必须保护；多件商品如何最可能共同发货。
@@ -267,6 +270,7 @@ class RecognitionService:
    目标是"正常真实仓库最可能怎么发"，不是"最安全怎么发"，也不是"最极限省体积怎么发"。
    shipment.state 直接写最可能行为，同时描述主要物理形态、处理方式与包装方式，例如：自然压平后袋装、轻度压缩袋装、自然折叠后袋装、保持主体形状后袋装、保持形状后箱装。
    禁止：发货时效、包邮、货代、CAL、体积重、利润。禁止裸尺寸×数量、机械放大 L/W/H、固定压缩率。
+   shipment.weight_g 不得小于当前全部商品裸重（当前购买总净重）；仍按当前全部购买数量整体判断最终运输尺寸与总重量。
 
 6. structure（辅助观察，有明确证据才记录，无证据 null/unknown）：只输出以下正式值，不要输出其它写法——
    rigidity：soft / semi_rigid / hard；foldability 与 compressibility：none / limited / good；

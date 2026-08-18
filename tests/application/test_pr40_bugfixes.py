@@ -79,7 +79,7 @@ class TestPromptV17:
         return RecognitionService._prompt(1, include_json_shape=True)
 
     def test_prompt_version_is_v17(self):
-        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.2"
+        assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.3"
 
     def test_prompt_lighter_than_v16(self):
         """v2.0 prompt 文本部分不含旧版冗长数量规则和具体示例。
@@ -97,11 +97,12 @@ class TestPromptV17:
         # v1.6 的 false enum 声明不再出现
         assert "enum 约束" not in prompt
         # prompt 文本部分（不含 JSON 示例）应有界（宽松上限，防止失控膨胀）
+        # v2.3 新增裸重/裸尺寸作用域说明（合计净重 + 单销售单位尺寸），上限放宽到 3800。
         text_end = prompt.find("\n严格按以下 JSON")
         if text_end < 0:
             text_end = prompt.find("\n只返回符合")
         prompt_text = prompt[:text_end] if text_end > 0 else prompt
-        assert len(prompt_text) < 3000, f"Prompt 文本异常膨胀: {len(prompt_text)} chars"
+        assert len(prompt_text) < 3800, f"Prompt 文本异常膨胀: {len(prompt_text)} chars"
 
     def test_prompt_no_concrete_product_examples(self):
         prompt = self._prompt_text()
