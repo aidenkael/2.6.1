@@ -55,7 +55,8 @@ def test_pyinstaller_spec_has_required_resources() -> None:
     required_resources = [
         "calibration/runtime_safety_baseline",
         "calibration/logistics_v2",
-        "src/profit_accounting_26/ui/forms",
+        "profit_accounting_26/ui/forms",
+        "profit_accounting_26/product_collector/ui/forms",
         "src/profit_accounting_26/ui/assets",
         "config",
     ]
