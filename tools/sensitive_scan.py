@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,30 +25,12 @@ PATTERNS = {
 FORBIDDEN_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".pem", ".key", ".zip"}
 
 
-def _get_gitignored_files() -> set[Path]:
-    """返回被 .gitignore 忽略的文件集合（仅检测已知 forbidden 后缀）。"""
-    try:
-        result = subprocess.run(
-            ["git", "ls-files", "--others", "--ignored", "--exclude-standard"],
-            capture_output=True, text=True, cwd=ROOT, timeout=10,
-        )
-        if result.returncode != 0:
-            return set()
-        return {ROOT / line.strip() for line in result.stdout.splitlines() if line.strip()}
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return set()
-
-
 def main() -> int:
-    gitignored = _get_gitignored_files()
     findings: list[str] = []
     for path in ROOT.rglob("*"):
         if any(part in EXCLUDED_DIRS for part in path.parts):
             continue
         if not path.is_file():
-            continue
-        # 跳过 .gitignore 已排除的文件（不会被 git 跟踪）
-        if path in gitignored:
             continue
         if path.suffix.lower() in FORBIDDEN_SUFFIXES:
             findings.append(f"forbidden file: {path.relative_to(ROOT)}")
