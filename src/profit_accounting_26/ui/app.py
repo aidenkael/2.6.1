@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from profit_accounting_26._version import __version__
 from profit_accounting_26.ui.main_window import NAV_ITEMS, MainWindow
 
 
@@ -16,7 +17,7 @@ def build_window(data_dir=None):
 
     app, paths = bootstrap_application(
         data_dir=data_dir,
-        app_name="UU护航 3.0.1",
+        app_name=f"UU护航 {__version__}",
         icon_relative="src/profit_accounting_26/ui/assets/app_icon_desktop_taskbar.svg",
     )
     if paths is None:

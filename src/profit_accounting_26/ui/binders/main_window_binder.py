@@ -18,8 +18,8 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QObject, QSize, Qt, Signal
+from PySide6.QtGui import QFontMetrics, QIcon, QPainter
 from PySide6.QtWidgets import (
     QFileDialog,
     QLabel,
@@ -45,6 +45,24 @@ NAV_BINDINGS: list[tuple[str, str, str, str]] = [
     ("btnNavHistory", "pageHistory", "历史记录管理", "nav_history_records.svg"),
     ("btnNavSettings", "pageSettingsHost", "设置", "nav_settings.svg"),
 ]
+
+
+class _PathElideFilter(QObject):
+    """事件过滤器：让 QLabel 单行显示路径，超长时中间截断（ElideMiddle）。
+
+    拦截 paintEvent 用 QFontMetrics.elidedText 绘制；不修改布局结构。
+    """
+
+    def eventFilter(self, obj, event):
+        if event.type() == event.Type.Paint and isinstance(obj, QLabel):
+            fm = QFontMetrics(obj.font())
+            elided = fm.elidedText(obj.text(), Qt.TextElideMode.ElideMiddle, obj.width())
+            if elided != obj.text():
+                painter = QPainter(obj)
+                painter.setPen(obj.palette().text().color())
+                painter.drawText(0, (obj.height() + fm.ascent() - fm.descent()) // 2, elided)
+                return True
+        return False
 
 
 class MainWindowBinder:
@@ -260,8 +278,23 @@ class MainWindowBinder:
         self.lbl_data_dir = self.window.findChild(QLabel, "lblDataDirectoryPath")
         btn_change = self.window.findChild(QPushButton, "btnChangeDataDirectory")
         if self.lbl_data_dir:
-            self.lbl_data_dir.setText(str(self.context.paths.data_dir))
-            self.lbl_data_dir.setWordWrap(True)
+            path_text = str(self.context.paths.data_dir)
+            self.lbl_data_dir.setText(path_text)
+            # 路径显示策略：单行 + 中间截断 + 悬停工具提示。
+            # 侧边栏固定 220px，卡片内边距后约 188px 可用宽度，
+            # 不使用 wordWrap（长路径换行会挤占按钮空间并导致文字重叠）。
+            self.lbl_data_dir.setWordWrap(False)
+            self.lbl_data_dir.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            self.lbl_data_dir.setToolTip(path_text)
+            # 固定单行高度，防止路径撑高卡片
+            fm = QFontMetrics(self.lbl_data_dir.font())
+            self.lbl_data_dir.setMaximumHeight(fm.height() + 4)
+            self.lbl_data_dir.setMinimumWidth(60)
+            # 安装事件过滤器实现 ElideMiddle 绘制
+            self._path_elide_filter = _PathElideFilter(self.lbl_data_dir)
+            self.lbl_data_dir.installEventFilter(self._path_elide_filter)
         if btn_change:
             btn_change.clicked.connect(self.change_data_directory)
 
@@ -296,7 +329,9 @@ class MainWindowBinder:
         )
         # 目录标签保持显示当前真实运行目录，不把尚未生效的新目录伪装成当前目录。
         if getattr(self, "lbl_data_dir", None):
-            self.lbl_data_dir.setText(str(self.context.paths.data_dir))
+            path_text = str(self.context.paths.data_dir)
+            self.lbl_data_dir.setText(path_text)
+            self.lbl_data_dir.setToolTip(path_text)
 
     # ------------------------------------------------------------------
     # 汇率

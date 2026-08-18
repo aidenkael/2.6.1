@@ -817,7 +817,10 @@ class TestCompatibility:
         assert _machine_ai_initial(payload) is not None
 
     def test_version_kept_3_0_1(self):
+        """软件版本由 _version.py 统一管理，入口文件从 _version 导入。"""
         import pathlib
 
+        version_src = pathlib.Path("src/profit_accounting_26/_version.py").read_text(encoding="utf-8")
+        assert '"3.0.1"' in version_src
         app_src = pathlib.Path("src/profit_accounting_26/ui/app.py").read_text(encoding="utf-8")
-        assert "UU护航 3.0.1" in app_src
+        assert "from profit_accounting_26._version import __version__" in app_src

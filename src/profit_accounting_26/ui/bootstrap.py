@@ -11,6 +11,7 @@ import os
 import sys
 from pathlib import Path
 
+from profit_accounting_26._version import __version__
 from profit_accounting_26.shared import ApplicationPaths, resource_path
 
 
@@ -59,7 +60,7 @@ def choose_data_directory(app) -> Path | None:
 def bootstrap_application(
     *,
     data_dir=None,
-    app_name: str = "UU护航 3.0.1",
+    app_name: str = f"UU护航 {__version__}",
     icon_relative: str | None = None,
 ):
     """建立 QApplication 并解析数据目录，返回 ``(app, paths)``。

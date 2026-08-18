@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from profit_accounting_26._version import __version__
 from profit_accounting_26.application.calibration_feedback_service import CalibrationFeedbackService
 from profit_accounting_26.application.history_export_service import (
     ExportAbortError,
@@ -87,7 +88,7 @@ def test_calibration_export_structure_and_summary(env):
         items = json.loads(bundle.read("feedback.json"))["items"]
     assert manifest["format"] == "calibration-feedback-v1"
     assert manifest["prompt_version"]
-    assert manifest["software_version"] == "2.6.1"
+    assert manifest["software_version"] == __version__
     assert manifest["model"] == "m-1"
     assert manifest["rule_version"] == "v2"
     summary = summaries[0]

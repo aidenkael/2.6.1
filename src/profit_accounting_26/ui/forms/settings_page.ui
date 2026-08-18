@@ -1580,7 +1580,7 @@ QListWidget::item:selected { background: #edf4ff; border-color: #4b8cff; color: 
            </layout>
           </item>
           <item>
-           <widget class="QTableWidget" name="tableCalibrationPackages"><property name="columnCount"><number>4</number></property><property name="rowCount"><number>0</number></property><property name="minimumHeight"><number>170</number></property><property name="alternatingRowColors"><bool>true</bool></property><column><property name="text"><string>版本</string></property></column><column><property name="text"><string>状态</string></property></column><column><property name="text"><string>导入时间</string></property></column><column><property name="text"><string>文件名</string></property></column></widget>
+           <widget class="QTableWidget" name="tableCalibrationPackages"><property name="columnCount"><number>4</number></property><property name="rowCount"><number>0</number></property><property name="minimumHeight"><number>170</number></property><property name="alternatingRowColors"><bool>true</bool></property><column><property name="text"><string>校准版本</string></property></column><column><property name="text"><string>状态</string></property></column><column><property name="text"><string>首次登记时间</string></property></column><column><property name="text"><string>文件名</string></property></column></widget>
           </item>
           <item>
            <widget class="QLabel" name="lblCalibrationActiveStatus">

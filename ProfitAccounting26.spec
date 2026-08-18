@@ -10,7 +10,9 @@ a = Analysis(
     datas=[
         (str(root / "config"), "config"),
         (str(root / "calibration" / "logistics_v2"), "calibration/logistics_v2"),
-        (str(root / "docs" / "assets" / "ui_baseline"), "docs/assets/ui_baseline"),
+        (str(root / "calibration" / "runtime_safety_baseline"), "calibration/runtime_safety_baseline"),
+        (str(root / "src" / "profit_accounting_26" / "ui" / "forms"), "src/profit_accounting_26/ui/forms"),
+        (str(root / "src" / "profit_accounting_26" / "ui" / "assets"), "src/profit_accounting_26/ui/assets"),
     ],
     hiddenimports=["PIL"],
     hookspath=[],

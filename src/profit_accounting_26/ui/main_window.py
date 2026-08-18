@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import QMainWindow, QWidget
 
+from profit_accounting_26._version import __version__
 from profit_accounting_26.application import AppContext
 from profit_accounting_26.shared import resource_path
 from profit_accounting_26.ui.binders.main_window_binder import MainWindowBinder
@@ -60,8 +61,14 @@ class MainWindow(QMainWindow):
         loaded_central = loaded_ui.centralWidget()
         loaded_central.setParent(self)
         self.setCentralWidget(loaded_central)
-        # 窗口标题使用 .ui 中的 windowTitle（运行时为 UU护航 3.0.1），不硬编码旧版本
-        self.setWindowTitle(loaded_ui.windowTitle())
+        # 窗口标题使用 .ui 的 windowTitle 作为基础，版本号从 _version 动态注入
+        from PySide6.QtWidgets import QLabel as _QLabel
+        
+        self.setWindowTitle(f"UU护航 {__version__}")
+        # 同步更新侧边栏“当前版本”标签（.ui 中为静态占位文字）
+        _lbl_ver = self.findChild(_QLabel, "lblCurrentVersion")
+        if _lbl_ver is not None:
+            _lbl_ver.setText(f"当前版本：{__version__}")
         # 不直接采用 .ui 的 1920×1080 设计尺寸，也不采用其 minimumSize：
         # 两者都可能超过当前屏幕可用区域。启动尺寸按屏幕可用区域裁剪，
         # 页面内部的 QScrollArea 负责窄窗口下的横向/纵向滚动。

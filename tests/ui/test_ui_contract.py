@@ -150,7 +150,7 @@ class TestUIFileContract:
             "main_window.ui": "28d093eb2e150f003c4843979f3758f41e566b9b1b452aa7764e67b5435d302d",
             # PR #40 验收修复：settings_page.ui 根节点去掉 980×650 minimumSize，
             # 窄窗口由 settingsScrollArea 承担滚动，根节点不再把主窗口最小宽度撑大
-            "settings_page.ui": "206d249a9681243783c6b7301008a7323c17cb66e3d9c1590660dce85b3a924e",
+            "settings_page.ui": "bb9feb6783b6a859c7dc2fdadde10928ddb149f050bd6957c9a96617a4ef4028",
         }
         for name, sha in expected.items():
             data = (FORMS_DIR / name).read_bytes()

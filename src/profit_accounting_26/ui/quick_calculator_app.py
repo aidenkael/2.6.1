@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from PySide6.QtGui import QIcon
 
+from profit_accounting_26._version import __version__
 from profit_accounting_26.application import AppContext
 from profit_accounting_26.shared import resource_path
 from profit_accounting_26.ui.bootstrap import bootstrap_application
@@ -28,7 +29,7 @@ def build_quick_window(data_dir=None):
     """
     app, paths = bootstrap_application(
         data_dir=data_dir,
-        app_name="UU测算 3.0.1",
+        app_name=f"UU测算 {__version__}",
         icon_relative=QUICK_ICON_RELATIVE,
     )
     if paths is None:

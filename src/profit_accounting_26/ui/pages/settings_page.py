@@ -367,7 +367,7 @@ class SettingsPage(QWidget):
         table = self.calibration_table
         if table is None:
             return
-        table.setHorizontalHeaderLabels(["版本", "状态", "导入时间", "文件名"])
+        table.setHorizontalHeaderLabels(["校准版本", "状态", "首次登记时间", "文件名"])
         table.setAlternatingRowColors(True)
         table.verticalHeader().setVisible(False)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
