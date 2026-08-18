@@ -4,7 +4,9 @@
 ``CalculationService`` / 确定性物流引擎 / ``CalculationBinder`` 双场景 driver
 状态机；不复制、不重写任何物流/利润/汇率/货代/规则公式。
 
-布局基准：``forms/quick_calculator.ui``（用户提供的 UU测算_轻量版.ui）。
+Quick 只拥有：UI / 输入适配 / 显示映射 / 货代按钮 / 置顶 / 清空 / 启动入口。
+“国内成本”是 Quick 专属合并输入（= 主软件商品成本 + 国内运费），
+仅作 UI 输入适配，不要求主软件同形，也不写回主软件数据结构。
 """
 
 from __future__ import annotations
@@ -13,11 +15,20 @@ from typing import Any
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QDoubleSpinBox, QLabel, QMainWindow, QPushButton, QToolButton
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QDoubleSpinBox,
+    QLabel,
+    QMainWindow,
+    QPushButton,
+    QToolButton,
+)
 
 from profit_accounting_26.application import AppContext
 from profit_accounting_26.application.calculation_service import CalculationService
+from profit_accounting_26.application.profit_defaults import apply_profit_defaults
 from profit_accounting_26.domain.models import PackageSpec
+from profit_accounting_26.engines.logistics import calculate_system_cost
 from profit_accounting_26.shared import resource_path
 from profit_accounting_26.ui.binders.calculation_binder import CalculationBinder
 from profit_accounting_26.ui.ui_loader import load_ui
@@ -35,7 +46,8 @@ class QuickCalculatorWindow(QMainWindow):
     """UU测算 主窗口：从 quick_calculator.ui 加载布局，直接复用现有 Binder/Service。
 
     与 UU护航 共用同一个数据目录 / location.json / SettingsService / AppContext；
-    本窗口不写历史、不写设置（货代/尾程/规则选择只作用于本次测算会话）。
+    本窗口不写历史、不写设置（货代/尾程/规则/利润默认值只作用于本次测算会话，
+    绝不覆盖主软件保存的默认值）。
     """
 
     def __init__(self, context: AppContext) -> None:
@@ -54,15 +66,12 @@ class QuickCalculatorWindow(QMainWindow):
         self.setWindowTitle(loaded.windowTitle())
         # 蓝色 U 图标（任务栏/标题栏与主软件黑色 U 完全独立）
         self.setWindowIcon(QIcon(str(resource_path(QUICK_ICON_RELATIVE))))
-        # 保持 .ui 固定紧凑尺寸（700×560）
-        self.setFixedSize(loaded.minimumSize())
-        # §7：默认保持置顶（不新增置顶开关）
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
 
         self._find_widgets()
         self._wire_inputs()
         self._wire_forwarders()
         self._wire_clear()
+        self._wire_on_top()
 
         # 利润区直接复用现有 CalculationBinder（UI 已按主软件相同 objectName 命名）
         self.profit_binder = CalculationBinder(self, context)
@@ -74,6 +83,9 @@ class QuickCalculatorWindow(QMainWindow):
             rule for rule in context.settings_service.rules_from_settings(self.settings)
             if rule.enabled and not rule.archived
         ))
+        # 三项利润字段（活动预留/标价利率/活动后利润率）读取主软件
+        # “明确保存后沿用”的同一套默认值；从未保存则沿用现有初始默认（15%/25%）。
+        apply_profit_defaults(self.settings, self.profit_binder)
 
         self._refresh_forwarder_buttons()
         # 尾程初始值沿用当前设置/最近保存值（与主软件 refresh_settings 一致），
@@ -86,6 +98,10 @@ class QuickCalculatorWindow(QMainWindow):
             self._loading = False
         self._sync_tail_rmb_from_usd(recalculate=False)
         self._recalculate()
+        # 默认置顶（checkbox 默认勾选）
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        # 所有控件布局完成后按真实 sizeHint 固定窗口（不写死 700×560）
+        self._refit_window()
 
     # ------------------------------------------------------------------
     # 控件绑定
@@ -105,6 +121,7 @@ class QuickCalculatorWindow(QMainWindow):
         self.tail_fee_rmb: QDoubleSpinBox = f(QDoubleSpinBox, "spinTailFreightRmb")
         self.tail_fee_usd: QDoubleSpinBox = f(QDoubleSpinBox, "spinTailFreightUsd")
         self.btn_clear: QPushButton = f(QPushButton, "btnClearAndNew")
+        self.chk_stay_on_top: QCheckBox = f(QCheckBox, "chkQuickStayOnTop")
         self._forwarder_buttons = [
             f(QToolButton, name) for name in _FORWARDER_BUTTON_NAMES
         ]
@@ -129,6 +146,14 @@ class QuickCalculatorWindow(QMainWindow):
 
     def _wire_clear(self) -> None:
         self.btn_clear.clicked.connect(self.clear_new)
+
+    def _wire_on_top(self) -> None:
+        self.chk_stay_on_top.toggled.connect(self._on_stay_on_top_toggled)
+
+    def _refit_window(self) -> None:
+        """按内容真实 sizeHint 固定窗口尺寸（货代按钮数量变化时重新收紧）。"""
+        self.adjustSize()
+        self.setFixedSize(self.size())
 
     # ------------------------------------------------------------------
     # 尾程双币种（主软件语义：RMB=USD×汇率；只改会话，不写全局设置）
@@ -163,6 +188,15 @@ class QuickCalculatorWindow(QMainWindow):
             self._recalculate()
 
     # ------------------------------------------------------------------
+    # 置顶（默认勾选；可取消；不写入 settings，每次启动默认置顶）
+    # ------------------------------------------------------------------
+
+    def _on_stay_on_top_toggled(self, checked: bool) -> None:
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, bool(checked))
+        # 部分平台切换 flag 会把窗口隐藏，这里确保切换后窗口保持可见
+        self.show()
+
+    # ------------------------------------------------------------------
     # 货代选择（最多 3 个；只改本次测算，不写全局默认货代）
     # ------------------------------------------------------------------
 
@@ -194,6 +228,8 @@ class QuickCalculatorWindow(QMainWindow):
             button.setProperty("selected", button.property("forwarderId") == self.selected_forwarder_id)
             button.style().unpolish(button)
             button.style().polish(button)
+        # 货代按钮数量变化时按内容重新收紧窗口（无大片占位）
+        self._refit_window()
 
     def _on_forwarder_clicked(self) -> None:
         forwarder_id = str(self.sender().property("forwarderId") or "")
@@ -233,9 +269,18 @@ class QuickCalculatorWindow(QMainWindow):
         quote = quotes[self.selected_forwarder_id]
         # 总头程展示 = weight_fee + fixed_fee（取自现有 LogisticsQuote，不重新计算）
         self.txt_first_mile_total.setValue(round(quote.weight_fee_rmb + quote.fixed_fee_rmb, 2))
-        # 系统总成本 = 国内成本 + 物流总额（头程+服务费+尾程），与主软件数学等价；
-        # 通过现有 CalculationBinder 入口传入，不另写第二套成本公式。
-        system_cost = round(self.spin_domestic_cost.value() + quote.total_logistics_rmb, 2)
+        # 系统总成本：直接调用共享 system-cost 计算入口（calculate_system_cost），
+        # Quick 的“国内成本”作为合并输入传入（product_cost_rmb 槽位）——
+        # 数学上与主软件“商品成本+国内运费+物流总额”等价；以后物流/成本公式
+        # 只在共享核心维护，Quick 自动跟随。
+        system_cost = round(
+            calculate_system_cost(
+                product_cost_rmb=self.spin_domestic_cost.value(),
+                domestic_shipping_rmb=0.0,
+                logistics_total_rmb=quote.total_logistics_rmb,
+            ),
+            2,
+        )
         self.profit_binder.set_calculation_cost(system_cost)
         self._current_system_cost = system_cost
 
@@ -249,9 +294,10 @@ class QuickCalculatorWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def clear_new(self) -> None:
-        """清空本次轻量核算会话：尺寸/重量/国内成本清零，利润区走 Binder.reset()
-        （恢复活动预留 15%、活动后利润率 25%）；尾程沿用当前设置值（不恢复硬编码）；
-        利润规则沿用当前设置选择；不写历史、不写设置、不删主软件数据。"""
+        """清空本次轻量核算会话：尺寸/重量/国内成本清零，利润区走 Binder.reset()，
+        随后三项利润字段恢复“用户上一次在主软件明确保存”的默认值（从未保存则
+        沿用现有初始默认 15%/25%）；尾程沿用当前设置值（不恢复硬编码）；利润规则
+        沿用当前设置选择；不写历史、不写设置、不删主软件数据。"""
         self._loading = True
         try:
             for spin in (self.spin_length, self.spin_width, self.spin_height,
@@ -260,12 +306,7 @@ class QuickCalculatorWindow(QMainWindow):
         finally:
             self._loading = False
         self.profit_binder.reset()
-        # reset() 期间“标价利率”控件的 valueChanged 会改写 Binder 内部 driver
-        # （共享 Binder 既有行为：仅当该控件清空前非 0 才触发，主软件 clear_new
-        # 因先触发成本=0 的刷新而天然规避）。这里按 §6 清空语义显式恢复
-        # 活动后利润率 25%（与主软件“清空后 25%”一致）。
-        if self.profit_binder.spin_profit_rate is not None:
-            self.profit_binder.spin_profit_rate.setValue(25.0)
+        apply_profit_defaults(self.settings, self.profit_binder)
         self._recalculate()
 
     # ------------------------------------------------------------------
@@ -278,7 +319,11 @@ class QuickCalculatorWindow(QMainWindow):
             self._refresh_settings_from_disk()
 
     def _refresh_settings_from_disk(self) -> None:
-        """主软件修改设置后，Quick 重新加载（汇率/规则/尾程/货代）。"""
+        """主软件修改设置后，Quick 重新加载（汇率/规则/尾程/货代）。
+
+        三项利润默认值只在启动与“清空”时读取（与主软件一致：refresh_settings
+        不触碰这 3 项）；Quick 会话内的临时修改绝不写回 settings。
+        """
         fresh = self.context.settings_service.load()
         self.settings = dict(fresh)
         self.profit_binder.set_exchange_rate(self._rate())

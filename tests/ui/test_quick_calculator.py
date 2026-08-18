@@ -18,6 +18,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QLabel  # noqa: E402
 
 from profit_accounting_26.application import AppContext, SettingsService  # noqa: E402
@@ -179,12 +180,90 @@ def test_editable_frozen_contract(page):
     assert page.findChild(QLabel, "lblActivitySubsidyStatus") is not None
 
 
-def test_quick_window_compact_and_always_on_top(page):
-    """§7：窗口固定 700×560 紧凑尺寸，默认保持置顶（WindowStaysOnTopHint）。"""
-    assert page.minimumSize().width() == 700 and page.minimumSize().height() == 560
-    assert page.maximumSize().width() == 700 and page.maximumSize().height() == 560
-    flags = page.windowFlags()
-    assert bool(flags & page.windowFlags().WindowStaysOnTopHint) is True
+def test_quick_window_compact_and_default_on_top(page):
+    """§7/§8：窗口不再固定 700×560（按内容 sizeHint 收紧），默认置顶且可取消。"""
+    assert page.width() < 700 and page.height() < 560
+    # 默认置顶（checkbox 默认勾选 + WindowStaysOnTopHint）
+    assert page.chk_stay_on_top.isChecked() is True
+    assert bool(page.windowFlags() & Qt.WindowType.WindowStaysOnTopHint) is True
+    # 取消置顶 → flag 移除
+    page.chk_stay_on_top.setChecked(False)
+    assert bool(page.windowFlags() & Qt.WindowType.WindowStaysOnTopHint) is False
+    # 重新勾选 → 恢复
+    page.chk_stay_on_top.setChecked(True)
+    assert bool(page.windowFlags() & Qt.WindowType.WindowStaysOnTopHint) is True
+
+
+def test_input_widths_compressed_to_about_six_digits(page):
+    """§四：普通数字输入框宽度明显缩短（约 6 位数字显示宽度，≤ 90px）。"""
+    for name in _EDITABLE_SPINS + _FROZEN_SPINS:
+        spin = page.findChild(QDoubleSpinBox, name)
+        assert spin is not None, name
+        assert spin.width() <= 90, f"{name} width={spin.width()}"
+    # 利润规则下拉保留规则名所需宽度
+    combo = page.findChild(QComboBox, "cmbProfitRule")
+    assert combo is not None and combo.width() >= 100
+
+
+def test_unit_symbols_tight_against_inputs(page):
+    """§五：¥/$/cm/g/% 紧贴对应输入框（同一组间距 ≤ 5px），且是外部 QLabel。"""
+    pairs = [
+        ("spinConservativeLengthCm", "unitQuickspinConservativeLengthCm"),
+        ("spinConservativeWidthCm", "unitQuickspinConservativeWidthCm"),
+        ("spinConservativeHeightCm", "unitQuickspinConservativeHeightCm"),
+        ("spinConservativeWeightG", "unitQuickspinConservativeWeightG"),
+        ("spinQuickDomesticCostRmb", "currencyQuickDomesticRmb"),
+        ("txtQuickFirstMileTotalRmb", "currencyQuickFirstMileRmb"),
+        ("spinTailFreightRmb", "currencyTailRmb"),
+        ("spinTailFreightUsd", "currencyTailUsd"),
+        ("txtCalculatedCostRmb", "currencyCalculatedCostRmb"),
+        ("txtCalculatedCostUsd", "currencyCalculatedCostUsd"),
+        ("txtNoActivityPriceRmb", "noActivityPriceRmbSymbol"),
+        ("txtNoActivityPriceUsd", "noActivityPriceUsdSymbol"),
+        ("txtNoActivityProfitRmb", "noActivityProfitRmbSymbol"),
+        ("txtNoActivityProfitUsd", "noActivityProfitUsdSymbol"),
+        ("txtActivityPriceRmb", "activityPriceRmbSymbol"),
+        ("txtActivityPriceUsd", "activityPriceUsdSymbol"),
+        ("txtActivityProfitRmb", "activityProfitRmbSymbol"),
+        ("txtActivityProfitUsd", "activityProfitUsdSymbol"),
+        ("txtListPriceProfitRate", "unit_txtListPriceProfitRate"),
+        ("spinPromotionReserve", "unitPromotionReserve"),
+        ("spinProfitRate", "unitProfitRate"),
+    ]
+    page.show()
+    try:
+        from PySide6.QtCore import QCoreApplication
+
+        QCoreApplication.processEvents()
+        for spin_name, label_name in pairs:
+            spin = page.findChild(QDoubleSpinBox, spin_name)
+            label = page.findChild(QLabel, label_name)
+            assert spin is not None and label is not None, (spin_name, label_name)
+            # 符号/单位在输入框左侧或右侧都允许：取两控件之间的净间距
+            gap = max(spin.geometry().left(), label.geometry().left()) - min(
+                spin.geometry().right(), label.geometry().right()
+            )
+            assert 0 <= gap <= 5, f"{spin_name} 与 {label_name} 间距 {gap}px"
+    finally:
+        page.hide()
+
+
+def test_no_widget_clipping_after_refit(page):
+    """§十三：按 sizeHint 收紧后所有控件都在窗口内、无裁剪。"""
+    page.show()
+    try:
+        from PySide6.QtCore import QCoreApplication
+
+        QCoreApplication.processEvents()
+        for name in _EDITABLE_SPINS + _FROZEN_SPINS:
+            spin = page.findChild(QDoubleSpinBox, name)
+            assert spin is not None
+            assert spin.geometry().right() <= page.width(), name
+            assert spin.geometry().bottom() <= page.height(), name
+        assert page.findChild(QComboBox, "cmbProfitRule").geometry().right() <= page.width()
+        assert page.btn_clear.geometry().right() <= page.width()
+    finally:
+        page.hide()
 
 
 # ==================================================================
@@ -471,3 +550,37 @@ def test_pyproject_has_uu_calculator_entry():
     """pyproject 提供 uu-calculator 开发入口（为未来 Setup.exe 保留）。"""
     text = Path("pyproject.toml").read_text(encoding="utf-8")
     assert 'uu-calculator = "profit_accounting_26.ui.quick_calculator_app:main"' in text
+
+
+# ==================================================================
+# C 共享核心（任务书 20-22）：无第二套业务计算系统
+# ==================================================================
+
+
+def test_quick_profit_results_driven_by_shared_engine(page):
+    """C-21：Quick 的利润区就是共享 CalculationBinder 实例，导出同一套双场景结构。"""
+    from profit_accounting_26.ui.binders.calculation_binder import CalculationBinder
+
+    assert isinstance(page.profit_binder, CalculationBinder)
+    _install_forwarders(page.context, 1)
+    _set_spec(page)
+    scenarios = page.profit_binder.export_profit_scenarios()
+    assert scenarios.get("schema_version") == "2.6.1-dual-profit-v1"
+    assert "no_activity" in scenarios and "activity" in scenarios
+    assert scenarios["no_activity"].get("sale_price_usd", 0) > 0
+    assert scenarios["activity"].get("profit_rate_on_cost") is not None
+
+
+def test_quick_has_no_second_business_formula_implementation():
+    """C-22：Quick 源码不存在独立物流/利润公式实现（只调用共享入口）。"""
+    source = Path(__file__).resolve().parents[2] / "src" / "profit_accounting_26" / "ui" / "quick_calculator_window.py"
+    text = source.read_text(encoding="utf-8")
+    for forbidden in (
+        "volume_divisor",
+        "chargeable_weight_kg",
+        "volume_weight_kg",
+        "calculate_dual_profit",
+        "sale_price_for",
+        "calculate_profit",
+    ):
+        assert forbidden not in text, f"Quick 不得出现第二套业务公式: {forbidden}"

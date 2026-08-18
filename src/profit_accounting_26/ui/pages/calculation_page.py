@@ -46,6 +46,10 @@ from profit_accounting_26.application.packaging_presentation import (
     packaging_summary,
     product_summary,
 )
+from profit_accounting_26.application.profit_defaults import (
+    apply_profit_defaults,
+    capture_profit_defaults,
+)
 from profit_accounting_26.application.recognition_service import (
     RecognitionCancellation,
     RecognitionCancelledError,
@@ -343,6 +347,9 @@ class CalculationPage(QWidget):
             if rule.enabled and not rule.archived
         ))
         self.profit_binder.selectedRuleChanged.connect(self._persist_selected_rule)
+        # 三项利润字段（活动预留/标价利率/活动后利润率）恢复用户上一次明确保存的默认值；
+        # 从未保存过则沿用现有初始默认（15% / 25%）。这是本轮唯一主软件业务改动。
+        apply_profit_defaults(self.settings, self.profit_binder)
 
         self.rebuild_image_slots(int(self.settings.get("image_slot_count", 5)))
         self.rebuild_quote_cards()
@@ -2261,6 +2268,10 @@ class CalculationPage(QWidget):
             self.context.diagnostic_logger.event("user_feedback_save_failed", record_id=self.record_id, error=str(exc))
             QMessageBox.warning(self, "用户修正未保存", f"记录已保存，但用户修正保存失败：{exc}")
         self.mark_saved()
+        # 明确保存成功后：把活动预留/标价利率/活动后利润率这三项当时的
+        # 值记为以后默认值（仅编辑不保存不改变默认值；本轮唯一主软件业务改动）。
+        capture_profit_defaults(self.settings, self.profit_binder)
+        self.context.settings_service.save(self.settings)
         self.context.diagnostic_logger.event("record_saved", record_id=self.record_id)
         # The local reestimate baseline belongs to one unsaved measurement
         # session only.  Saving ends that session; the record itself keeps its
@@ -2505,6 +2516,9 @@ class CalculationPage(QWidget):
         self.forwarder_selection_changed = False
         self._select_package("正常档", user=False)
         self.profit_binder.reset()
+        # 清空/新建后恢复用户上一次明确保存的三项利润默认值；
+        # 从未保存过则沿用现有初始默认（15% / 25%）。
+        apply_profit_defaults(self.settings, self.profit_binder)
         self._update_review_badge()
         self._refresh_edit_mode_ui()
         self.mark_saved()
