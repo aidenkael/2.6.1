@@ -8,9 +8,14 @@
   <property name="styleSheet">
    <string>QMainWindow,QWidget{background:#f5f8fc;color:#172033;font-family:"Microsoft YaHei UI";font-size:9pt;}
 QFrame[section="true"]{background:white;border:1px solid #dbe5f1;border-radius:6px;}
+QFrame[section="false"]{background:transparent;border:none;}
 QLabel[title="true"]{font-weight:600;} QLabel[unit="true"]{color:#607089;} QLabel[status="true"]{font-size:8pt;color:#607089;}
-QDoubleSpinBox,QComboBox{background:white;border:1px solid #d7e2ef;border-radius:4px;padding:2px 4px;min-height:24px;}
-QDoubleSpinBox[preview="true"]{background:#f1f5fa;color:#607089;}
+QDoubleSpinBox{background:white;border:1px solid #c5d5e8;border-radius:4px;padding:2px 4px;min-height:24px;}
+QDoubleSpinBox:focus{border:1px solid #176ff2;}
+QDoubleSpinBox[preview="true"]{background:#f1f5fa;border:1px solid #e0e7f1;color:#5a6478;}
+QDoubleSpinBox[preview="true"]:focus{border:1px solid #c5d1e0;}
+QComboBox{background:white;border:1px solid #d7e2ef;border-radius:4px;padding:2px 4px;min-height:24px;}
+QComboBox:focus{border:1px solid #176ff2;}
 QToolButton,QPushButton{background:white;border:1px solid #d7e2ef;border-radius:4px;padding:3px 6px;min-height:24px;}
 QToolButton[selected="true"]{background:#176ff2;color:white;border-color:#176ff2;font-weight:600;}
 QCheckBox{background:transparent;color:#172033;}</string>
@@ -107,7 +112,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
            <property name="text">
             <string>cm</string>
            </property>
-           <property name="unit">
+           <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
             <bool>true</bool>
            </property>
           </widget>
@@ -168,7 +179,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
            <property name="text">
             <string>cm</string>
            </property>
-           <property name="unit">
+           <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
             <bool>true</bool>
            </property>
           </widget>
@@ -229,7 +246,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
            <property name="text">
             <string>cm</string>
            </property>
-           <property name="unit">
+           <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
             <bool>true</bool>
            </property>
           </widget>
@@ -290,7 +313,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
            <property name="text">
             <string>g</string>
            </property>
-           <property name="unit">
+           <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
             <bool>true</bool>
            </property>
           </widget>
@@ -303,7 +332,7 @@ QCheckBox{background:transparent;color:#172033;}</string>
     <item>
      <widget class="QFrame" name="costSection">
       <property name="section">
-       <bool>true</bool>
+       <bool>false</bool>
       </property>
       <layout class="QGridLayout" name="costGrid">
        <property name="horizontalSpacing">
@@ -323,6 +352,9 @@ QCheckBox{background:transparent;color:#172033;}</string>
        </property>
        <property name="bottomMargin">
         <number>5</number>
+       </property>
+       <property name="columnStretch">
+        <string>0,0,0</string>
        </property>
        <item row="0" column="0">
         <widget class="QLabel" name="lblQuickDomesticCost">
@@ -356,6 +388,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
        </item>
        <item row="1" column="0">
         <widget class="QWidget" name="quickDomesticCostRow" native="true">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
          <layout class="QHBoxLayout" name="quickDomesticCostRowLayout">
           <property name="spacing">
            <number>2</number>
@@ -377,7 +415,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
             <property name="text">
              <string>¥</string>
             </property>
-            <property name="unit">
+            <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
              <bool>true</bool>
             </property>
            </widget>
@@ -412,6 +456,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
        </item>
        <item row="1" column="1">
         <widget class="QWidget" name="quickFirstMileRow" native="true">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
          <layout class="QHBoxLayout" name="quickFirstMileRowLayout">
           <property name="spacing">
            <number>2</number>
@@ -433,7 +483,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
             <property name="text">
              <string>¥</string>
             </property>
-            <property name="unit">
+            <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
              <bool>true</bool>
             </property>
            </widget>
@@ -474,6 +530,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
        </item>
        <item row="1" column="2">
         <widget class="QWidget" name="quickTailRow" native="true">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
          <layout class="QHBoxLayout" name="quickTailRowLayout">
           <property name="spacing">
            <number>2</number>
@@ -495,7 +557,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
             <property name="text">
              <string>¥</string>
             </property>
-            <property name="unit">
+            <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
              <bool>true</bool>
             </property>
            </widget>
@@ -523,6 +591,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
             <property name="maximum">
              <double>1000000.000000</double>
             </property>
+            <property name="readOnly">
+             <bool>true</bool>
+            </property>
+            <property name="preview">
+             <bool>true</bool>
+            </property>
            </widget>
           </item>
           <item>
@@ -530,7 +604,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
             <property name="text">
              <string>$</string>
             </property>
-            <property name="unit">
+            <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
              <bool>true</bool>
             </property>
            </widget>
@@ -569,7 +649,7 @@ QCheckBox{background:transparent;color:#172033;}</string>
     <item>
      <widget class="QFrame" name="forwarderCostSection">
       <property name="section">
-       <bool>true</bool>
+       <bool>false</bool>
       </property>
       <layout class="QHBoxLayout" name="forwarderCostLayout">
        <property name="spacing">
@@ -693,6 +773,9 @@ QCheckBox{background:transparent;color:#172033;}</string>
        </item>
        <item>
         <widget class="QFrame" name="forwarderCostSeparator">
+         <property name="visible">
+          <bool>false</bool>
+         </property>
          <property name="frameShape">
           <enum>QFrame::VLine</enum>
          </property>
@@ -731,6 +814,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
           </item>
           <item>
            <widget class="QWidget" name="quickTotalCostRow" native="true">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <layout class="QHBoxLayout" name="quickTotalCostRowLayout">
              <property name="spacing">
               <number>2</number>
@@ -752,7 +841,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
                <property name="text">
                 <string>¥</string>
                </property>
-               <property name="unit">
+               <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
                 <bool>true</bool>
                </property>
               </widget>
@@ -787,7 +882,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
                <property name="text">
                 <string>$</string>
                </property>
-               <property name="unit">
+               <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
                 <bool>true</bool>
                </property>
               </widget>
@@ -856,6 +957,9 @@ QCheckBox{background:transparent;color:#172033;}</string>
        <property name="bottomMargin">
         <number>5</number>
        </property>
+       <property name="columnStretch">
+        <string>0,0,0</string>
+       </property>
        <item row="0" column="0">
         <widget class="QLabel" name="lblNoActivityPrice">
          <property name="text">
@@ -868,6 +972,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
        </item>
        <item row="0" column="1">
         <widget class="QWidget" name="noActivityProfitTitleHost" native="true">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
          <layout class="QHBoxLayout" name="noActivityProfitTitleHostLayout">
           <property name="spacing">
            <number>4</number>
@@ -896,6 +1006,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
           </item>
           <item>
            <widget class="QLabel" name="lblNoActivitySubsidyStatus">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="text">
              <string>未触发</string>
             </property>
@@ -937,6 +1053,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
           </property>
           <item>
            <widget class="QWidget" name="noActivityPriceRmbRow" native="true">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <layout class="QHBoxLayout" name="noActivityPriceRmbRowLayout">
              <property name="spacing">
               <number>2</number>
@@ -958,7 +1080,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
                <property name="text">
                 <string>¥</string>
                </property>
-               <property name="unit">
+               <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
                 <bool>true</bool>
                </property>
               </widget>
@@ -999,6 +1127,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
           </item>
           <item>
            <widget class="QWidget" name="noActivityPriceUsdRow" native="true">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <layout class="QHBoxLayout" name="noActivityPriceUsdRowLayout">
              <property name="spacing">
               <number>2</number>
@@ -1020,7 +1154,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
                <property name="text">
                 <string>$</string>
                </property>
-               <property name="unit">
+               <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
                 <bool>true</bool>
                </property>
               </widget>
@@ -1076,6 +1216,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
           </property>
           <item>
            <widget class="QWidget" name="noActivityProfitRmbRow" native="true">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <layout class="QHBoxLayout" name="noActivityProfitRmbRowLayout">
              <property name="spacing">
               <number>2</number>
@@ -1097,7 +1243,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
                <property name="text">
                 <string>¥</string>
                </property>
-               <property name="unit">
+               <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
                 <bool>true</bool>
                </property>
               </widget>
@@ -1135,6 +1287,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
           </item>
           <item>
            <widget class="QWidget" name="noActivityProfitUsdRow" native="true">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <layout class="QHBoxLayout" name="noActivityProfitUsdRowLayout">
              <property name="spacing">
               <number>2</number>
@@ -1156,7 +1314,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
                <property name="text">
                 <string>$</string>
                </property>
-               <property name="unit">
+               <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
                 <bool>true</bool>
                </property>
               </widget>
@@ -1203,6 +1367,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
        </item>
        <item row="1" column="2">
         <widget class="QWidget" name="listPriceRateRow" native="true">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
          <layout class="QHBoxLayout" name="listPriceRateRowLayout">
           <property name="spacing">
            <number>2</number>
@@ -1252,7 +1422,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
             <property name="text">
              <string>%</string>
             </property>
-            <property name="unit">
+            <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
              <bool>true</bool>
             </property>
            </widget>
@@ -1266,7 +1442,7 @@ QCheckBox{background:transparent;color:#172033;}</string>
     <item>
      <widget class="QFrame" name="promotionReserveSection">
       <property name="section">
-       <bool>true</bool>
+       <bool>false</bool>
       </property>
       <layout class="QHBoxLayout" name="promotionReserveLayout">
        <property name="spacing">
@@ -1344,7 +1520,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
            <property name="text">
             <string>%</string>
            </property>
-           <property name="unit">
+           <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
             <bool>true</bool>
            </property>
           </widget>
@@ -1357,7 +1539,7 @@ QCheckBox{background:transparent;color:#172033;}</string>
     <item>
      <widget class="QFrame" name="activitySection">
       <property name="section">
-       <bool>true</bool>
+       <bool>false</bool>
       </property>
       <layout class="QGridLayout" name="activityGrid">
        <property name="horizontalSpacing">
@@ -1378,6 +1560,9 @@ QCheckBox{background:transparent;color:#172033;}</string>
        <property name="bottomMargin">
         <number>5</number>
        </property>
+       <property name="columnStretch">
+        <string>0,0,0</string>
+       </property>
        <item row="0" column="0">
         <widget class="QLabel" name="lblActivityPrice">
          <property name="text">
@@ -1390,6 +1575,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
        </item>
        <item row="0" column="1">
         <widget class="QWidget" name="activityProfitTitleHost" native="true">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
          <layout class="QHBoxLayout" name="activityProfitTitleHostLayout">
           <property name="spacing">
            <number>4</number>
@@ -1418,6 +1609,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
           </item>
           <item>
            <widget class="QLabel" name="lblActivitySubsidyStatus">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <property name="text">
              <string>未触发</string>
             </property>
@@ -1459,6 +1656,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
           </property>
           <item>
            <widget class="QWidget" name="activityPriceRmbRow" native="true">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <layout class="QHBoxLayout" name="activityPriceRmbRowLayout">
              <property name="spacing">
               <number>2</number>
@@ -1480,7 +1683,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
                <property name="text">
                 <string>¥</string>
                </property>
-               <property name="unit">
+               <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
                 <bool>true</bool>
                </property>
               </widget>
@@ -1521,6 +1730,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
           </item>
           <item>
            <widget class="QWidget" name="activityPriceUsdRow" native="true">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <layout class="QHBoxLayout" name="activityPriceUsdRowLayout">
              <property name="spacing">
               <number>2</number>
@@ -1542,7 +1757,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
                <property name="text">
                 <string>$</string>
                </property>
-               <property name="unit">
+               <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
                 <bool>true</bool>
                </property>
               </widget>
@@ -1604,6 +1825,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
           </property>
           <item>
            <widget class="QWidget" name="activityProfitRmbRow" native="true">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <layout class="QHBoxLayout" name="activityProfitRmbRowLayout">
              <property name="spacing">
               <number>2</number>
@@ -1625,7 +1852,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
                <property name="text">
                 <string>¥</string>
                </property>
-               <property name="unit">
+               <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
                 <bool>true</bool>
                </property>
               </widget>
@@ -1663,6 +1896,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
           </item>
           <item>
            <widget class="QWidget" name="activityProfitUsdRow" native="true">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
             <layout class="QHBoxLayout" name="activityProfitUsdRowLayout">
              <property name="spacing">
               <number>2</number>
@@ -1684,7 +1923,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
                <property name="text">
                 <string>$</string>
                </property>
-               <property name="unit">
+               <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
                 <bool>true</bool>
                </property>
               </widget>
@@ -1731,6 +1976,12 @@ QCheckBox{background:transparent;color:#172033;}</string>
        </item>
        <item row="1" column="2">
         <widget class="QWidget" name="activityProfitRateRow" native="true">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
          <layout class="QHBoxLayout" name="activityProfitRateRowLayout">
           <property name="spacing">
            <number>2</number>
@@ -1783,7 +2034,13 @@ QCheckBox{background:transparent;color:#172033;}</string>
             <property name="text">
              <string>%</string>
             </property>
-            <property name="unit">
+            <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="unit">
              <bool>true</bool>
             </property>
            </widget>

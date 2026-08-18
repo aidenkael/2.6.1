@@ -142,6 +142,7 @@ def test_unit_labels_are_outside_spinboxes(qapp, spin_name, unit_label, unit_tex
 
 _FROZEN_SPINS = (
     "txtQuickFirstMileTotalRmb",
+    "spinTailFreightRmb",
     "txtCalculatedCostUsd",
     "txtNoActivityPriceRmb",
     "txtNoActivityProfitUsd",
@@ -155,7 +156,6 @@ _EDITABLE_SPINS = (
     "spinConservativeHeightCm",
     "spinConservativeWeightG",
     "spinQuickDomesticCostRmb",
-    "spinTailFreightRmb",
     "spinTailFreightUsd",
     "txtCalculatedCostRmb",
     "txtNoActivityPriceUsd",
@@ -168,7 +168,7 @@ _EDITABLE_SPINS = (
 
 
 def test_editable_frozen_contract(page):
-    """第3项：冻结/可编辑表与主 CalculationBinder 一致（尾程双币种都可编辑）。"""
+    """第3项：冻结/可编辑表与主 CalculationBinder 一致（尾程 RMB 冻结，USD 可编辑）。"""
     for name in _FROZEN_SPINS:
         spin = page.findChild(QDoubleSpinBox, name)
         assert spin is not None and spin.isReadOnly(), name
@@ -271,15 +271,18 @@ def test_no_widget_clipping_after_refit(page):
 # ==================================================================
 
 
-def test_tail_fee_bidirectional(page):
-    """第4项：尾程 RMB↔USD 双向修改，与主软件当前汇率逻辑一致（保留两位小数）。"""
+def test_tail_fee_usd_drives_rmb(page):
+    """第4项：尾程 USD 可编辑 → RMB 冻结结果（USD × 汇率）；RMB 不可反向驱动 USD。"""
     _install_forwarders(page.context, 1)
     rate = 7.2
+    # USD → RMB 正向联动
     page.tail_fee_usd.setValue(6.0)
     assert page.tail_fee_rmb.value() == pytest.approx(round(6.0 * rate, 2), abs=0.001)
+    # RMB 为 readOnly，不能反向驱动 USD
+    assert page.tail_fee_rmb.isReadOnly()
+    # 即使程序化 setValue(RMB)，USD 不变（无反向信号连接）
     page.tail_fee_rmb.setValue(50.0)
-    page.tail_fee_rmb.editingFinished.emit()
-    assert page.tail_fee_usd.value() == pytest.approx(round(50.0 / rate, 2), abs=0.001)
+    assert page.tail_fee_usd.value() == pytest.approx(6.0, abs=0.001)
 
 
 def test_total_cost_edit_does_not_reverse_engineer_upstream(page):

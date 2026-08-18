@@ -5,7 +5,7 @@
 状态机；不复制、不重写任何物流/利润/汇率/货代/规则公式。
 
 Quick 只拥有：UI / 输入适配 / 显示映射 / 货代按钮 / 置顶 / 清空 / 启动入口。
-“国内成本”是 Quick 专属合并输入（= 主软件商品成本 + 国内运费），
+"国内成本"是 Quick 专属合并输入（= 主软件商品成本 + 国内运费），
 仅作 UI 输入适配，不要求主软件同形，也不写回主软件数据结构。
 """
 
@@ -18,9 +18,12 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
+    QFrame,
+    QGridLayout,
     QLabel,
     QMainWindow,
     QPushButton,
+    QSizePolicy,
     QToolButton,
 )
 
@@ -64,8 +67,14 @@ class QuickCalculatorWindow(QMainWindow):
         self.setCentralWidget(central)
         # 窗口名称固定为 .ui 的 windowTitle（UU测算）
         self.setWindowTitle(loaded.windowTitle())
+        # .ui 的全局 stylesheet 在 loaded widget 上；转移到 self 使 property selector 生效
+        self.setStyleSheet(loaded.styleSheet())
         # 蓝色 U 图标（任务栏/标题栏与主软件黑色 U 完全独立）
         self.setWindowIcon(QIcon(str(resource_path(QUICK_ICON_RELATIVE))))
+
+        # 利润区 Grid → HBox 重组（消灭中间大空白）——必须在 findChild 前完成
+        self._restructure_profit_section("noActivitySection", "noActivityGrid")
+        self._restructure_profit_section("activitySection", "activityGrid")
 
         self._find_widgets()
         self._wire_inputs()
@@ -84,7 +93,7 @@ class QuickCalculatorWindow(QMainWindow):
             if rule.enabled and not rule.archived
         ))
         # 三项利润字段（活动预留/标价利率/活动后利润率）读取主软件
-        # “明确保存后沿用”的同一套默认值；从未保存则沿用现有初始默认（15%/25%）。
+        # "明确保存后沿用"的同一套默认值；从未保存则沿用现有初始默认（15%/25%）。
         apply_profit_defaults(self.settings, self.profit_binder)
 
         self._refresh_forwarder_buttons()
@@ -97,11 +106,48 @@ class QuickCalculatorWindow(QMainWindow):
         finally:
             self._loading = False
         self._sync_tail_rmb_from_usd(recalculate=False)
+
         self._recalculate()
         # 默认置顶（checkbox 默认勾选）
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        # 所有控件布局完成后按真实 sizeHint 固定窗口（不写死 700×560）
-        self._refit_window()
+        # 窗口尺寸只在初始化阶段确定一次，之后永远固定
+        self._fix_window_size()
+
+    # ------------------------------------------------------------------
+    # 利润区 Grid → HBox 重组（消灭中间大空白）
+    # ------------------------------------------------------------------
+
+    def _restructure_profit_section(self, section_name: str, grid_name: str) -> None:
+        """利润区 QGridLayout 紧凑化：各列 Maximum 策略 + 末尾 stretch 列。
+
+        .ui 的 QGridLayout 默认 columnStretch=0,0,0，三列等分剩余空间。
+        本方法在 .ui 加载后执行一次性调整：
+        - 把列 0/1/2 的 widget 设为 Maximum 宽度策略
+        - 在列 3 添加 stretch 列吸收剩余空间（只在最右侧）
+        """
+        section = self.findChild(QFrame, section_name)
+        if section is None:
+            return
+        grid = section.findChild(QGridLayout, grid_name)
+        if grid is None:
+            return
+
+        # 确保所有列中的 widget 使用 Maximum 宽度策略（不被 grid 拉宽）
+        for col in range(grid.columnCount()):
+            for row in range(grid.rowCount()):
+                item = grid.itemAtPosition(row, col)
+                if item is None:
+                    continue
+                w = item.widget()
+                if w is not None:
+                    w.setSizePolicy(QSizePolicy.Policy.Maximum, w.sizePolicy().verticalPolicy())
+
+        # 添加 stretch 列到最右侧（列 3），吸收所有剩余空间
+        grid.setColumnStretch(3, 1)
+        # 确保原始三列不 stretch
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 0)
+        grid.setColumnStretch(2, 0)
 
     # ------------------------------------------------------------------
     # 控件绑定
@@ -117,7 +163,7 @@ class QuickCalculatorWindow(QMainWindow):
         self.spin_domestic_cost: QDoubleSpinBox = f(QDoubleSpinBox, "spinQuickDomesticCostRmb")
         # 总头程展示（只读）：取自当前货代 quote 的 weight_fee + fixed_fee
         self.txt_first_mile_total: QDoubleSpinBox = f(QDoubleSpinBox, "txtQuickFirstMileTotalRmb")
-        # 尾程双币种（RMB/USD 均可编辑，双向换算）
+        # 尾程：USD 可编辑，RMB 冻结（灰色结果 = USD × 汇率）
         self.tail_fee_rmb: QDoubleSpinBox = f(QDoubleSpinBox, "spinTailFreightRmb")
         self.tail_fee_usd: QDoubleSpinBox = f(QDoubleSpinBox, "spinTailFreightUsd")
         self.btn_clear: QPushButton = f(QPushButton, "btnClearAndNew")
@@ -135,10 +181,10 @@ class QuickCalculatorWindow(QMainWindow):
         for spin in (self.spin_length, self.spin_width, self.spin_height,
                      self.spin_weight, self.spin_domestic_cost):
             spin.valueChanged.connect(lambda _value: self._recalculate())
-        # 尾程：RMB/USD 双向换算，与主软件一致（USD 实时联动 RMB）
+        # 尾程：仅 USD 可编辑 → 实时联动 RMB（RMB 为冻结结果）
         self.tail_fee_usd.valueChanged.connect(lambda _value: self._on_tail_usd_live())
         self.tail_fee_usd.editingFinished.connect(lambda: self._on_tail_commit())
-        self.tail_fee_rmb.editingFinished.connect(lambda: self._on_tail_rmb_commit())
+        # 注意：tail_fee_rmb 为 readOnly，不连接 editingFinished（无反向驱动）
 
     def _wire_forwarders(self) -> None:
         for button in self._forwarder_buttons:
@@ -150,13 +196,57 @@ class QuickCalculatorWindow(QMainWindow):
     def _wire_on_top(self) -> None:
         self.chk_stay_on_top.toggled.connect(self._on_stay_on_top_toggled)
 
-    def _refit_window(self) -> None:
-        """按内容真实 sizeHint 固定窗口尺寸（货代按钮数量变化时重新收紧）。"""
+    def _fix_window_size(self) -> None:
+        """窗口尺寸只在初始化阶段确定一次，之后永远固定。
+
+        adjustSize() 按所有子控件 sizeHint 计算最小合理尺寸；
+        setFixedSize() 锁定，此后数字变化/状态变化/货代数量变化均不影响窗口大小。
+        """
         self.adjustSize()
         self.setFixedSize(self.size())
 
     # ------------------------------------------------------------------
-    # 尾程双币种（主软件语义：RMB=USD×汇率；只改会话，不写全局设置）
+    # 规则状态紧凑映射（Quick 专用，不改 CalculationBinder / 主软件）
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _compact_rule_status(full_text: str) -> str:
+        """Quick 专用：将完整规则状态映射为短状态（只显示 已触发/未触发）。
+
+        映射规则：
+        - 内部 "已触发 +¥20.33" → Quick "已触发"
+        - 内部 "已调整 ¥20.33"  → Quick "已触发"（规则实际已作用）
+        - 内部 "未触发"         → Quick "未触发"
+        - 内部 "无规则" / 空    → Quick "未触发"
+        """
+        if not full_text:
+            return "未触发"
+        if "已触发" in full_text or "已调整" in full_text:
+            return "已触发"
+        return "未触发"
+
+    def _apply_compact_rule_status(self) -> None:
+        """将利润区两个规则状态标签覆盖为 Quick 短格式（运行时动态文本映射）。
+
+        基础样式（灰色小字）由 .ui stylesheet 的 QLabel[status="true"] 提供；
+        已触发时仅覆盖颜色为绿色（inline stylesheet 优先级高于全局）。
+        """
+        for label in (self.profit_binder.lbl_na_status, self.profit_binder.lbl_act_status):
+            if label is not None:
+                full = label.text()
+                compact = self._compact_rule_status(full)
+                if label.text() != compact:
+                    label.setText(compact)
+                # 已触发=绿色；未触发由全局 stylesheet 灰色兜底
+                if compact == "已触发":
+                    label.setStyleSheet("color:#168A58;")
+                else:
+                    label.setStyleSheet("")
+                # 重新适配固定宽度（文本变化后 sizeHint 随之更新）
+                label.setFixedWidth(label.sizeHint().width() + 4)
+
+    # ------------------------------------------------------------------
+    # 尾程（Quick 专属：USD 可编辑 → RMB 冻结结果；不修改主软件双向语义）
     # ------------------------------------------------------------------
 
     def _on_tail_usd_live(self) -> None:
@@ -172,16 +262,6 @@ class QuickCalculatorWindow(QMainWindow):
             self.tail_fee_rmb.setValue(round(self.tail_fee_usd.value() * rate, 2))
         if recalculate:
             self._recalculate()
-
-    def _on_tail_rmb_commit(self) -> None:
-        if self._loading:
-            return
-        rate = self._rate()
-        from PySide6.QtCore import QSignalBlocker
-
-        with QSignalBlocker(self.tail_fee_usd):
-            self.tail_fee_usd.setValue(round(self.tail_fee_rmb.value() / rate, 2) if rate else 0.0)
-        self._recalculate()
 
     def _on_tail_commit(self) -> None:
         if not self._loading:
@@ -208,7 +288,7 @@ class QuickCalculatorWindow(QMainWindow):
 
     @staticmethod
     def _short_name(name: str) -> str:
-        """与主软件 recalculate 相同的货代简名逻辑（如“深圳货代”→“深圳”）。"""
+        """与主软件 recalculate 相同的货代简名逻辑（如"深圳货代"→"深圳"）。"""
         return str(name or "").rstrip("货代") or str(name or "")
 
     def _refresh_forwarder_buttons(self) -> None:
@@ -224,12 +304,11 @@ class QuickCalculatorWindow(QMainWindow):
                 button.setVisible(True)
             else:
                 button.setProperty("forwarderId", "")
-                button.setVisible(False)  # 不存在的位置不留占位
+                button.setVisible(False)  # 不存在的位置隐藏，窗口尺寸不变
             button.setProperty("selected", button.property("forwarderId") == self.selected_forwarder_id)
             button.style().unpolish(button)
             button.style().polish(button)
-        # 货代按钮数量变化时按内容重新收紧窗口（无大片占位）
-        self._refit_window()
+        # 注意：不调用任何 resize / adjustSize —— 窗口尺寸在初始化时已固定
 
     def _on_forwarder_clicked(self) -> None:
         forwarder_id = str(self.sender().property("forwarderId") or "")
@@ -270,8 +349,8 @@ class QuickCalculatorWindow(QMainWindow):
         # 总头程展示 = weight_fee + fixed_fee（取自现有 LogisticsQuote，不重新计算）
         self.txt_first_mile_total.setValue(round(quote.weight_fee_rmb + quote.fixed_fee_rmb, 2))
         # 系统总成本：直接调用共享 system-cost 计算入口（calculate_system_cost），
-        # Quick 的“国内成本”作为合并输入传入（product_cost_rmb 槽位）——
-        # 数学上与主软件“商品成本+国内运费+物流总额”等价；以后物流/成本公式
+        # Quick 的"国内成本"作为合并输入传入（product_cost_rmb 槽位）——
+        # 数学上与主软件"商品成本+国内运费+物流总额"等价；以后物流/成本公式
         # 只在共享核心维护，Quick 自动跟随。
         system_cost = round(
             calculate_system_cost(
@@ -283,11 +362,14 @@ class QuickCalculatorWindow(QMainWindow):
         )
         self.profit_binder.set_calculation_cost(system_cost)
         self._current_system_cost = system_cost
+        # Quick 规则状态紧凑映射（不改 Binder 内部计算）
+        self._apply_compact_rule_status()
 
     def _clear_results(self) -> None:
         self.txt_first_mile_total.setValue(0.0)
         self.profit_binder.set_calculation_cost(0.0)
         self._current_system_cost = 0.0
+        self._apply_compact_rule_status()
 
     # ------------------------------------------------------------------
     # 清空（只清当前会话）
@@ -295,7 +377,7 @@ class QuickCalculatorWindow(QMainWindow):
 
     def clear_new(self) -> None:
         """清空本次轻量核算会话：尺寸/重量/国内成本清零，利润区走 Binder.reset()，
-        随后三项利润字段恢复“用户上一次在主软件明确保存”的默认值（从未保存则
+        随后三项利润字段恢复"用户上一次在主软件明确保存"的默认值（从未保存则
         沿用现有初始默认 15%/25%）；尾程沿用当前设置值（不恢复硬编码）；利润规则
         沿用当前设置选择；不写历史、不写设置、不删主软件数据。"""
         self._loading = True
@@ -321,7 +403,7 @@ class QuickCalculatorWindow(QMainWindow):
     def _refresh_settings_from_disk(self) -> None:
         """主软件修改设置后，Quick 重新加载（汇率/规则/尾程/货代）。
 
-        三项利润默认值只在启动与“清空”时读取（与主软件一致：refresh_settings
+        三项利润默认值只在启动与"清空"时读取（与主软件一致：refresh_settings
         不触碰这 3 项）；Quick 会话内的临时修改绝不写回 settings。
         """
         fresh = self.context.settings_service.load()

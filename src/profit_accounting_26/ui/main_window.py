@@ -101,6 +101,7 @@ class MainWindow(QMainWindow):
 
         # 跨页面信号（保留现有行为）
         self.calculation_page.dirtyChanged.connect(self.binder.set_dirty)
+        self.calculation_page.historyEditingChanged.connect(self.binder.set_history_editing)
         self.settings_page.dirtyChanged.connect(self.binder.set_dirty)
         self.settings_page.settingsSaved.connect(self.binder.on_settings_saved)
         self.settings_page.forwardersSaved.connect(self.calculation_page.refresh_settings)

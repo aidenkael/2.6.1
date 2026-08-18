@@ -168,8 +168,9 @@ class TestHistoryEditClosedLoop:
         assert page.record_id == rid
         assert page.packaging_stale is False
         assert page.btn_save_record.text() == "更新此记录"
-        assert page.edit_state_label.text() == "正在编辑历史记录"
-        assert page.edit_state_label.isVisibleTo(page)
+        # edit_state_label 已删除；历史编辑状态由 historyEditingChanged 信号
+        # 通知 MainWindowBinder，在唯一 lblSaveStatus 上显示"正在更新历史记录"
+        assert page.editing_record_id == rid
 
         # 恢复后改任何字段都允许直接重算保存（裸规格变化也不会标过期）
         page.bare_weight.spin.setValue(500.0)
@@ -236,7 +237,8 @@ class TestHistoryEditClosedLoop:
         assert page.initial_ai_snapshot is None
         assert page.user_calibration_dirty is False
         assert page.btn_save_record.text() == "保存本次记录"
-        assert not page.edit_state_label.isVisibleTo(page)
+        # edit_state_label 已删除；clear_new 后 editing_record_id=None
+        assert page.editing_record_id is None
         # 新商品允许重建第一次 AI
         _simulate_ai(page, dims=(40.0, 30.0, 10.0, 500.0), method="新首次AI")
         assert page.initial_ai_snapshot is not None

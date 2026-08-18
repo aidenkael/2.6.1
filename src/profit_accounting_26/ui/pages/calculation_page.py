@@ -256,6 +256,7 @@ class _UserCorrectionEdit(QTextEdit):
 class CalculationPage(QWidget):
     dirtyChanged = Signal(bool)
     saved = Signal(str)
+    historyEditingChanged = Signal(bool)
 
     def __init__(self, context: AppContext, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -513,13 +514,6 @@ class CalculationPage(QWidget):
         self.product_link = f(QLineEdit, "txtProductLink")
         self.btn_save_record = f(QPushButton, "btnSaveCurrentRecord")
         self.btn_clear_new = f(QPushButton, "btnClearAndNew")
-        # 保存按钮旁的历史编辑状态轻提示（不占用新布局区域）
-        bottom_layout = f(QHBoxLayout, "bottomActionLayout")
-        self.edit_state_label = QLabel("")
-        self.edit_state_label.setProperty("muted", True)
-        self.edit_state_label.setVisible(False)
-        if bottom_layout is not None:
-            bottom_layout.insertWidget(2, self.edit_state_label)
         self._apply_adopted_flow_ui()
         self._apply_round3_ui_polish()
 
@@ -924,6 +918,8 @@ class CalculationPage(QWidget):
     # ------------------------------------------------------------------
 
     def _mark_dirty(self) -> None:
+        if self._updating:
+            return
         if not self.dirty:
             self.dirty = True
             self.dirtyChanged.emit(True)
@@ -1000,7 +996,10 @@ class CalculationPage(QWidget):
         self.dirtyChanged.emit(False)
 
     def _persist_selected_rule(self, rule_id: str) -> None:
-        self.selected_profit_rule_id = str(rule_id or "")
+        new_id = str(rule_id or "")
+        if new_id == self.selected_profit_rule_id:
+            return
+        self.selected_profit_rule_id = new_id
         self.settings["selected_profit_rule_id"] = self.selected_profit_rule_id
         self.context.settings_service.save(self.settings)
         self._mark_dirty()
@@ -2788,11 +2787,14 @@ class CalculationPage(QWidget):
         self.mark_saved()
 
     def _refresh_edit_mode_ui(self) -> None:
-        """按新建/历史编辑模式刷新保存按钮文案与编辑状态提示。"""
+        """按新建/历史编辑模式刷新保存按钮文案与状态栏。
+
+        不再使用独立的 edit_state_label；统一由 MainWindowBinder.set_history_editing
+        在唯一的 lblSaveStatus 上显示"正在更新历史记录"。
+        """
         editing = self.editing_record_id is not None
         self.btn_save_record.setText("更新此记录" if editing else "保存本次记录")
-        self.edit_state_label.setText("正在编辑历史记录" if editing else "")
-        self.edit_state_label.setVisible(editing)
+        self.historyEditingChanged.emit(editing)
 
     @staticmethod
     def _fill_package_fields(fields: dict[str, Any], raw: dict[str, Any]) -> None:
@@ -2814,7 +2816,9 @@ class CalculationPage(QWidget):
         self.selected_forwarder_id = str(self.settings.get("selected_forwarder_id") or self.selected_forwarder_id)
         self.selected_profit_rule_id = str(self.settings.get("selected_profit_rule_id") or self.selected_profit_rule_id)
         self._updating = True
-        self.tail_fee_usd.setValue(float(self.settings.get("default_tail_fee_usd", 5.56)))
+        from PySide6.QtCore import QSignalBlocker
+        with QSignalBlocker(self.tail_fee_usd.spin):
+            self.tail_fee_usd.setValue(float(self.settings.get("default_tail_fee_usd", 5.56)))
         self._updating = False
         # 重新同步 RMB = USD × 当前有效汇率，确保汇率变化后一致性
         self._sync_tail_rmb_from_usd(recalculate=False)

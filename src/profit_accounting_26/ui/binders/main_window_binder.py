@@ -76,8 +76,12 @@ class MainWindowBinder:
         self._bind_navigation()
         self._bind_data_directory()
         self._bind_exchange_rate()
-        self._bind_save_status()
         self._mount_pages()
+        # 必须在 _mount_pages 之后绑定保存状态：
+        # _mount_pages 会删除 main_window.ui 的 pageCalculation 占位（含旧 lblSaveStatus），
+        # 替换为 CalculationPage（从同一 .ui 重新加载，含新的 lblSaveStatus）。
+        # 如果提前绑定，self.lbl_save_status 会指向已被 deleteLater 的旧控件。
+        self._bind_save_status()
         # 默认切换到测算页（Stage 4：新导航顺序下为 index 0）
         self.switch_page(0)
 
@@ -350,20 +354,45 @@ class MainWindowBinder:
 
     def _bind_save_status(self) -> None:
         self.lbl_save_status = self.window.findChild(QLabel, "lblSaveStatus")
+        # 历史记录编辑模式状态：独立于 dirty 的第三种状态
+        self._is_history_editing = False
 
     def set_dirty(self, dirty: bool) -> None:
         if not self.lbl_save_status:
             return
+        # dirty=True 时优先显示"未保存"（无论是否历史编辑模式）
         if dirty:
             self.lbl_save_status.setText("未保存")
             self.lbl_save_status.setStyleSheet(
                 "background:#FFF4E5;color:#C77600;padding:6px 11px;border-radius:14px;"
+            )
+        elif self._is_history_editing:
+            # 非 dirty 且处于历史编辑模式 → "正在更新历史记录"
+            self.lbl_save_status.setText("正在更新历史记录")
+            self.lbl_save_status.setStyleSheet(
+                "background:#EAF0FA;color:#4A6FA5;padding:6px 11px;border-radius:14px;"
             )
         else:
             self.lbl_save_status.setText("已保存")
             self.lbl_save_status.setStyleSheet(
                 "background:#EAF9F2;color:#168A58;padding:6px 11px;border-radius:14px;"
             )
+
+    def set_history_editing(self, editing: bool) -> None:
+        """切换历史编辑模式。进入时显示"正在更新历史记录"；退出后由 set_dirty 接管。"""
+        self._is_history_editing = editing
+        if not editing:
+            return
+        # 进入历史编辑模式且当前非 dirty → 显示"正在更新历史记录"
+        if not self.lbl_save_status:
+            return
+        # 如果已经是"未保存"状态则不覆盖（dirty 优先级高于 editing）
+        if self.lbl_save_status.text() == "未保存":
+            return
+        self.lbl_save_status.setText("正在更新历史记录")
+        self.lbl_save_status.setStyleSheet(
+            "background:#EAF0FA;color:#4A6FA5;padding:6px 11px;border-radius:14px;"
+        )
 
     # ------------------------------------------------------------------
     # 设置保存后刷新
