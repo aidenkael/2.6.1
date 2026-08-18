@@ -22,6 +22,7 @@ dev = [
 
 [project.scripts]
 profit-accounting-2-6 = "profit_accounting_26.ui.app:main"
+uu-calculator = "profit_accounting_26.ui.quick_calculator_app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
