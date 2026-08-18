@@ -44,6 +44,19 @@ _FORWARDER_BUTTON_NAMES = ("btnQuickForwarder1", "btnQuickForwarder2", "btnQuick
 # 与主软件 ForwarderCardsController 相同的展示优先级
 _FORWARDER_PRIORITY = {"义乌货代": 0, "深圳货代": 1}
 
+# 顶层窗口固定尺寸契约（实机验收 448×475 无裁剪）。
+# 硬规则：只在窗口创建/重建时应用一次；任何业务交互（数值变化/利润变化/
+# 货代选择/货代数量刷新/WindowActivate/settings reload）永远不得再改变顶层尺寸，
+# 也禁止用业务内容 sizeHint 重新推导窗口尺寸。
+QUICK_WINDOW_WIDTH = 448
+QUICK_WINDOW_HEIGHT = 475
+# 规则状态标签固定尺寸（紧凑文本只有 已触发/未触发 三字，8pt 下三字宽约 33px，
+# 44px 为含余量的精确固定宽，不超出标题行可用宽；一次设定永不更新；
+# 禁止 setFixedWidth(sizeHint()+N) 追踪——QLabel sizeHint 会吸收既有固定宽度，
+# 追踪会形成每轮 +N 的正反馈漂移，是本轮 P0 的尺寸漂移放大器）
+_STATUS_LABEL_FIXED_WIDTH = 44
+_STATUS_LABEL_FIXED_HEIGHT = 14
+
 
 class QuickCalculatorWindow(QMainWindow):
     """UU测算 主窗口：从 quick_calculator.ui 加载布局，直接复用现有 Binder/Service。
@@ -110,8 +123,12 @@ class QuickCalculatorWindow(QMainWindow):
         self._recalculate()
         # 默认置顶（checkbox 默认勾选）
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        # 窗口尺寸只在初始化阶段确定一次，之后永远固定
-        self._fix_window_size()
+        # 窗口尺寸固定契约：初始化完成后只设置一次，之后永不随内容变化
+        self._apply_fixed_window_size()
+        # 两个规则状态标签固定尺寸一次设定（替代此前的 sizeHint 追踪）
+        for label in (self.profit_binder.lbl_na_status, self.profit_binder.lbl_act_status):
+            if label is not None:
+                label.setFixedSize(_STATUS_LABEL_FIXED_WIDTH, _STATUS_LABEL_FIXED_HEIGHT)
 
     # ------------------------------------------------------------------
     # 利润区 Grid → HBox 重组（消灭中间大空白）
@@ -196,14 +213,20 @@ class QuickCalculatorWindow(QMainWindow):
     def _wire_on_top(self) -> None:
         self.chk_stay_on_top.toggled.connect(self._on_stay_on_top_toggled)
 
-    def _fix_window_size(self) -> None:
-        """窗口尺寸只在初始化阶段确定一次，之后永远固定。
+    def _apply_fixed_window_size(self) -> None:
+        """应用顶层窗口固定尺寸契约（min == max == 448×475）。
 
-        adjustSize() 按所有子控件 sizeHint 计算最小合理尺寸；
-        setFixedSize() 锁定，此后数字变化/状态变化/货代数量变化均不影响窗口大小。
+        不依赖任何内容 sizeHint；仅在窗口创建与原生窗口重建（show）时重新
+        声明一次固定契约。setWindowFlag 等触发原生窗口重建后，Windows 平台会
+        丢失既有 fixed 约束（实测出现 min≠max 失效态），因此在 showEvent
+        重新声明，保证任何重建后顶层 min==max 恒成立。
         """
-        self.adjustSize()
-        self.setFixedSize(self.size())
+        self.setFixedSize(QUICK_WINDOW_WIDTH, QUICK_WINDOW_HEIGHT)
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        """原生窗口每次显示/重建后重新声明固定尺寸契约（幂等，不依赖内容）。"""
+        super().showEvent(event)
+        self._apply_fixed_window_size()
 
     # ------------------------------------------------------------------
     # 规则状态紧凑映射（Quick 专用，不改 CalculationBinder / 主软件）
@@ -242,8 +265,7 @@ class QuickCalculatorWindow(QMainWindow):
                     label.setStyleSheet("color:#168A58;")
                 else:
                     label.setStyleSheet("")
-                # 重新适配固定宽度（文本变化后 sizeHint 随之更新）
-                label.setFixedWidth(label.sizeHint().width() + 4)
+                # 标签宽度在初始化时一次性固定，此处不再随 sizeHint 追踪
 
     # ------------------------------------------------------------------
     # 尾程（Quick 专属：USD 可编辑 → RMB 冻结结果；不修改主软件双向语义）

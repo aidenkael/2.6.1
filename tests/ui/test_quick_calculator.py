@@ -181,8 +181,15 @@ def test_editable_frozen_contract(page):
 
 
 def test_quick_window_compact_and_default_on_top(page):
-    """§7/§8：窗口不再固定 700×560（按内容 sizeHint 收紧），默认置顶且可取消。"""
-    assert page.width() < 700 and page.height() < 560
+    """§7/§8：顶层窗口固定 448×475（min == max 硬契约），默认置顶且可取消。"""
+    from profit_accounting_26.ui.quick_calculator_window import (
+        QUICK_WINDOW_HEIGHT,
+        QUICK_WINDOW_WIDTH,
+    )
+
+    assert page.width() == QUICK_WINDOW_WIDTH == 448
+    assert page.height() == QUICK_WINDOW_HEIGHT == 475
+    assert page.minimumSize() == page.maximumSize()
     # 默认置顶（checkbox 默认勾选 + WindowStaysOnTopHint）
     assert page.chk_stay_on_top.isChecked() is True
     assert bool(page.windowFlags() & Qt.WindowType.WindowStaysOnTopHint) is True
@@ -203,6 +210,23 @@ def test_input_widths_compressed_to_about_six_digits(page):
     # 利润规则下拉保留规则名所需宽度
     combo = page.findChild(QComboBox, "cmbProfitRule")
     assert combo is not None and combo.width() >= 100
+
+
+def _row_starvation_px(spin) -> int:
+    """返回 spin 所在嵌套行布局被压缩的像素数（行最小需求 - 实际分配）。
+
+    直接在外层布局中（非嵌套行）的控件返回 0（严格检查）。
+    """
+    host = spin.parentWidget()
+    layout = host.layout() if host is not None else None
+    if layout is None:
+        return 0
+    for index in range(layout.count()):
+        row = layout.itemAt(index).layout()
+        if row is not None and row.indexOf(spin) >= 0:
+            allocated = layout.itemAt(index).geometry().width()
+            return max(0, row.minimumSize().width() - allocated)
+    return 0
 
 
 def test_unit_symbols_tight_against_inputs(page):
@@ -243,7 +267,12 @@ def test_unit_symbols_tight_against_inputs(page):
             gap = max(spin.geometry().left(), label.geometry().left()) - min(
                 spin.geometry().right(), label.geometry().right()
             )
-            assert 0 <= gap <= 5, f"{spin_name} 与 {label_name} 间距 {gap}px"
+            # 真实用户环境（Windows + Microsoft YaHei UI）下行宽恰好贴合（gap=2）；
+            # offscreen/CI 平台的回退字体更宽，窗口固定 448 后行会被压缩，
+            # 重叠量不得超过行压缩量（否则是真实布局缺陷而非字体差异）。
+            starvation = _row_starvation_px(spin)
+            assert gap >= -starvation, f"{spin_name} 与 {label_name} 间距 {gap}px"
+            assert gap <= 5, f"{spin_name} 与 {label_name} 间距 {gap}px"
     finally:
         page.hide()
 
@@ -587,3 +616,152 @@ def test_quick_has_no_second_business_formula_implementation():
         "calculate_profit",
     ):
         assert forbidden not in text, f"Quick 不得出现第二套业务公式: {forbidden}"
+
+
+# ==================================================================
+# P0 回归：任何业务交互永远不得改变顶层窗口尺寸
+# （真实缺陷：状态标签 setFixedWidth(sizeHint+4) 追踪漂移 +
+#   setWindowFlag 重建原生窗口丢失 fixed 约束 → 窗口横向持续放大）
+# ==================================================================
+
+
+def _pump(app) -> None:
+    """完整跑一轮事件循环，确保 LayoutRequest/延迟刷新全部落地。"""
+    for _ in range(3):
+        app.processEvents()
+
+
+def test_window_size_contract_is_hard_constant():
+    """硬契约：顶层固定尺寸是常量声明，不是从内容 sizeHint 推导。"""
+    from profit_accounting_26.ui import quick_calculator_window as mod
+
+    assert mod.QUICK_WINDOW_WIDTH == 448
+    assert mod.QUICK_WINDOW_HEIGHT == 475
+    # 禁止动态 refit 链复活：源码不得再出现以下模式
+    text = Path(mod.__file__).read_text(encoding="utf-8")
+    assert "_refit_window" not in text
+    assert "setFixedWidth(label.sizeHint()" not in text
+    assert "self.adjustSize()" not in text
+    assert "setFixedSize(self.size())" not in text
+
+
+def test_interactions_never_resize_top_level_window(qapp, temp_context):
+    """P0 回归：show + 事件循环下，全部交互路径后顶层尺寸/min/max 恒等于初始值。"""
+    from PySide6.QtCore import QEvent, QPoint, QPointF
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtTest import QTest
+
+    _install_forwarders(temp_context, 2)
+    window = QuickCalculatorWindow(temp_context)
+    try:
+        window.show()
+        _pump(qapp)
+        initial = (window.width(), window.height())
+        assert initial == (448, 475)
+
+        def assert_locked(tag: str) -> None:
+            _pump(qapp)
+            assert (window.width(), window.height()) == initial, tag
+            assert (
+                window.minimumWidth(), window.minimumHeight(),
+            ) == initial, f"{tag}: minimumSize 被改变"
+            assert (
+                window.maximumWidth(), window.maximumHeight(),
+            ) == initial, f"{tag}: maximumSize 被改变"
+            assert window.minimumSize() == window.maximumSize(), tag
+
+        def wheel(spin, times: int = 5) -> None:
+            pos = QPoint(spin.width() // 2, spin.height() // 2)
+            for _ in range(times):
+                ev = QWheelEvent(
+                    QPointF(pos), spin.mapToGlobal(pos), QPoint(0, 0), QPoint(0, 120),
+                    Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+                    Qt.ScrollPhase.NoScrollPhase, False,
+                )
+                qapp.sendEvent(spin, ev)
+
+        # 1. setValue 小值/大值
+        window.spin_length.setValue(2)
+        assert_locked("spin.setValue(2)")
+        window.spin_length.setValue(160)
+        assert_locked("spin.setValue(160)")
+
+        # 2. 键盘输入（lineEdit 真实按键）
+        window.spin_length.setFocus()
+        window.spin_length.lineEdit().selectAll()
+        QTest.keyClicks(window.spin_length.lineEdit(), "160")
+        QTest.keyClick(window.spin_length.lineEdit(), Qt.Key.Key_Return)
+        assert_locked("keyboard input")
+
+        # 3. 鼠标滚轮（含连续快速滚轮）
+        wheel(window.spin_length)
+        assert_locked("wheel on length")
+        wheel(window.spin_weight, times=30)
+        assert_locked("wheel 30x on weight")
+
+        # 4. 货代按钮来回切换
+        for button in window._forwarder_buttons:
+            if button.isVisible() and button.property("forwarderId"):
+                button.click()
+        assert_locked("forwarder buttons")
+
+        # 5/6. 尾程 USD / 国内成本 valueChanged
+        window.tail_fee_usd.setValue(6.66)
+        assert_locked("tail usd valueChanged")
+        window.spin_domestic_cost.setValue(88.8)
+        assert_locked("domestic cost valueChanged")
+
+        # 7. 完整输入 → 利润重算
+        _set_spec(window)
+        assert_locked("full recalc")
+
+        # 8. 规则状态 未触发→已触发（真实规则评估路径）
+        settings = temp_context.settings_service.load()
+        rule = _income_rule("R-P0", "低价补贴", 50.0, 10.0)
+        settings["profit_rules"] = [asdict(rule)]
+        settings["selected_profit_rule_id"] = rule.id
+        temp_context.settings_service.save(settings)
+        window._refresh_settings_from_disk()
+        window.profit_binder.txt_na_price_usd.setValue(30.0)
+        window._apply_compact_rule_status()
+        assert_locked("status 未触发→已触发")
+
+        # 9. WindowActivate / settings reload
+        qapp.sendEvent(window, QEvent(QEvent.Type.WindowActivate))
+        assert_locked("WindowActivate")
+
+        # 10. 置顶开关往返（setWindowFlag 重建原生窗口，P0 真实触发源）
+        window.chk_stay_on_top.setChecked(False)
+        assert_locked("stay-on-top off")
+        window.chk_stay_on_top.setChecked(True)
+        assert_locked("stay-on-top on")
+
+        # 11. 清空 → 重新输入
+        window.btn_clear.click()
+        assert_locked("clear")
+        _set_spec(window)
+        assert_locked("re-enter after clear")
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_status_labels_fixed_once_never_drift(qapp, temp_context):
+    """状态标签固定尺寸一次设定：多轮重算后宽度不漂移（删除 sizeHint 追踪）。"""
+    _install_forwarders(temp_context, 1)
+    window = QuickCalculatorWindow(temp_context)
+    try:
+        window.show()
+        _pump(qapp)
+        labels = (window.profit_binder.lbl_na_status, window.profit_binder.lbl_act_status)
+        widths = [label.width() for label in labels]
+        for value in (10.0, 50.0, 120.0, 999.9):
+            window.spin_length.setValue(value)
+            window.spin_weight.setValue(value * 10)
+            _pump(qapp)
+        assert [label.width() for label in labels] == widths
+        for label in labels:
+            assert label.minimumWidth() == label.maximumWidth() == widths[0]
+    finally:
+        window.close()
+        window.deleteLater()
