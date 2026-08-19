@@ -119,16 +119,22 @@ class FirstClickSelectAllFilter(QObject):
     用 ``root`` 限定作用范围；主软件 CalculationPage 与 UU测算 各安装一份，
     不在两个窗口里复制两套逻辑。
 
-    时序修复：
-    上一版拦截 MouseButtonPress 后立即 selectAll，但 Qt 内部焦点处理可能
-    在同一事件循环末尾再次覆盖 selection，导致全选失效。
-    本版本不拦截事件（return False），改用 QTimer.singleShot(0, ...)
-    让 Qt 正常完成本次点击的聚焦/光标定位后，再执行一次 selectAll。
+    时序方案（MousePress → MouseRelease）：
+    - 上一版在 MousePress 后 QTimer.singleShot(0, selectAll) 仍被后续的
+      MouseButtonRelease 默认处理（光标定位）覆盖。
+    - 本版本：
+      1. MousePress（无焦点）→ 只标记 _pending_line = lineEdit，不 selectAll；
+      2. 同一 lineEdit 收到 MouseButtonRelease 时，先清除标记，
+         然后 QTimer.singleShot(0, selectAll)——此时 Release 默认处理已完成，
+         selectAll 是最后一个操作，不会被覆盖；
+      3. 第二次点击（已有焦点）→ 不设标记，Release 时自然不触发全选。
     """
 
     def __init__(self, root: QWidget) -> None:
         super().__init__(root)
         self.root = root
+        # 记录本次 MousePress 时"无焦点→需要 Release 后全选"的 lineEdit
+        self._pending_line: QLineEdit | None = None
 
     def _inside_root(self, target: QWidget) -> bool:
         cursor: QWidget | None = target
@@ -158,20 +164,37 @@ class FirstClickSelectAllFilter(QObject):
         return None
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
-        if event.type() != QEvent.Type.MouseButtonPress or not isinstance(watched, QWidget):
+        etype = event.type()
+        if not isinstance(watched, QWidget):
             return False
-        spin = self._spinbox_from_target(watched)
-        if spin is None or not self._inside_root(spin):
+
+        if etype == QEvent.Type.MouseButtonPress:
+            spin = self._spinbox_from_target(watched)
+            if spin is None or not self._inside_root(spin):
+                return False
+            if spin.hasFocus():
+                # 已有焦点：第二次及以后点击，不设标记，完全保持 Qt 默认行为
+                self._pending_line = None
+                return False
+            # 无焦点第一次点击：只记录 lineEdit，等 Release 后再 selectAll
+            line = spin.lineEdit()
+            if line is None:
+                return False
+            self._pending_line = line
             return False
-        if spin.hasFocus():
-            # 已获得焦点：第二次及以后点击恢复 Qt 默认光标行为
+
+        if etype == QEvent.Type.MouseButtonRelease:
+            line = self._pending_line
+            if line is None:
+                return False
+            # 仅当事件目标是同一个 lineEdit 时才触发
+            if watched is not line:
+                return False
+            self._pending_line = None
+            # Release 默认处理（光标定位）已完成，在事件循环尾部执行 selectAll
+            QTimer.singleShot(0, line.selectAll)
             return False
-        # 无焦点第一次点击：让 Qt 正常处理本次点击（聚焦 + 光标定位），
-        # 然后在当前事件循环结束后执行一次 selectAll 覆盖光标位置。
-        line = spin.lineEdit()
-        if line is None:
-            return False
-        QTimer.singleShot(0, line.selectAll)
+
         return False
 
 
