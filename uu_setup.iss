@@ -9,7 +9,7 @@
 #define MyAppQuickExeName "UU测算.exe"
 
 ; 固定 AppId —— 从 3.0.1 开始永久使用，保证升级识别
-#define MyAppId "{{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
+#define MyAppId "{{947AA23F-4261-4FA8-A5C3-77A39122D250}"
 
 [Setup]
 AppId={#MyAppId}
