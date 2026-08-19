@@ -983,7 +983,7 @@ QCheckBox{background:transparent;color:#172033;}</string>
         <number>5</number>
        </property>
        <property name="columnStretch">
-        <string>0,0,0</string>
+        <string>0,0,0,0</string>
        </property>
        <item row="0" column="0">
         <widget class="QLabel" name="lblNoActivityPrice">
@@ -1076,19 +1076,40 @@ QCheckBox{background:transparent;color:#172033;}</string>
              </property>
             </widget>
            </item>
-           <item>
-            <widget class="QLabel" name="lblPromotionReserve">
-             <property name="text">
-              <string>活动预留</string>
-             </property>
-             <property name="title">
-              <bool>true</bool>
-             </property>
-            </widget>
-           </item>
           </layout>
          </widget>
         </item>
+       <item row="0" column="3">
+        <widget class="QWidget" name="promotionReserveTitleHost" native="true">
+         <layout class="QHBoxLayout" name="promotionReserveTitleHostLayout">
+          <property name="spacing">
+           <number>0</number>
+          </property>
+          <property name="leftMargin">
+           <number>16</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="lblPromotionReserve">
+            <property name="text">
+             <string>活动预留</string>
+            </property>
+            <property name="title">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
        <item row="1" column="0">
         <widget class="QWidget" name="noActivityPrice" native="true">
          <layout class="QVBoxLayout" name="noActivityPriceLayout">
@@ -1489,6 +1510,33 @@ QCheckBox{background:transparent;color:#172033;}</string>
             </property>
            </widget>
           </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="1" column="3">
+        <widget class="QWidget" name="promotionReserveRow" native="true">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <layout class="QHBoxLayout" name="promotionReserveRowLayout">
+          <property name="spacing">
+           <number>2</number>
+          </property>
+          <property name="leftMargin">
+           <number>16</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
           <item>
            <widget class="QDoubleSpinBox" name="spinPromotionReserve">
             <property name="minimumSize">

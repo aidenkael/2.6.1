@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import webbrowser
 from pathlib import Path
 from typing import Any
 
@@ -217,6 +218,25 @@ class _TableDeleteKeyFilter(QObject):
         ):
             self._page._delete_selected()
             return True
+        return False
+
+
+class _LinkClickOpenFilter(QObject):
+    """历史商品链接单击：使用系统默认浏览器打开 URL。
+
+    只作用于安装了本过滤器的 QLineEdit（商品链接）；
+    单击链接文字时打开浏览器，URL 为空时不做任何操作。
+    保持链接只读、不改变表格其他交互。
+    """
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if event.type() != QEvent.Type.MouseButtonPress:
+            return False
+        if not isinstance(watched, QLineEdit):
+            return False
+        url = watched.text().strip()
+        if url:
+            webbrowser.open(url)
         return False
 
 
@@ -478,6 +498,9 @@ class HistoryPage(QWidget):
             link_edit.setProperty("muted", True)
             link_edit.setFixedHeight(20)
             link_edit.setToolTip(link)
+            link_edit.setCursor(Qt.CursorShape.PointingHandCursor)
+            # 单击链接 → 系统默认浏览器打开
+            link_edit.installEventFilter(_LinkClickOpenFilter(link_edit))
             column.addWidget(link_edit)
         else:
             placeholder = QLabel("—")

@@ -2275,6 +2275,9 @@ class CalculationPage(QWidget):
         # 明确保存成功后：把活动预留/标价利率/活动后利润率这三项当时的
         # 值记为以后默认值（仅编辑不保存不改变默认值；本轮唯一主软件业务改动）。
         capture_profit_defaults(self.settings, self.profit_binder)
+        # 保存成功后记住本次实际采用的货代，作为下次新建的默认货代
+        # （语义："上一次成功保存记录时实际使用的货代" = 下一次新建默认）。
+        self.settings["selected_forwarder_id"] = self.selected_forwarder_id
         self.context.settings_service.save(self.settings)
         self.context.diagnostic_logger.event("record_saved", record_id=self.record_id)
         # The local reestimate baseline belongs to one unsaved measurement

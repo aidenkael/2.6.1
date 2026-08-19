@@ -149,10 +149,10 @@ class QuickCalculatorWindow(QMainWindow):
     def _restructure_profit_section(self, section_name: str, grid_name: str) -> None:
         """利润区 QGridLayout 紧凑化：各列 Maximum 策略 + 末尾 stretch 列。
 
-        .ui 的 QGridLayout 默认 columnStretch=0,0,0，三列等分剩余空间。
+        .ui 的 QGridLayout 默认 columnStretch=0,0,0（或 0,0,0,0），各列不 stretch。
         本方法在 .ui 加载后执行一次性调整：
-        - 把列 0/1/2 的 widget 设为 Maximum 宽度策略
-        - 在列 3 添加 stretch 列吸收剩余空间（只在最右侧）
+        - 把所有已存在列中的 widget 设为 Maximum 宽度策略
+        - 在最右侧添加 stretch 列吸收剩余空间
         """
         section = self.findChild(QFrame, section_name)
         if section is None:
@@ -161,8 +161,17 @@ class QuickCalculatorWindow(QMainWindow):
         if grid is None:
             return
 
+        # 确定实际内容列数（遍历所有 item 取最大列号 +1）
+        max_col = 0
+        for i in range(grid.count()):
+            row, col, _rowspan, _colspan = grid.getItemPosition(i)
+            if col > max_col:
+                max_col = col
+        content_cols = max_col + 1
+        stretch_col = content_cols
+
         # 确保所有列中的 widget 使用 Maximum 宽度策略（不被 grid 拉宽）
-        for col in range(grid.columnCount()):
+        for col in range(content_cols):
             for row in range(grid.rowCount()):
                 item = grid.itemAtPosition(row, col)
                 if item is None:
@@ -171,12 +180,11 @@ class QuickCalculatorWindow(QMainWindow):
                 if w is not None:
                     w.setSizePolicy(QSizePolicy.Policy.Maximum, w.sizePolicy().verticalPolicy())
 
-        # 添加 stretch 列到最右侧（列 3），吸收所有剩余空间
-        grid.setColumnStretch(3, 1)
-        # 确保原始三列不 stretch
-        grid.setColumnStretch(0, 0)
-        grid.setColumnStretch(1, 0)
-        grid.setColumnStretch(2, 0)
+        # 添加 stretch 列到最右侧，吸收所有剩余空间
+        grid.setColumnStretch(stretch_col, 1)
+        # 确保所有内容列不 stretch
+        for col in range(content_cols):
+            grid.setColumnStretch(col, 0)
 
     # ------------------------------------------------------------------
     # 控件绑定

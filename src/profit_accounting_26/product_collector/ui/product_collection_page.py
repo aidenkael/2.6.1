@@ -872,6 +872,30 @@ class ImageSearchWorker(QObject):
             self.failed.emit(str(exc))
 
 
+class _CardGridDeleteKeyFilter(QObject):
+    """商品卡片区域 Delete 键：直接复用 ``remove_selected()``（KEEP → REMOVED）。
+
+    只监听发往 QScrollArea（卡片滚动区域）的按键事件；焦点在搜索词输入框、
+    数量 SpinBox 等其它控件时，Delete 键事件不会到达滚动区域，天然安全。
+    已移除视图下 Delete 不做任何事情（与按钮行为一致）。
+    """
+
+    def __init__(self, scroll: "QScrollArea", page: "ProductCollectionPage") -> None:
+        super().__init__(scroll)
+        self._page = page
+        scroll.installEventFilter(self)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if (
+            event.type() == QEvent.Type.KeyPress
+            and event.key() == Qt.Key.Key_Delete
+            and not self._page._showing_removed
+        ):
+            self._page.remove_selected()
+            return True
+        return False
+
+
 class ProductCollectionPage(QWidget):
     """商品采集页 V1.1：中英文映射 + 多搜索词顺序采集 + 卡片批量操作 + AI风险检测。
 
@@ -1006,6 +1030,9 @@ class ProductCollectionPage(QWidget):
         self.status_hint_frame = form.findChild(QWidget, "statusHintFrame")
         self.scroll = form.findChild(QScrollArea, "scrollProducts")
         self._container = form.findChild(QWidget, "productGridHost")
+        # Delete 键（卡片区域）：复用同一 remove_selected()，已移除视图下不做事
+        self.scroll.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self._card_grid_delete_filter = _CardGridDeleteKeyFilter(self.scroll, self)
 
         # 卡片网格布局
         self._card_grid = QGridLayout(self._container)
@@ -1612,6 +1639,9 @@ class ProductCollectionPage(QWidget):
         self._cards[product_id].set_selected(selected)
         self._update_stats()
         self._update_selection_buttons()
+        # 选中后让滚动区域获得焦点，使 Delete 键能触发移除选中
+        if selected and self.scroll is not None:
+            self.scroll.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def select_all_visible(self) -> None:
         """全部选择：只选择当前可见的 KEEP 商品（已移除商品绝不进入选择）。

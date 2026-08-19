@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QComboBox, QLineEdit, QDoubleSpinBox, QWidget
 
@@ -118,6 +118,12 @@ class FirstClickSelectAllFilter(QObject):
     安装位置：QApplication 级事件过滤器（与 BlankClickFocusFilter 相同机制），
     用 ``root`` 限定作用范围；主软件 CalculationPage 与 UU测算 各安装一份，
     不在两个窗口里复制两套逻辑。
+
+    时序修复：
+    上一版拦截 MouseButtonPress 后立即 selectAll，但 Qt 内部焦点处理可能
+    在同一事件循环末尾再次覆盖 selection，导致全选失效。
+    本版本不拦截事件（return False），改用 QTimer.singleShot(0, ...)
+    让 Qt 正常完成本次点击的聚焦/光标定位后，再执行一次 selectAll。
     """
 
     def __init__(self, root: QWidget) -> None:
@@ -160,14 +166,13 @@ class FirstClickSelectAllFilter(QObject):
         if spin.hasFocus():
             # 已获得焦点：第二次及以后点击恢复 Qt 默认光标行为
             return False
-        # 无焦点第一次点击：拦截本次 press（否则 Qt 默认光标定位会
-        # 覆盖 selectAll），手动聚焦并全选整个数值——等同 Tab 切入效果。
+        # 无焦点第一次点击：让 Qt 正常处理本次点击（聚焦 + 光标定位），
+        # 然后在当前事件循环结束后执行一次 selectAll 覆盖光标位置。
         line = spin.lineEdit()
         if line is None:
             return False
-        spin.setFocus(Qt.FocusReason.MouseFocusReason)
-        line.selectAll()
-        return True
+        QTimer.singleShot(0, line.selectAll)
+        return False
 
 
 def install_first_click_select_all(root: QWidget) -> FirstClickSelectAllFilter:

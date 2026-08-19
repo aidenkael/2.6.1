@@ -3,7 +3,8 @@
 offscreen 平台的鼠标点击焦点模拟不可靠（QTest.mouseClick 不传递焦点、
 clearFocus 可能不生效），因此：
 - 单元级直接调用 FirstClickSelectAllFilter.eventFilter 验证两个分支：
-  无焦点第一次点击 → 拦截 + 全选；已有焦点第二次点击 → 放行（Qt 默认）；
+  无焦点第一次点击 → 安排延时全选（QTimer.singleShot）；
+  已有焦点第二次点击 → 放行（Qt 默认）；
 - 点击箭头/边框区域（事件目标非 lineEdit）→ 不拦截；
 - 普通文字编辑器（QLineEdit）→ 不受影响；
 - 主软件 CalculationPage 与 UU测算 都安装同一公共实现（不复制两套逻辑）；
@@ -23,7 +24,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QEvent, QPointF, Qt  # noqa: E402
 from PySide6.QtGui import QMouseEvent  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QDoubleSpinBox, QLineEdit, QWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDoubleSpinBox, QLineEdit, QWidget  # noqa: E402
 
 from profit_accounting_26.ui.input_editing import (  # noqa: E402
     FirstClickSelectAllFilter,
@@ -60,23 +61,26 @@ def host(qapp):
 
 
 class TestFirstClickSelectAll:
-    def test_first_click_selects_all_when_no_focus(self, host):
-        """无焦点第一次点击 → 拦截 press、聚焦并全选整个数值（等同 Tab 切入）。"""
+    def test_first_click_schedules_select_all_when_no_focus(self, host, qapp):
+        """无焦点第一次点击 → 不拦截事件，但通过 QTimer.singleShot 安排全选。"""
         spin = host._spin
         editor = spin.lineEdit()
         assert spin.hasFocus() is False, "未显示控件不应有焦点"
         intercepted = host._guard.eventFilter(editor, _press())
-        assert intercepted is True, "无焦点首次点击必须拦截默认 press"
+        assert intercepted is False, "新版本不拦截事件（让 Qt 正常处理焦点）"
+        # 处理 pending QTimer.singleShot(0, ...) 回调
+        qapp.processEvents()
         full = editor.text().strip()
         assert editor.selectedText() == full, (
-            f"第一次点击应全选整个数值，实际 selectedText={editor.selectedText()!r} vs {full!r}"
+            f"第一次点击后 processEvents 应全选整个数值，"
+            f"实际 selectedText={editor.selectedText()!r} vs {full!r}"
         )
 
     def test_second_click_restores_default_when_focused(self, host, monkeypatch):
         """已有焦点第二次点击 → 放行（Qt 默认光标行为），不再强制全选。
 
         offscreen 平台窗口焦点切换不可靠（show 后 hasFocus 可能仍 False），
-        这里直接注入 hasFocus=True 验证“已聚焦”分支。
+        这里直接注入 hasFocus=True 验证"已聚焦"分支。
         """
         spin = host._spin
         editor = spin.lineEdit()
@@ -151,7 +155,7 @@ class TestSelectAllInstalledInBothApps:
             window.deleteLater()
 
     def test_quick_first_click_selects_all_value(self, qapp, tmp_path, monkeypatch):
-        """UU测算 数值输入框：未显示窗口上第一次点击全选整个数值。"""
+        """UU测算 数值输入框：未显示窗口上第一次点击后 processEvents 全选数值。"""
         monkeypatch.setenv("PROFIT_ACCOUNTING_DATA_DIR", str(tmp_path))
         from profit_accounting_26.application import AppContext
         from profit_accounting_26.ui.quick_calculator_window import QuickCalculatorWindow
@@ -164,8 +168,10 @@ class TestSelectAllInstalledInBothApps:
             editor = spin.lineEdit()
             assert spin.hasFocus() is False, "未显示窗口控件不应有焦点"
             QTest.mouseClick(editor, Qt.MouseButton.LeftButton)
+            # 处理 QTimer.singleShot(0, ...) 回调
+            qapp.processEvents()
             full = editor.text().strip()
-            assert editor.selectedText() == full, "Quick 输入框第一次点击应全选"
+            assert editor.selectedText() == full, "Quick 输入框第一次点击后应全选"
         finally:
             window.close()
             window.deleteLater()

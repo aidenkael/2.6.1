@@ -278,14 +278,14 @@ class TestGridColumnNoStretch:
         from PySide6.QtWidgets import QGridLayout
         grid = page.findChild(QGridLayout, "noActivityGrid")
         assert grid is not None
-        # 列 0/1/2 是内容列，不应 stretch
-        for col in range(3):
+        # 列 0/1/2/3 是内容列（3=活动预留），不应 stretch
+        for col in range(4):
             assert grid.columnStretch(col) == 0, (
                 f"noActivityGrid col {col} stretch 应为 0"
             )
-        # 列 3 是末尾 stretch 列
-        assert grid.columnStretch(3) == 1, (
-            "noActivityGrid col 3 (末尾) stretch 应为 1"
+        # 列 4 是末尾 stretch 列
+        assert grid.columnStretch(4) == 1, (
+            "noActivityGrid col 4 (末尾) stretch 应为 1"
         )
 
     def test_activity_grid_content_cols_no_stretch(self, page):
