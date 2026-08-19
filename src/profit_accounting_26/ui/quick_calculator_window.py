@@ -34,6 +34,7 @@ from profit_accounting_26.domain.models import PackageSpec
 from profit_accounting_26.engines.logistics import calculate_system_cost
 from profit_accounting_26.shared import resource_path
 from profit_accounting_26.ui.binders.calculation_binder import CalculationBinder
+from profit_accounting_26.ui.input_editing import install_first_click_select_all
 from profit_accounting_26.ui.ui_loader import load_ui
 
 # 蓝色 U 图标（仓库已有资产，直接复用，禁止重新设计）
@@ -45,11 +46,14 @@ _FORWARDER_BUTTON_NAMES = ("btnQuickForwarder1", "btnQuickForwarder2", "btnQuick
 _FORWARDER_PRIORITY = {"义乌货代": 0, "深圳货代": 1}
 
 # 顶层窗口固定尺寸契约（实机验收 448×475 无裁剪）。
-# 硬规则：只在窗口创建/重建时应用一次；任何业务交互（数值变化/利润变化/
+# 硬规则：窗口创建时一次性测量并锁定两个稳定尺寸（collapsed / expanded），
+# 之后折叠/展开只在两个固定尺寸之间切换；任何业务交互（数值变化/利润变化/
 # 货代选择/货代数量刷新/WindowActivate/settings reload）永远不得再改变顶层尺寸，
-# 也禁止用业务内容 sizeHint 重新推导窗口尺寸。
+# 也禁止用业务内容 sizeHint 重新推导窗口尺寸（杜绝尺寸正反馈漂移）。
 QUICK_WINDOW_WIDTH = 448
 QUICK_WINDOW_HEIGHT = 475
+# 折叠分界：总成本区域（forwarderCostSection）下方；折叠时隐藏利润/活动区域
+_COLLAPSIBLE_SECTION_NAMES = ("noActivitySection", "activitySection", "bottomSection")
 # 规则状态标签固定尺寸（紧凑文本只有 已触发/未触发 三字，8pt 下三字宽约 33px，
 # 44px 为含余量的精确固定宽，不超出标题行可用宽；一次设定永不更新；
 # 禁止 setFixedWidth(sizeHint()+N) 追踪——QLabel sizeHint 会吸收既有固定宽度，
@@ -94,6 +98,7 @@ class QuickCalculatorWindow(QMainWindow):
         self._wire_forwarders()
         self._wire_clear()
         self._wire_on_top()
+        self._wire_collapse()
 
         # 利润区直接复用现有 CalculationBinder（UI 已按主软件相同 objectName 命名）
         self.profit_binder = CalculationBinder(self, context)
@@ -123,8 +128,15 @@ class QuickCalculatorWindow(QMainWindow):
         self._recalculate()
         # 默认置顶（checkbox 默认勾选）
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        # 窗口尺寸固定契约：初始化完成后只设置一次，之后永不随内容变化
-        self._apply_fixed_window_size()
+        # 折叠/展开：初始化时一次性测量两个稳定尺寸并锁定（默认折叠）
+        self._expanded = False
+        self._collapsed_height = 0
+        self._expanded_height = 0
+        self._measure_window_sizes()
+        self._set_details_visible(False)
+        self._apply_locked_window_size()
+        # 首次点击全选（主软件 / UU测算 共享同一公共实现）
+        self._first_click_select_all_guard = install_first_click_select_all(self)
         # 两个规则状态标签固定尺寸一次设定（替代此前的 sizeHint 追踪）
         for label in (self.profit_binder.lbl_na_status, self.profit_binder.lbl_act_status):
             if label is not None:
@@ -185,6 +197,13 @@ class QuickCalculatorWindow(QMainWindow):
         self.tail_fee_usd: QDoubleSpinBox = f(QDoubleSpinBox, "spinTailFreightUsd")
         self.btn_clear: QPushButton = f(QPushButton, "btnClearAndNew")
         self.chk_stay_on_top: QCheckBox = f(QCheckBox, "chkQuickStayOnTop")
+        # 折叠箭头（总成本区域右侧；▼=可展开 / ▲=可收起）
+        self.btn_toggle_details: QToolButton = f(QToolButton, "btnQuickToggleDetails")
+        # 折叠分界以下的利润/活动区域（折叠时隐藏；promotionReserveSection 已
+        # 并入 noActivitySection 标题行，随 noActivitySection 一起隐藏）
+        self._collapsible_sections = [
+            f(QFrame, name) for name in _COLLAPSIBLE_SECTION_NAMES
+        ]
         self._forwarder_buttons = [
             f(QToolButton, name) for name in _FORWARDER_BUTTON_NAMES
         ]
@@ -213,20 +232,61 @@ class QuickCalculatorWindow(QMainWindow):
     def _wire_on_top(self) -> None:
         self.chk_stay_on_top.toggled.connect(self._on_stay_on_top_toggled)
 
-    def _apply_fixed_window_size(self) -> None:
-        """应用顶层窗口固定尺寸契约（min == max == 448×475）。
+    def _wire_collapse(self) -> None:
+        self.btn_toggle_details.clicked.connect(self._toggle_details)
 
-        不依赖任何内容 sizeHint；仅在窗口创建与原生窗口重建（show）时重新
-        声明一次固定契约。setWindowFlag 等触发原生窗口重建后，Windows 平台会
-        丢失既有 fixed 约束（实测出现 min≠max 失效态），因此在 showEvent
-        重新声明，保证任何重建后顶层 min==max 恒成立。
+    # ------------------------------------------------------------------
+    # 折叠 / 展开（稳定尺寸切换，绝不按当前尺寸累加推导）
+    # ------------------------------------------------------------------
+
+    def _measure_window_sizes(self) -> None:
+        """初始化时一次性确定 collapsed / expanded 两个稳定高度（此后只切换，不重测）。
+
+        - expanded 高度：展开状态下一次 adjustSize 实测（包含标题栏/边框）；
+        - collapsed 高度：同一 frame 下按布局 sizeHint 差量计算
+          （collapsed 内容高 + frame），不再二次 adjustSize——
+          保证两个值都是静态常量，之后所有折叠/展开交互只调用
+          ``_apply_locked_window_size`` 在这两个固定尺寸之间切换，
+          不存在反复 adjustSize / sizeHint 正反馈 / 逐轮累加，宽度恒为 448。
         """
-        self.setFixedSize(QUICK_WINDOW_WIDTH, QUICK_WINDOW_HEIGHT)
+        layout = self.centralWidget().layout()
+        self._set_details_visible(True)
+        layout.invalidate()
+        layout.activate()
+        self.adjustSize()
+        expanded_content = layout.sizeHint().height()
+        self._expanded_height = max(self.height(), 1)
+        self._set_details_visible(False)
+        layout.invalidate()
+        layout.activate()
+        collapsed_content = layout.sizeHint().height()
+        frame = self._expanded_height - expanded_content
+        self._collapsed_height = max(collapsed_content + frame, 1)
+
+    def _set_details_visible(self, visible: bool) -> None:
+        for section in self._collapsible_sections:
+            if section is not None:
+                section.setVisible(visible)
+
+    def _toggle_details(self) -> None:
+        self._expanded = not self._expanded
+        self._set_details_visible(self._expanded)
+        self.btn_toggle_details.setText("▲" if self._expanded else "▼")
+        self._apply_locked_window_size()
+
+    def _apply_locked_window_size(self) -> None:
+        """在 collapsed / expanded 两个固定尺寸之间切换（min == max == 448×H）。
+
+        不依赖任何内容 sizeHint；折叠/展开交互、原生窗口重建（show /
+        setWindowFlag）后都只重新声明当前状态的固定契约，幂等、无漂移。
+        """
+        height = self._expanded_height if self._expanded else self._collapsed_height
+        self.setFixedSize(QUICK_WINDOW_WIDTH, height)
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        """原生窗口每次显示/重建后重新声明固定尺寸契约（幂等，不依赖内容）。"""
+        """原生窗口每次显示/重建后重新声明当前状态的固定尺寸契约（幂等）。"""
         super().showEvent(event)
-        self._apply_fixed_window_size()
+        self._apply_locked_window_size()
 
     # ------------------------------------------------------------------
     # 规则状态紧凑映射（Quick 专用，不改 CalculationBinder / 主软件）

@@ -181,14 +181,17 @@ def test_editable_frozen_contract(page):
 
 
 def test_quick_window_compact_and_default_on_top(page):
-    """§7/§8：顶层窗口固定 448×475（min == max 硬契约），默认置顶且可取消。"""
+    """§7/§8：默认折叠（高度 = collapsed 稳定尺寸，宽度恒 448，min == max 硬契约），
+    默认置顶且可取消。"""
     from profit_accounting_26.ui.quick_calculator_window import (
         QUICK_WINDOW_HEIGHT,
         QUICK_WINDOW_WIDTH,
     )
 
     assert page.width() == QUICK_WINDOW_WIDTH == 448
-    assert page.height() == QUICK_WINDOW_HEIGHT == 475
+    # 默认折叠：窗口高度 = collapsed 稳定高度（小于 expanded 高度 475）
+    assert page.height() == page._collapsed_height
+    assert page._collapsed_height < QUICK_WINDOW_HEIGHT
     assert page.minimumSize() == page.maximumSize()
     # 默认置顶（checkbox 默认勾选 + WindowStaysOnTopHint）
     assert page.chk_stay_on_top.isChecked() is True
@@ -231,6 +234,7 @@ def _row_starvation_px(spin) -> int:
 
 def test_unit_symbols_tight_against_inputs(page):
     """§五：¥/$/cm/g/% 紧贴对应输入框（同一组间距 ≤ 5px），且是外部 QLabel。"""
+    page._toggle_details()  # 展开利润区（默认折叠下利润区控件 geometry 无效）
     pairs = [
         ("spinConservativeLengthCm", "unitQuickspinConservativeLengthCm"),
         ("spinConservativeWidthCm", "unitQuickspinConservativeWidthCm"),
@@ -632,7 +636,7 @@ def _pump(app) -> None:
 
 
 def test_window_size_contract_is_hard_constant():
-    """硬契约：顶层固定尺寸是常量声明，不是从内容 sizeHint 推导。"""
+    """硬契约：顶层固定尺寸是常量声明，不是从内容 sizeHint 动态推导。"""
     from profit_accounting_26.ui import quick_calculator_window as mod
 
     assert mod.QUICK_WINDOW_WIDTH == 448
@@ -641,8 +645,12 @@ def test_window_size_contract_is_hard_constant():
     text = Path(mod.__file__).read_text(encoding="utf-8")
     assert "_refit_window" not in text
     assert "setFixedWidth(label.sizeHint()" not in text
-    assert "self.adjustSize()" not in text
     assert "setFixedSize(self.size())" not in text
+    # 折叠/展开切换路径（_toggle_details）不得重新推导尺寸：
+    # 只允许在两个固定尺寸之间切换（_apply_locked_window_size）
+    toggle_body = text.split("def _toggle_details")[1].split("def _apply_locked_window_size")[0]
+    assert "adjustSize" not in toggle_body, "toggle 路径禁止 adjustSize（尺寸漂移）"
+    assert "sizeHint" not in toggle_body, "toggle 路径禁止 sizeHint 推导（尺寸漂移）"
 
 
 def test_interactions_never_resize_top_level_window(qapp, temp_context):
@@ -657,7 +665,9 @@ def test_interactions_never_resize_top_level_window(qapp, temp_context):
         window.show()
         _pump(qapp)
         initial = (window.width(), window.height())
-        assert initial == (448, 475)
+        # 默认折叠：宽度恒 448，高度为 collapsed 稳定尺寸
+        assert initial[0] == 448
+        assert initial[1] == window._collapsed_height
 
         def assert_locked(tag: str) -> None:
             _pump(qapp)

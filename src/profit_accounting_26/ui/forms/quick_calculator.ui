@@ -930,6 +930,31 @@ QCheckBox{background:transparent;color:#172033;}</string>
          </layout>
         </widget>
        </item>
+        <item>
+         <widget class="QToolButton" name="btnQuickToggleDetails">
+          <property name="text">
+           <string>▼</string>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>18</width>
+            <height>26</height>
+           </size>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>18</width>
+            <height>26</height>
+           </size>
+          </property>
+          <property name="focusPolicy">
+           <enum>Qt::NoFocus</enum>
+          </property>
+          <property name="styleSheet">
+           <string>QToolButton{border:none;background:transparent;color:#176ff2;font-weight:600;padding:0;}</string>
+          </property>
+         </widget>
+        </item>
       </layout>
      </widget>
     </item>
@@ -1023,16 +1048,47 @@ QCheckBox{background:transparent;color:#172033;}</string>
          </layout>
         </widget>
        </item>
-       <item row="0" column="2">
-        <widget class="QLabel" name="lblListPriceProfitRateTitle">
-         <property name="text">
-          <string>标价利率</string>
-         </property>
-         <property name="title">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
+        <item row="0" column="2">
+         <widget class="QWidget" name="listPriceRateTitleHost" native="true">
+          <layout class="QHBoxLayout" name="listPriceRateTitleHostLayout">
+           <property name="spacing">
+            <number>6</number>
+           </property>
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
+           <item>
+            <widget class="QLabel" name="lblListPriceProfitRateTitle">
+             <property name="text">
+              <string>标价利率</string>
+             </property>
+             <property name="title">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="lblPromotionReserve">
+             <property name="text">
+              <string>活动预留</string>
+             </property>
+             <property name="title">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
        <item row="1" column="0">
         <widget class="QWidget" name="noActivityPrice" native="true">
          <layout class="QVBoxLayout" name="noActivityPriceLayout">
@@ -1433,105 +1489,52 @@ QCheckBox{background:transparent;color:#172033;}</string>
             </property>
            </widget>
           </item>
+          <item>
+           <widget class="QDoubleSpinBox" name="spinPromotionReserve">
+            <property name="minimumSize">
+             <size>
+              <width>66</width>
+              <height>26</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>66</width>
+              <height>26</height>
+             </size>
+            </property>
+            <property name="buttonSymbols">
+             <enum>QAbstractSpinBox::NoButtons</enum>
+            </property>
+            <property name="decimals">
+             <number>1</number>
+            </property>
+            <property name="maximum">
+             <double>99.000000</double>
+            </property>
+            <property name="value">
+             <double>15.000000</double>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="unitPromotionReserve">
+            <property name="text">
+             <string>%</string>
+            </property>
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="unit">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
          </layout>
         </widget>
-       </item>
-      </layout>
-     </widget>
-    </item>
-    <item>
-     <widget class="QFrame" name="promotionReserveSection">
-      <property name="section">
-       <bool>false</bool>
-      </property>
-      <layout class="QHBoxLayout" name="promotionReserveLayout">
-       <property name="spacing">
-        <number>6</number>
-       </property>
-       <property name="leftMargin">
-        <number>8</number>
-       </property>
-       <property name="topMargin">
-        <number>4</number>
-       </property>
-       <property name="rightMargin">
-        <number>8</number>
-       </property>
-       <property name="bottomMargin">
-        <number>4</number>
-       </property>
-       <item>
-        <widget class="QLabel" name="lblPromotionReserve">
-         <property name="text">
-          <string>活动预留</string>
-         </property>
-         <property name="title">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <layout class="QHBoxLayout" name="promotionReserveValueRow">
-         <property name="spacing">
-          <number>2</number>
-         </property>
-         <property name="leftMargin">
-          <number>0</number>
-         </property>
-         <property name="topMargin">
-          <number>0</number>
-         </property>
-         <property name="rightMargin">
-          <number>0</number>
-         </property>
-         <property name="bottomMargin">
-          <number>0</number>
-         </property>
-         <item>
-          <widget class="QDoubleSpinBox" name="spinPromotionReserve">
-           <property name="minimumSize">
-            <size>
-             <width>66</width>
-             <height>26</height>
-            </size>
-           </property>
-           <property name="maximumSize">
-            <size>
-             <width>66</width>
-             <height>26</height>
-            </size>
-           </property>
-           <property name="buttonSymbols">
-            <enum>QAbstractSpinBox::NoButtons</enum>
-           </property>
-           <property name="decimals">
-            <number>1</number>
-           </property>
-           <property name="maximum">
-            <double>99.000000</double>
-           </property>
-           <property name="value">
-            <double>15.000000</double>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QLabel" name="unitPromotionReserve">
-           <property name="text">
-            <string>%</string>
-           </property>
-           <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="unit">
-            <bool>true</bool>
-           </property>
-          </widget>
-         </item>
-        </layout>
        </item>
       </layout>
      </widget>

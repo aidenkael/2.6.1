@@ -69,7 +69,10 @@ from profit_accounting_26.ui.controllers.forwarder_cards_controller import Forwa
 from profit_accounting_26.ui.controllers.image_slots_controller import ImageSlotsController
 from profit_accounting_26.ui.ui_loader import load_main_window
 from profit_accounting_26.ui.widgets import Card, ImageSlotWidget, QuoteCard, confirm_action
-from profit_accounting_26.ui.input_editing import install_blank_click_focus_filter
+from profit_accounting_26.ui.input_editing import (
+    install_blank_click_focus_filter,
+    install_first_click_select_all,
+)
 
 
 class RecognitionWorker(QObject):
@@ -358,6 +361,8 @@ class CalculationPage(QWidget):
         self._sync_tail_rmb_from_usd(recalculate=False)
         self.recalculate()
         self._blank_focus_guard = install_blank_click_focus_filter(self)
+        # 数值输入框首次点击全选（与 UU测算 共享同一公共实现，不复制两套逻辑）
+        self._first_click_select_all_guard = install_first_click_select_all(self)
 
     # ------------------------------------------------------------------
     # .ui 加载与控件绑定

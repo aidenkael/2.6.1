@@ -548,11 +548,16 @@ def _dims_equal(source: dict[str, Any], expected: dict[str, float]) -> bool:
 def is_ai_reestimate_polluted_suggestion(payload: dict[str, Any], suggested) -> bool:
     """读取/导出层兼容：旧版本把 AI 重估结果误写成 user_suggested 的污染检测。
 
-    条件：suggested_package 四项数值完整，且与某条 reestimate_history 的
-    adopted_reestimate_proposal（或最终采用结果 current_estimate）完全一致，
-    且旧记录没有“用户手动字段来源”证据（旧版本不保存该证据）。
+    用户明确输入的事实优先：只有存在明确 ``_v2.reestimate_history``，
+    且 suggested_package 与某条 ``adopted_reestimate_proposal`` 精确一致时，
+    才认为有旧 AI reestimate 污染嫌疑（场景 C 兼容）。
+
+    禁止仅凭 ``suggested_package == current_estimate`` 就隐藏用户建议：
+    用户真正手工修改以后，current_estimate 本来就很可能等于
+    user suggested_package，该等值不能单独作为“这是 AI 污染”的证据。
+
     仅影响显示/导出（Excel 用户校准内容、历史页显示），绝不修改原始历史 JSON；
-    无法确定来源时返回 False 保持原数据。
+    无法明确证明来源于 AI 时返回 False，保留用户输入。
     """
     dims = _suggested_dims(suggested)
     if dims is None:
@@ -569,17 +574,16 @@ def is_ai_reestimate_polluted_suggestion(payload: dict[str, Any], suggested) -> 
                     scenario = proposal.get(tier)
                     if isinstance(scenario, dict) and _dims_equal(scenario, dims):
                         return True
-    current = v2.get("current_estimate")
-    if isinstance(current, dict) and _dims_equal(current, dims):
-        return True
     return False
 
 
 def user_calibration_text(feedback, payload: dict[str, Any] | None = None) -> str:
     """只读真正用户层：user_note + 真正 user_suggested 的 suggested_package。
 
-    payload 提供时执行旧版本污染兼容：suggested_package 与 AI 重估 adopted
-    完全一致且无用户手动来源证据时，不再把 AI 包装说明冒充用户校准。
+    payload 提供时执行旧版本污染兼容：只有存在明确 reestimate_history 且
+    suggested_package 与某条 adopted_reestimate_proposal 精确一致时，
+    才把该建议当作旧 AI 重估污染过滤；用户真正手工填写的内容（即使
+    与 current_estimate 一致）一律保留。
     """
     lines: list[str] = []
     note = str(getattr(feedback, "user_note", "") or "").strip().replace("\n", " ")

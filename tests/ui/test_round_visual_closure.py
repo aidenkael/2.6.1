@@ -171,11 +171,15 @@ class TestFiveModuleStructure:
         assert fwd is not None
         assert not fwd.property("section"), "forwarderCostSection 应为 section=false"
 
-    def test_promo_section_no_independent_border(self, page):
-        """promotionReserveSection 设 section=false → 无独立边框。"""
+    def test_promo_reserve_moved_into_list_price_row(self, page):
+        """活动预留不再独占一行：promotionReserveSection 已删除，
+        spinPromotionReserve 移入 noActivitySection 的标价利率行（标题右侧）。"""
         promo = page.findChild(QFrame, "promotionReserveSection")
-        assert promo is not None
-        assert not promo.property("section"), "promotionReserveSection 应为 section=false"
+        assert promo is None, "promotionReserveSection 应已删除（活动预留并入标价利率行）"
+        section = page.findChild(QFrame, "noActivitySection")
+        assert section is not None
+        spin = section.findChild(QDoubleSpinBox, "spinPromotionReserve")
+        assert spin is not None, "spinPromotionReserve 应位于 noActivitySection 内（objectName 不变）"
 
     def test_activity_section_no_independent_border(self, page):
         """activitySection 设 section=false → 无独立边框。"""

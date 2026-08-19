@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -197,6 +197,29 @@ def _dims_text(raw: dict[str, Any] | None) -> str:
     return f"{dims} / {_fmt(weight)}g" if _num(weight) is not None else dims
 
 
+class _TableDeleteKeyFilter(QObject):
+    """历史表格范围 Delete 键：直接复用 ``_delete_selected()``（含现有确认框）。
+
+    只监听发往 QTableWidget 的按键事件；焦点在搜索框等其它控件时，
+    Delete 键事件不会到达表格，天然安全（搜索框 Delete 只删除搜索文字）。
+    不做 QApplication 全局 Delete 监听。
+    """
+
+    def __init__(self, table: "QTableWidget", page: "HistoryPage") -> None:
+        super().__init__(table)
+        self._page = page
+        table.installEventFilter(self)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if (
+            event.type() == QEvent.Type.KeyPress
+            and event.key() == Qt.Key.Key_Delete
+        ):
+            self._page._delete_selected()
+            return True
+        return False
+
+
 class HistoryPage(QWidget):
     recordRequested = Signal(str)
 
@@ -291,6 +314,8 @@ class HistoryPage(QWidget):
         )
         self.table.itemSelectionChanged.connect(self._update_action_states)
         self.table.cellDoubleClicked.connect(lambda _row, _col: self.open_selected())
+        # Delete 键（表格范围）：复用同一 _delete_selected()，确认框不变
+        self._delete_key_filter = _TableDeleteKeyFilter(self.table, self)
         card_layout.addWidget(self.table)
         layout.addWidget(card, 1)
         self._update_action_states()

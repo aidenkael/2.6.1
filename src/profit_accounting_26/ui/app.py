@@ -28,9 +28,25 @@ def build_window(data_dir=None):
 
 
 def main() -> int:
+    from profit_accounting_26.ui.single_instance import (
+        UU_ESCORT_INSTANCE_KEY,
+        SingleInstanceGuard,
+    )
+
     app, window = build_window()
     if window is None:
         return 0
+    # UU护航 单实例：已有实例时请求激活并正常退出，不创建第二个窗口/AppContext
+    guard = SingleInstanceGuard(UU_ESCORT_INSTANCE_KEY, parent=app)
+    if guard.already_running:
+        return 0
+
+    def _activate() -> None:
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+    guard.activateRequested.connect(_activate)
     window.showMaximized()
     return app.exec()
 
