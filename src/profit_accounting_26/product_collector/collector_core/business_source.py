@@ -354,29 +354,80 @@ async def collect_with_report(
             # 浏览器启动层：使用系统安装的 Microsoft Edge Stable（channel="msedge"），
             # 不写死路径/版本号、不下载浏览器、不连接用户 Profile；
             # 每次采集独立启动、独立会话，采集完成后只关闭本次启动的浏览器。
+            launch_mono = time.monotonic()
             try:
                 browser = await pw.chromium.launch(channel="msedge", headless=True)
             except Exception:
                 logger.error("浏览器启动失败：未检测到 Microsoft Edge")
                 return finish("未检测到 Microsoft Edge，无法启动商品采集。")
+            launch_elapsed = time.monotonic() - launch_mono
+            logger.info("Edge 启动完成 (%.1fs)", launch_elapsed)
+
             page = await browser.new_page()
 
             # 先注册监听，再导航——避免竞态
             page.on("response", on_response)
 
             logger.info("导航到 %s (seed=%s, 计划深度=%d)", search_url, actual_seed, planned)
+            goto_mono = time.monotonic()
             try:
                 await page.goto(search_url, wait_until="domcontentloaded", timeout=60_000)
             except Exception as e:
                 logger.error("页面导航失败: %s", e)
                 return finish(f"页面导航失败: {type(e).__name__}")
+            goto_elapsed = time.monotonic() - goto_mono
+
+            # 诊断：确认导航后实际 URL 和 title（排查 about:blank / 首次启动异常）
+            try:
+                actual_url = page.url
+                page_title = await page.title()
+            except Exception:
+                actual_url = "<无法获取>"
+                page_title = "<无法获取>"
+            logger.info(
+                "goto 完成 (%.1fs): url=%s, title=%s",
+                goto_elapsed, actual_url[:120], page_title[:80],
+            )
 
             # 等待首页响应
             try:
                 await asyncio.wait_for(response_event.wait(), timeout=FIRST_RESPONSE_TIMEOUT_S)
             except asyncio.TimeoutError:
-                logger.warning("首页搜索响应超时")
-                return finish("首个有效搜索响应超时")
+                # 超时前记录最终页面状态（诊断首次失败根因）
+                try:
+                    final_url = page.url
+                    final_title = await page.title()
+                except Exception:
+                    final_url = "<无法获取>"
+                    final_title = "<无法获取>"
+                logger.warning(
+                    "首页搜索响应超时 (final_url=%s, title=%s, page_stats=%d)，"
+                    "尝试同一浏览器内轻量重试",
+                    final_url[:120], final_title[:80], len(page_stats),
+                )
+                # 同一浏览器内轻量重试：关闭旧 page，新建 page 重新导航。
+                # 浏览器已"预热"（TLS/进程已初始化），第二次通常能正常响应。
+                # 不复用旧 page 是因为其内部状态可能已损坏。
+                try:
+                    await page.close()
+                except Exception:
+                    pass
+                response_event.clear()
+                retry_page = await browser.new_page()
+                retry_page.on("response", on_response)
+                try:
+                    await retry_page.goto(
+                        search_url, wait_until="domcontentloaded", timeout=60_000
+                    )
+                    await asyncio.wait_for(
+                        response_event.wait(), timeout=FIRST_RESPONSE_TIMEOUT_S
+                    )
+                    # 重试成功：替换 page 引用以继续后续滚动
+                    page = retry_page
+                    logger.info("同浏览器重试成功，继续采集")
+                except Exception as retry_err:
+                    logger.warning("同浏览器重试也失败: %s", retry_err)
+                    return finish("首个有效搜索响应超时（重试未解决）")
 
             logger.info("首页取得 %d 个新商品", page_stats[-1].new_valid)
 
