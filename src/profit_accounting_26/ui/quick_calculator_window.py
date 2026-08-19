@@ -34,7 +34,6 @@ from profit_accounting_26.domain.models import PackageSpec
 from profit_accounting_26.engines.logistics import calculate_system_cost
 from profit_accounting_26.shared import resource_path
 from profit_accounting_26.ui.binders.calculation_binder import CalculationBinder
-from profit_accounting_26.ui.input_editing import install_first_click_select_all
 from profit_accounting_26.ui.ui_loader import load_ui
 
 # 蓝色 U 图标（仓库已有资产，直接复用，禁止重新设计）
@@ -135,8 +134,6 @@ class QuickCalculatorWindow(QMainWindow):
         self._measure_window_sizes()
         self._set_details_visible(False)
         self._apply_locked_window_size()
-        # 首次点击全选（主软件 / UU测算 共享同一公共实现）
-        self._first_click_select_all_guard = install_first_click_select_all(self)
         # 两个规则状态标签固定尺寸一次设定（替代此前的 sizeHint 追踪）
         for label in (self.profit_binder.lbl_na_status, self.profit_binder.lbl_act_status):
             if label is not None:
