@@ -351,7 +351,14 @@ async def collect_with_report(
     browser = None
     try:
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=True)
+            # 浏览器启动层：使用系统安装的 Microsoft Edge Stable（channel="msedge"），
+            # 不写死路径/版本号、不下载浏览器、不连接用户 Profile；
+            # 每次采集独立启动、独立会话，采集完成后只关闭本次启动的浏览器。
+            try:
+                browser = await pw.chromium.launch(channel="msedge", headless=True)
+            except Exception:
+                logger.error("浏览器启动失败：未检测到 Microsoft Edge")
+                return finish("未检测到 Microsoft Edge，无法启动商品采集。")
             page = await browser.new_page()
 
             # 先注册监听，再导航——避免竞态
