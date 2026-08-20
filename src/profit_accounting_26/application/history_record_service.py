@@ -20,6 +20,7 @@ from uuid import uuid4
 from profit_accounting_26.application.data_contracts import (
     RECORD_ORIGINS,
     RECORD_SCHEMA_VERSION,
+    V2_PAYLOAD_KEY,
     HistoryRecordV2,
     attach_v2_block,
     record_from_payload,
@@ -80,6 +81,14 @@ class HistoryRecordV2Service:
         # 保留旧记录已有字段（如 created_at、images、旧 layers），避免历史丢失
         for key, value in existing.items():
             final_payload.setdefault(key, value)
+        # payload 可能只携带 _v2 的部分增量键（如 reestimate_history）：
+        # 以已存在块为基底合并增量，保证 ai_initial / calibration_feedback_id
+        # 等既有键绝不因 payload 的 _v2 遮蔽而丢失。
+        payload_v2 = v2_block_from_payload(payload)
+        if payload_v2:
+            merged_v2 = dict(existing_block)
+            merged_v2.update(payload_v2)
+            final_payload[V2_PAYLOAD_KEY] = merged_v2
         attach_v2_block(
             final_payload,
             origin="history_edit",

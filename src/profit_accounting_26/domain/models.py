@@ -217,6 +217,14 @@ class AIObservation:
     weight_scope: str = "unknown"
     quantity: int = 1
     quantity_source: str = "unknown"
+    quantity_unit: str = ""
+    quantity_summary: str = ""
+    # 商品成本三字段语义（v2.2 数据合同）：
+    # - product_cost_rmb 恒为「本次购买/当前选择数量对应的商品货值总额」；
+    # - product_unit_price_rmb / product_total_cost_rmb 是 AI 从页面读到的原始
+    #   单价 / 总价（审计用），历史 raw 保留，本地不修改。
+    product_unit_price_rmb: float | None = None
+    product_total_cost_rmb: float | None = None
     source: str = "manual"
     model: str = ""
     prompt_version: str = ""

@@ -64,13 +64,14 @@ def test_selected_result_keeps_conservative_values_monotonic():
     assert proposal.conservative.weight_g >= proposal.normal.weight_g
 
 
-def test_foldable_item_uses_transformed_transport_outline_before_generic_candidate():
+def test_foldable_item_without_ai_does_not_fabricate_transport_outline():
     proposal = PackagingEstimationService().estimate(
         AIObservation(product_name="generic flexible strip", length_cm=55, width_cm=2, height_cm=1,
                       weight_g=110, foldability="good", packing_actions=["flat_fold"]),
     )
-    assert proposal.normal.length_cm < 55
-    assert proposal.normal.weight_g >= 110
+    # 无外部 AI shipment → 不生成 generic/transform 精确尺寸，优先人工复核
+    assert proposal.proposal_source == "no_valid_candidate"
+    assert not proposal.normal.is_complete()
 
 
 def test_nonfoldable_item_keeps_outline_and_ai_cannot_drop_confirmed_net_weight():
@@ -82,28 +83,34 @@ def test_nonfoldable_item_keeps_outline_and_ai_cannot_drop_confirmed_net_weight(
     assert "packaged_weight_below_confirmed_net_weight" in proposal.rejected_candidates["ai_candidate"]
 
 
-def test_ai_fold_claim_without_smaller_outline_is_rejected_and_fallback_continues():
+def test_ai_fold_claim_without_smaller_outline_is_soft_warning_only():
     observation = AIObservation(
         product_name="generic flexible item", length_cm=60, width_cm=10, height_cm=2, weight_g=110,
         dimension_scope="product_size", foldability="good", packing_actions=["flat_fold"],
     )
     proposal = PackagingEstimationService().estimate(
-        observation, external_proposal=_ai(_scenario("normal", state=PackagingState.FULL_FLAT_FOLD, dims=(60, 10, 2), weight=130)),
+        observation, external_proposal=_ai(
+            _scenario("normal", state=PackagingState.FULL_FLAT_FOLD, dims=(60, 10, 2), weight=130),
+            _scenario("conservative", state=PackagingState.FULL_FLAT_FOLD, dims=(62, 12, 4), weight=150),
+        ),
     )
-    assert "packing_action_not_reflected_in_outline" in proposal.rejected_candidates["ai_candidate"]
-    assert proposal.proposal_source == "ai_candidate_salvaged"
+    # 软语义冲突 → 记录 warning，不替换完整 AI shipment
+    assert "packing_action_not_reflected_in_outline" in proposal.candidate_records["ai_candidate"].get("warnings", [])
+    assert proposal.proposal_source == "ai_candidate"
+    assert proposal.normal.length_cm == 60
 
 
-def test_unsupported_box_with_no_weight_increment_is_rejected():
+def test_unsupported_box_with_no_weight_increment_is_soft_warning_only():
     observation = AIObservation(product_name="generic flexible item", weight_g=110, weight_scope="net_weight")
     boxed = _scenario("normal", dims=(20, 15, 6), weight=110)
     boxed.packaging_method = "硬质包装盒"
     proposal = PackagingEstimationService().estimate(
         observation, external_proposal=_ai(boxed, _scenario("conservative", dims=(22, 17, 8), weight=130)),
     )
-    reasons = proposal.rejected_candidates["ai_candidate"]
-    assert "unsupported_individual_package_type" in reasons
-    assert "packaged_weight_has_no_material_increment" in reasons
+    warnings = proposal.candidate_records["ai_candidate"].get("warnings", [])
+    assert "unsupported_individual_package_type" in warnings
+    assert "packaged_weight_has_no_material_increment" in warnings
+    assert proposal.proposal_source == "ai_candidate"
 
 
 def test_single_item_outline_text_is_not_individual_box_evidence():
@@ -116,7 +123,9 @@ def test_single_item_outline_text_is_not_individual_box_evidence():
     proposal = PackagingEstimationService().estimate(
         observation, external_proposal=_ai(boxed, _scenario("conservative", dims=(24, 14, 9), weight=150)),
     )
-    assert "unsupported_individual_package_type" in proposal.rejected_candidates["ai_candidate"]
+    # 软语义冲突 → warning，完整 AI shipment 保留
+    assert "unsupported_individual_package_type" in proposal.candidate_records["ai_candidate"].get("warnings", [])
+    assert proposal.proposal_source == "ai_candidate"
 
 
 def test_merchant_original_box_evidence_allows_box_claim():
@@ -134,7 +143,7 @@ def test_merchant_original_box_evidence_allows_box_claim():
     assert proposal.proposal_source == "ai_candidate"
 
 
-def test_display_outline_with_unknown_protrusion_cannot_directly_win_without_rigid_evidence():
+def test_display_outline_with_unknown_protrusion_is_soft_warning_only():
     observation = AIObservation(
         product_name="generic structured item", overall_form="hard_3d", rigidity="hard",
         foldability="none", compressibility="none", requires_shape_retention=True,
@@ -148,11 +157,13 @@ def test_display_outline_with_unknown_protrusion_cannot_directly_win_without_rig
             _scenario("conservative", state=PackagingState.SHAPE_RETAINED, dims=(32.5, 16, 25), weight=800),
         ),
     )
-    reasons = proposal.rejected_candidates["ai_candidate"]
-    assert "shape_retention_requires_rigid_evidence" in reasons
-    assert "display_outline_requires_transport_evidence" in reasons
-    assert proposal.proposal_source != "ai_candidate"
-    assert proposal.normal.packaging_state is not PackagingState.SHAPE_RETAINED
+    warnings = proposal.candidate_records["ai_candidate"].get("warnings", [])
+    assert "shape_retention_requires_rigid_evidence" in warnings
+    assert "display_outline_requires_transport_evidence" in warnings
+    # 完整 AI shipment 不被软语义冲突替换；仅标记复核
+    assert proposal.proposal_source == "ai_candidate"
+    assert proposal.normal.length_cm == 30.5
+    assert proposal.normal.needs_review is True
 
 
 def test_limited_compressibility_requires_an_explained_transport_change():
@@ -167,7 +178,9 @@ def test_limited_compressibility_requires_an_explained_transport_change():
             _scenario("conservative", dims=(24, 19, 10), weight=150),
         ),
     )
-    assert "declared_transport_adjustment_not_reflected" in proposal.rejected_candidates["ai_candidate"]
+    warnings = proposal.candidate_records["ai_candidate"].get("warnings", [])
+    assert "declared_transport_adjustment_not_reflected" in warnings
+    assert proposal.proposal_source == "ai_candidate"
     assert proposal.normal.needs_review is True
 
 
@@ -189,7 +202,7 @@ def test_explicit_rigid_frame_allows_shape_retained_candidate():
     assert proposal.proposal_source == "ai_candidate"
 
 
-def test_unverified_ai_rigid_boolean_cannot_make_shape_retention_win():
+def test_unverified_ai_rigid_boolean_is_soft_warning_only():
     observation = AIObservation(
         product_name="generic structured item", overall_form="hard_3d", rigidity="hard",
         foldability="none", compressibility="none", requires_shape_retention=True, has_frame=True,
@@ -203,19 +216,21 @@ def test_unverified_ai_rigid_boolean_cannot_make_shape_retention_win():
             _scenario("conservative", state=PackagingState.SHAPE_RETAINED, dims=(30.5, 14, 23), weight=800),
         ),
     )
-    assert "shape_retention_requires_rigid_evidence" in proposal.rejected_candidates["ai_candidate"]
-    assert "display_outline_requires_transport_evidence" in proposal.rejected_candidates["ai_candidate"]
-    assert proposal.proposal_source != "ai_candidate"
+    warnings = proposal.candidate_records["ai_candidate"].get("warnings", [])
+    assert "shape_retention_requires_rigid_evidence" in warnings
+    assert "display_outline_requires_transport_evidence" in warnings
+    assert proposal.proposal_source == "ai_candidate"
 
 
-def test_recognizable_item_with_confirmed_weight_and_no_outer_dimensions_gets_candidate():
+def test_recognizable_item_with_confirmed_weight_and_no_outer_dimensions_requires_review():
     proposal = PackagingEstimationService().estimate(
         AIObservation(product_name="generic flexible item", overall_form="flexible_chain", packing_actions=["coil"],
                       weight_g=110, weight_scope="net_weight"),
     )
-    assert proposal.proposal_source == "generic_candidate"
-    assert proposal.normal.is_complete()
-    assert proposal.normal.weight_g > 110
+    # 无外部 AI shipment → 不自动生成 generic 精确尺寸
+    assert proposal.proposal_source == "no_valid_candidate"
+    assert not proposal.normal.is_complete()
+    assert proposal.needs_review
 
 
 def test_semantically_rejected_ai_outline_is_not_reused_by_fallback():
@@ -227,9 +242,10 @@ def test_semantically_rejected_ai_outline_is_not_reused_by_fallback():
     proposal = PackagingEstimationService().estimate(
         observation, external_proposal=_ai(_scenario("normal", dims=(55, 70, 2.5), weight=130)),
     )
+    # 页面硬事实（维度证据非外廓）→ 本地不自行创造数值，标记复核
     assert "dimension_evidence_not_outer_dimensions" in proposal.rejected_candidates["ai_candidate"]
-    assert proposal.proposal_source == "ai_candidate_salvaged"
-    assert proposal.normal.length_cm < 55
+    assert proposal.proposal_source == "ai_candidate_hard_facts"
+    assert proposal.normal.needs_review is True
 
 
 def test_invalid_ai_dimensions_keep_confirmed_weight_as_packaged_weight_start():
@@ -242,10 +258,12 @@ def test_invalid_ai_dimensions_keep_confirmed_weight_as_packaged_weight_start():
     proposal = PackagingEstimationService().estimate(
         observation, external_proposal=_ai(partial, _scenario("conservative", dims=(22, 17, 4), weight=145)),
     )
-    assert proposal.proposal_source == "ai_candidate_salvaged"
+    # AI shipment 不完整 → 保留 AI 有效字段，标记复核，不自动补齐
+    assert proposal.proposal_source == "ai_candidate_needs_review"
     assert proposal.normal.weight_g == 130
     assert proposal.normal.weight_g >= 110
-    assert proposal.candidate_records["candidate_field_salvage"]["diagnostic"]["user_confirmed"] == ["weight_g"]
+    assert proposal.normal.length_cm is None
+    assert proposal.needs_review
 
 
 def test_unsupported_shape_retention_is_removed_without_losing_coil_structure():
@@ -254,11 +272,15 @@ def test_unsupported_shape_retention_is_removed_without_losing_coil_structure():
         packing_actions=["coil", "retain_shape"], requires_shape_retention=True, weight_g=110, weight_scope="net_weight",
     )
     proposal = PackagingEstimationService().estimate(
-        observation, external_proposal=_ai(_scenario("normal", state=PackagingState.SHAPE_RETAINED, dims=(30, 20, 8), weight=140)),
+        observation, external_proposal=_ai(
+            _scenario("normal", state=PackagingState.SHAPE_RETAINED, dims=(30, 20, 8), weight=140),
+            _scenario("conservative", state=PackagingState.SHAPE_RETAINED, dims=(32, 22, 10), weight=160),
+        ),
     )
-    assert proposal.proposal_source == "ai_candidate_salvaged"
-    assert proposal.normal.packaging_state is not PackagingState.SHAPE_RETAINED
-    assert "shape_retention_requires_rigid_evidence" in proposal.adjustments
+    # 结构词保形证据不足 → warning；完整 AI shipment 保留
+    assert proposal.proposal_source == "ai_candidate"
+    assert "shape_retention_requires_rigid_evidence" in proposal.candidate_records["ai_candidate"].get("warnings", [])
+    assert proposal.normal.needs_review is True
 
 
 def test_salvage_completes_only_missing_dimensions_and_keeps_valid_weight():
@@ -269,8 +291,10 @@ def test_salvage_completes_only_missing_dimensions_and_keeps_valid_weight():
     proposal = PackagingEstimationService().estimate(
         observation, external_proposal=_ai(partial, _scenario("conservative", dims=(23, 18, 4), weight=170)),
     )
+    # AI shipment 不完整 → 保留有效字段 + needs_review，不自动补齐缺失尺寸
     assert proposal.normal.weight_g == 150
-    assert proposal.normal.height_cm is not None
+    assert proposal.normal.height_cm is None
+    assert proposal.needs_review
 
 
 def test_salvage_completes_only_missing_weight_and_keeps_valid_dimensions():
@@ -282,10 +306,13 @@ def test_salvage_completes_only_missing_weight_and_keeps_valid_dimensions():
         observation, external_proposal=_ai(missing_weight, _scenario("conservative", dims=(20, 14, 4), weight=150)),
     )
     assert (proposal.normal.length_cm, proposal.normal.width_cm, proposal.normal.height_cm) == (18, 12, 3)
-    assert proposal.normal.weight_g > 110
+    assert proposal.normal.weight_g is None
+    assert proposal.needs_review
 
 
 def test_full_generic_fallback_is_marked_when_only_identity_is_known():
     proposal = PackagingEstimationService().estimate(AIObservation(product_name="generic item"))
-    assert proposal.proposal_source == "generic_candidate"
-    assert "full_generic_fallback_no_reliable_fields" in proposal.candidate_records["generic_candidate"]["adjustments"]
+    # 无外部 AI shipment → 不生成 generic 兜底，优先人工补充/复核
+    assert proposal.proposal_source == "no_valid_candidate"
+    assert not proposal.normal.is_complete()
+    assert proposal.needs_review

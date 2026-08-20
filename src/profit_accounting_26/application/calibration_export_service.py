@@ -94,6 +94,8 @@ _OBSERVATION_FIELDS = frozenset({
     "weight_scope",
     "quantity",
     "quantity_source",
+    "quantity_unit",
+    "quantity_summary",
     "source",
     "model",
     "prompt_version",
@@ -126,6 +128,7 @@ _EVIDENCE_FIELDS = frozenset({
     "packing_actions",
     "packing_constraints",
     "quantity",
+    "quantity_unit",
 })
 
 _SHIPMENT_FIELDS = frozenset({
@@ -151,6 +154,7 @@ _FORBIDDEN_KEY_PARTS = (
     "calculation_snapshot",
     "profit_scenarios",
     "product_cost",
+    "unit_price",
     "domestic_shipping",
     "system_cost",
     "exchange_rate",
@@ -354,6 +358,42 @@ def _machine_ai_initial(payload: dict[str, Any]) -> dict[str, Any] | None:
     return block or None
 
 
+def _machine_local_adopted(initial: dict[str, Any]) -> dict[str, Any] | None:
+    """machine_facts.local_adopted：第一次本地仲裁后的最终采用结果。
+
+    只从 ai_initial.adopted_packaging 读取（AI 首次识图时的本地仲裁输出），
+    保存尺寸/重量、proposal_source、applied rule ids、conflicts、adjustments
+    与 engine/calibration version，供 Logistics-calibration 判断
+    “AI 错了？本地规则改错了？用户后来改了？”。
+    """
+    adopted = initial.get("adopted_packaging") if isinstance(initial, dict) else None
+    if not isinstance(adopted, dict):
+        return None
+    conservative = adopted.get("conservative")
+    normal = adopted.get("normal")
+    tier = conservative if isinstance(conservative, dict) else normal
+    if not isinstance(tier, dict):
+        return None
+    block: dict[str, Any] = {}
+    shipment = _packaging_scenario_block(tier)
+    if shipment:
+        block["shipment"] = shipment
+    for key in ("proposal_source", "engine_version", "calibration_version"):
+        value = adopted.get(key)
+        if value not in (None, ""):
+            block[key] = value
+    applied = adopted.get("applied_profile_ids")
+    if isinstance(applied, list):
+        block["applied_rule_ids"] = [str(rule_id) for rule_id in applied if str(rule_id)]
+    conflicts = adopted.get("conflicts")
+    if isinstance(conflicts, list):
+        block["conflicts"] = list(conflicts)
+    adjustments = adopted.get("adjustments")
+    if isinstance(adjustments, list):
+        block["adjustments"] = list(adjustments)
+    return block or None
+
+
 def _machine_user_feedback(feedback) -> dict[str, Any] | None:
     """machine_facts.user_feedback：直接读取 linked feedback 的精确字段。
 
@@ -377,6 +417,60 @@ def _machine_user_feedback(feedback) -> dict[str, Any] | None:
         ),
         "user_note": feedback.user_note,
     }
+
+
+# reestimate_history 单条白名单：只导出包装校准证据字段，禁止任何经济字段
+_REESTIMATE_ENTRY_FIELDS = frozenset({
+    "reestimate_id",
+    "sequence",
+    "timestamp",
+    "accepted",
+    "user_correction",
+    "confirmed_facts",
+    "arbitration_trace",
+    "model",
+    "provider",
+    "prompt_version",
+})
+
+
+def _machine_reestimate_history(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """machine_facts.reestimate_history：_v2.reestimate_history 的包装校准过滤块。
+
+    保留每次局部重估的纠偏过程证据（correction / confirmed_facts / raw proposal /
+    adopted proposal / arbitration trace / accepted / model / provider /
+    prompt_version / timestamp），供 Calibration Agent 看懂完整纠偏链。
+    经济字段由白名单 + 递归剔除双重防线排除；无重估时返回空列表（键始终存在）。
+    """
+    v2 = payload.get("_v2") if isinstance(payload.get("_v2"), dict) else {}
+    history = v2.get("reestimate_history")
+    if not isinstance(history, list):
+        return []
+    entries: list[dict[str, Any]] = []
+    for entry in history:
+        if not isinstance(entry, dict):
+            continue
+        out: dict[str, Any] = {key: entry.get(key) for key in _REESTIMATE_ENTRY_FIELDS}
+        for key in ("raw_reestimate_proposal", "adopted_reestimate_proposal"):
+            proposal = entry.get(key)
+            if isinstance(proposal, dict):
+                out[key] = {
+                    "normal": (
+                        _packaging_scenario_block(proposal["normal"])
+                        if isinstance(proposal.get("normal"), dict)
+                        else None
+                    ),
+                    "conservative": (
+                        _packaging_scenario_block(proposal["conservative"])
+                        if isinstance(proposal.get("conservative"), dict)
+                        else None
+                    ),
+                    "proposal_source": proposal.get("proposal_source"),
+                }
+            else:
+                out[key] = None
+        entries.append(_strip_forbidden_keys(out))
+    return entries
 
 
 def first_ai_short_name(payload: dict[str, Any]) -> str:
@@ -428,21 +522,83 @@ def first_ai_shipment_text(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def user_calibration_text(feedback) -> str:
-    """只读真正用户层：user_note + 真正 user_suggested 的 suggested_package。"""
+def _suggested_dims(suggested) -> dict[str, float] | None:
+    """suggested_package 的四项数值；任一缺失返回 None（部分编辑视为真实用户输入）。"""
+    if suggested is None:
+        return None
+    dims = {
+        "length_cm": _num(getattr(suggested, "length_cm", None)),
+        "width_cm": _num(getattr(suggested, "width_cm", None)),
+        "height_cm": _num(getattr(suggested, "height_cm", None)),
+        "weight_g": _num(getattr(suggested, "weight_g", None)),
+    }
+    if any(value is None for value in dims.values()):
+        return None
+    return dims
+
+
+def _dims_equal(source: dict[str, Any], expected: dict[str, float]) -> bool:
+    for key, target in expected.items():
+        actual = _num(source.get(key))
+        if actual is None or abs(actual - target) > 1e-6:
+            return False
+    return True
+
+
+def is_ai_reestimate_polluted_suggestion(payload: dict[str, Any], suggested) -> bool:
+    """读取/导出层兼容：旧版本把 AI 重估结果误写成 user_suggested 的污染检测。
+
+    用户明确输入的事实优先：只有存在明确 ``_v2.reestimate_history``，
+    且 suggested_package 与某条 ``adopted_reestimate_proposal`` 精确一致时，
+    才认为有旧 AI reestimate 污染嫌疑（场景 C 兼容）。
+
+    禁止仅凭 ``suggested_package == current_estimate`` 就隐藏用户建议：
+    用户真正手工修改以后，current_estimate 本来就很可能等于
+    user suggested_package，该等值不能单独作为“这是 AI 污染”的证据。
+
+    仅影响显示/导出（Excel 用户校准内容、历史页显示），绝不修改原始历史 JSON；
+    无法明确证明来源于 AI 时返回 False，保留用户输入。
+    """
+    dims = _suggested_dims(suggested)
+    if dims is None:
+        return False
+    v2 = payload.get("_v2") if isinstance(payload.get("_v2"), dict) else {}
+    history = v2.get("reestimate_history")
+    if isinstance(history, list):
+        for entry in history:
+            if not isinstance(entry, dict):
+                continue
+            proposal = entry.get("adopted_reestimate_proposal")
+            if isinstance(proposal, dict):
+                for tier in ("normal", "conservative"):
+                    scenario = proposal.get(tier)
+                    if isinstance(scenario, dict) and _dims_equal(scenario, dims):
+                        return True
+    return False
+
+
+def user_calibration_text(feedback, payload: dict[str, Any] | None = None) -> str:
+    """只读真正用户层：user_note + 真正 user_suggested 的 suggested_package。
+
+    payload 提供时执行旧版本污染兼容：只有存在明确 reestimate_history 且
+    suggested_package 与某条 adopted_reestimate_proposal 精确一致时，
+    才把该建议当作旧 AI 重估污染过滤；用户真正手工填写的内容（即使
+    与 current_estimate 一致）一律保留。
+    """
     lines: list[str] = []
     note = str(getattr(feedback, "user_note", "") or "").strip().replace("\n", " ")
     if note:
         lines.append(f"用户反馈：{note}")
     suggested = getattr(feedback, "suggested_package", None)
     if suggested is not None and suggested.has_content():
-        text = _fmt_dims_weight(
-            suggested.length_cm, suggested.width_cm, suggested.height_cm, suggested.weight_g
-        )
-        method = str(suggested.packaging_method or "").strip()
-        if method:
-            text = f"{text}；{method}" if text else method
-        lines.append(f"建议包装：{text}")
+        if payload is None or not is_ai_reestimate_polluted_suggestion(payload, suggested):
+            text = _fmt_dims_weight(
+                suggested.length_cm, suggested.width_cm, suggested.height_cm, suggested.weight_g
+            )
+            method = str(suggested.packaging_method or "").strip()
+            if method:
+                text = f"{text}；{method}" if text else method
+            lines.append(f"建议包装：{text}")
     return "\n".join(lines)
 
 
@@ -670,7 +826,7 @@ class CalibrationFeedbackExporter:
                 str(payload.get("product_link") or ""),
                 "",  # 图片列只嵌入主图缩略图，不再写路径文本
                 first_ai_shipment_text(payload),
-                user_calibration_text(feedback) if feedback is not None else "",
+                user_calibration_text(feedback, payload) if feedback is not None else "",
                 actual_first_mile_text(feedback) if feedback is not None else "",
             ]
             sheet.append(row)
@@ -762,11 +918,18 @@ class CalibrationFeedbackExporter:
                     "main_image": relative_paths[0] if relative_paths else "",
                     "images": relative_paths,
                     "ai_initial_shipment": first_ai_shipment_text(payload),
-                    "user_calibration": user_calibration_text(feedback) if feedback is not None else "",
+                    "user_calibration": user_calibration_text(feedback, payload) if feedback is not None else "",
                     "actual_first_mile": actual_first_mile_text(feedback) if feedback is not None else "",
                     "machine_facts": {
                         "ai_initial": _machine_ai_initial(payload),
+                        "local_adopted": _machine_local_adopted(_ai_initial_block(payload)),
                         "user_feedback": _machine_user_feedback(feedback),
+                        "actual_logistics": (
+                            _machine_user_feedback(feedback).get("actual_logistics")
+                            if feedback is not None
+                            else None
+                        ),
+                        "reestimate_history": _machine_reestimate_history(payload),
                     },
                 }
             )

@@ -162,16 +162,15 @@ class TestUserCorrectionPlaceholder:
             page.deleteLater()
             qapp.processEvents()
 
-    def test_user_correction_placeholder_is_two_line_example(self, qapp, temp_context):
+    def test_user_correction_placeholder_is_single_line_example(self, qapp, temp_context):
         page = CalculationPage(temp_context)
         try:
             edit = page.user_correction._widget
             example = edit.example.text()
-            # 阶段 3 最终调整：示例文字替换为两行短提示
+            # PR #40：示例文字精简为一行（移除"若商品识别错误"过期说明）
             assert "填写用于重估的修正（本框内容优先）" in example
-            assert "若商品识别错误，请同时修改上方摘要" in example
+            assert "若商品识别错误" not in example
             assert "头程" not in example and "货代" not in example
-            assert "\n" in example
             # 示例是 viewport 子控件且不影响真实内容
             assert edit.example.parent() is edit.viewport()
             assert edit.toPlainText() == ""
@@ -313,8 +312,8 @@ class TestHistoryTableRound5:
             stylesheet = page.table.styleSheet()
             assert "border-right" in stylesheet
             assert "1px solid" in stylesheet
-            # 不出现横向滚动条
-            assert page.table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            # 横向滚动策略：窄窗口下列宽不强制挤烂，允许出现横向滚动条
+            assert page.table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
         finally:
             page.deleteLater()
             qapp.processEvents()

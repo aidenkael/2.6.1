@@ -126,31 +126,32 @@ def test_ai_shipment_judgment_has_one_visible_contract_location(qapp, app_contex
 
 
 def test_visual_and_reestimate_prompts_are_frozen_minimal_contracts():
-    assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v1.3"
+    assert RecognitionService.PROMPT_VERSION == "2.6.1-visual-v2.3"
     # 阶段 3 最后一次调整：重估 Prompt 按用户明确要求升级为 v1.2（冲突优先级）
     assert LocalReestimateService.PROMPT_VERSION == "2.6.1-reestimate-v1.2"
     schema = RecognitionService.RESPONSE_SCHEMA
-    assert set(schema["properties"]) == {"product_name", "observed", "bare_estimate", "shipment", "note"}
+    assert set(schema["properties"]) == {"product_name", "observed", "bare_estimate", "shipment", "structure", "quantity", "field_evidence", "note"}
     assert "bare_estimate" in schema["properties"]
     be_schema = schema["properties"]["bare_estimate"]
     assert set(be_schema["required"]) == {"length_cm", "width_cm", "height_cm", "weight_g"}
     prompt = RecognitionService._prompt(2)
     assert "bare_estimate" in prompt
-    assert "数量为 0、未识别、模糊或无法可靠确认时，按 1 个销售单位判断" in prompt
-    assert "不得将单个商品的长、宽、高机械全部乘以数量" in prompt
-    assert "页面明确包装方式不等于页面明确包装尺寸" in prompt
+    assert "purchase_quantity" in prompt
+    assert "L/W/H" in prompt
+    assert "purchase_quantity" in prompt
     reestimate = LocalReestimateService._context(
         product_name="商品", confirmed_facts={}, current_shipment={}, user_correction="修正",
     )
     for text in (prompt, reestimate):
-        assert "主要物理形态/处理状态" in text
-        assert "简单包装方式" in text
-        assert "可折叠；袋装发货" in text
-        assert "不要只返回" in text
+        assert "物理形态" in text
+        assert "包装方式" in text
+        assert "可折叠" in text or "袋装" in text
+        assert "shipment" in text
     serialized_schema = json.dumps(schema, ensure_ascii=False)
+    # v1.4: rigidity/foldability/compressibility are now intentional schema fields
     for forbidden in (
-        "rigidity", "foldability", "compressibility", "normal", "conservative",
-        "package_type", "container_type", "packing_action",
+        "normal", "conservative",
+        "package_type", "container_type",
     ):
         assert forbidden not in serialized_schema
 

@@ -312,11 +312,11 @@ class TestHistoryPageFinalUi:
         finally:
             page.deleteLater()
 
-    def test_no_horizontal_scrollbar(self, qapp, context):
-        """11：无横向滚动条。"""
+    def test_horizontal_scroll_policy_allows_narrow_access(self, qapp, context):
+        """11：窄窗口允许横向滚动（列宽不强制挤烂），最右侧列可访问。"""
         _create(context, "睡帽")
         page = HistoryPage(context)
         try:
-            assert page.table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            assert page.table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
         finally:
             page.deleteLater()

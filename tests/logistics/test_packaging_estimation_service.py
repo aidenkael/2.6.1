@@ -55,7 +55,9 @@ def test_unknown_structure_is_not_treated_as_shape_retention(tmp_path: Path):
     proposal = service.estimate(observation)
     assert proposal.normal.packaging_state is not PackagingState.SHAPE_RETAINED
     assert proposal.needs_review
-    assert proposal.proposal_source == "generic_candidate"
+    # 无外部 AI shipment → 不自动生成 generic 精确尺寸，优先人工复核
+    assert proposal.proposal_source == "no_valid_candidate"
+    assert not proposal.normal.is_complete()
 
 
 def test_explicit_no_hard_structure_allows_data_driven_candidate(tmp_path: Path):
@@ -82,10 +84,10 @@ def test_explicit_no_hard_structure_allows_data_driven_candidate(tmp_path: Path)
         weight_g=100,
     )
     proposal = service.estimate(observation)
-    assert proposal.normal.packaging_state is PackagingState.STRONG_COMPRESSION
-    assert proposal.applied_profile_ids == ["GENERIC"]
-    assert proposal.normal.length_cm == 20
-    assert proposal.normal.weight_g == 120
+    # 无外部 AI shipment → 不生成 STRONG_COMPRESSION/GENERIC 精确尺寸
+    assert proposal.proposal_source == "no_valid_candidate"
+    assert proposal.needs_review
+    assert proposal.applied_profile_ids == []
 
 
 def test_complete_external_ai_candidate_is_adopted_after_validation(tmp_path: Path):
@@ -141,7 +143,8 @@ def test_complete_external_ai_candidate_is_adopted_after_validation(tmp_path: Pa
     assert proposal.local_proposed_scenarios["normal"]["packaging_method"] == "AI袋装"
     assert proposal.adjusted_scenarios["normal"]["packaging_method"] == "AI袋装"
     assert proposal.proposal_source == "ai_candidate"
-    assert proposal.needs_review
+    # v2.2：完整合法 AI shipment、无冲突 → 不再机械 needs_review（普通完整AI结果不提示复核）
+    assert proposal.needs_review is False
 
 
 def test_soft_item_without_matching_samples_is_not_auto_compressed(tmp_path: Path):
@@ -168,6 +171,7 @@ def test_soft_item_without_matching_samples_is_not_auto_compressed(tmp_path: Pat
         weight_g=100,
     )
     proposal = service.estimate(observation)
-    assert proposal.normal.length_cm == 20
-    assert proposal.normal.needs_review
-    assert proposal.proposal_source == "generic_candidate"
+    # 无外部 AI shipment → 不自动生成 generic 尺寸；优先人工复核
+    assert proposal.needs_review
+    assert proposal.proposal_source == "no_valid_candidate"
+    assert not proposal.normal.is_complete()

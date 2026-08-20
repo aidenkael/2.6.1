@@ -30,6 +30,14 @@
 | DEC-024 | 外部 AI 冲突不静默覆盖 | `ddad3b...` 明确保留 AI 原始、本地拟调整、最终方案及规则审计 | 适配层完整透传审计元数据，用户或上层决定采用值 | 否 |
 | DEC-025 | 兼容默认值不是生产真实值 | 上游为旧 JSON 回放保留默认尺寸/重量并标记 `default_fields_used` | 关键默认值未被人工替换时，2.6 阻止正式采用并显示待补充 | 否 |
 | DEC-026 | 物流接入分支 | 用户要求从 2.6 R2 基线建立分支 | 从 `ec6794df...` 建立 `integration/logistics-ddad3b-2.6.1` | 否 |
+| DEC-027 | AI/本地职责永久边界 | 83 条校准收口后用户固定职责边界 | AI 负责产品名/observed/bare_estimate/quantity/shipment/最小 structure；本地只做保护与已验证确定性修正，不做第二套包装判断 | 否 |
+| DEC-028 | 本地介入白名单 | 完整合法 AI shipment 默认通过，仅四类可介入 | 用户确认事实、页面/商家硬事实、83 条 validated 保护规则、validated 数值规则；软语义冲突只记录 warning + needs_review | 否 |
+| DEC-029 | generic 兜底退出生产 | 固定 25×18×5 等兜底与固定压缩率被用户禁止 | PackagingEstimationService 不再以 generic_candidate 覆盖完整 AI shipment；AI 缺失时优先人工补充复核 | 否 |
+| DEC-030 | RecognitionOutcome 合同 | `last_raw_proposal` 是临时状态共享，用户要求最小明确结果合同 | 新增 RecognitionOutcome（raw_observation/raw_ai_proposal/adopted_proposal/arbitration_observation/arbitration_trace），UI 不再反向读取服务状态 | 否 |
+| DEC-031 | confirmed_facts 先于仲裁 | 用户确认裸重 700g 必须参与本地仲裁而非事后覆盖 | RuntimeRecognitionService 复制 raw_observation 后先应用 confirmed_facts，再进 PackagingEstimationService；raw 历史永不被污染 | 否 |
+| DEC-032 | 历史四层语义 | 用户要求 ai_initial / initial_adopted(local) / user_current / actual | 复用 SQLite + `_v2`：ai_initial 冻结 raw+confirmed_facts；adopted_packaging 记录本地仲裁；current_estimate 为当前采用；feedback actual_logistics 为真实物流；旧记录兼容读取 | 否 |
+| DEC-033 | manifest 四层 | Excel 保持 7 列，manifest machine_facts 区分 AI/local/user/actual | machine_facts 含 ai_initial / local_adopted / user_feedback / actual_logistics | 否 |
+| DEC-034 | Prompt v1.8 收口 | 用户要求"短，但 AI 看得懂"，恢复一行销售单位逻辑，structure 一行词表 | v1.8：purchase_quantity 未知→quantity_source=assumed/unknown；packing_actions 仅正式允许值；rigidity/foldability/compressibility 一行词表 | 否 |
 
 ## 未决事项
 

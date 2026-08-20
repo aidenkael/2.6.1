@@ -13,7 +13,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
+from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from PySide6.QtCore import QEvent, QObject, QThread, Qt, QSignalBlocker, Signal, Slot
 from PySide6.QtGui import QDoubleValidator, QKeyEvent, QKeySequence
@@ -39,9 +41,14 @@ from profit_accounting_26.application.api_profile_store import LOCAL_REESTIMATE,
 from profit_accounting_26.application.calculation_session import CalculationSession
 from profit_accounting_26.application.category_normalizer import normalize_observation
 from profit_accounting_26.application.packaging_presentation import (
+    cost_review_warnings,
     normal_reminder,
     packaging_summary,
     product_summary,
+)
+from profit_accounting_26.application.profit_defaults import (
+    apply_profit_defaults,
+    capture_profit_defaults,
 )
 from profit_accounting_26.application.recognition_service import (
     RecognitionCancellation,
@@ -50,6 +57,7 @@ from profit_accounting_26.application.recognition_service import (
     RecognitionService,
     RecognitionUnavailableError,
 )
+from profit_accounting_26.application.runtime_ai_services import apply_confirmed_facts
 from profit_accounting_26.domain.models import (
     AIObservation,
     ImageType,
@@ -61,11 +69,13 @@ from profit_accounting_26.ui.controllers.forwarder_cards_controller import Forwa
 from profit_accounting_26.ui.controllers.image_slots_controller import ImageSlotsController
 from profit_accounting_26.ui.ui_loader import load_main_window
 from profit_accounting_26.ui.widgets import Card, ImageSlotWidget, QuoteCard, confirm_action
-from profit_accounting_26.ui.input_editing import install_blank_click_focus_filter
+from profit_accounting_26.ui.input_editing import (
+    install_blank_click_focus_filter,
+)
 
 
 class RecognitionWorker(QObject):
-    completed = Signal(object, object)
+    completed = Signal(object)
     failed = Signal(str, str)
 
     def __init__(self, service, image_items: list[dict[str, str]], cancellation: RecognitionCancellation, diagnostic_operation=None, user_context=None) -> None:
@@ -79,7 +89,7 @@ class RecognitionWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            observation, proposal = self._service.recognize(
+            outcome = self._service.recognize(
                 self._image_items,
                 cancellation=self._cancellation,
                 diagnostic_operation=self._diagnostic_operation,
@@ -94,7 +104,7 @@ class RecognitionWorker(QObject):
         except Exception as exc:
             self.failed.emit("failed", str(exc))
         else:
-            self.completed.emit(observation, proposal)
+            self.completed.emit(outcome)
 
 
 class LocalReestimateWorker(QObject):
@@ -202,8 +212,7 @@ class _UserCorrectionEdit(QTextEdit):
     """
 
     EXAMPLE_TEXT = (
-        "填写用于重估的修正（本框内容优先）\n"
-        "若商品识别错误，请同时修改上方摘要"
+        "填写用于重估的修正（本框内容优先）"
     )
     MIN_HEIGHT = 68
     MAX_HEIGHT = 88
@@ -249,6 +258,7 @@ class _UserCorrectionEdit(QTextEdit):
 class CalculationPage(QWidget):
     dirtyChanged = Signal(bool)
     saved = Signal(str)
+    historyEditingChanged = Signal(bool)
 
     def __init__(self, context: AppContext, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -261,6 +271,8 @@ class CalculationPage(QWidget):
         self.record_id: str | None = None
         self.dirty = False
         self.packaging_stale = False
+        # v2.2：当前采用是否来自“按修正重估”采用（AI 结果，非用户手改，badge 显示中性状态）
+        self._reestimate_adopted = False
         self._updating = False
         self.current_quote = None
         self.current_forwarder = None
@@ -275,6 +287,7 @@ class CalculationPage(QWidget):
         self._local_thread: QThread | None = None
         self._local_worker: LocalReestimateWorker | None = None
         self._local_dialog: QDialog | None = None
+        self._pending_reestimate_meta: dict[str, Any] | None = None
         self._ai_baseline: dict[str, Any] | None = None
         self.initial_ai_snapshot: dict[str, Any] | None = None
         self.current_feedback_id: str | None = None
@@ -284,8 +297,16 @@ class CalculationPage(QWidget):
         # 用户校准 dirty：仅用户手动修改当前采用尺寸/重量或填写用户修正时置位；
         # AI 首次自动复制不置位（程序化 setValue 不发信号）。
         self.user_calibration_dirty = False
+        # 用户亲手修改过“当前采用”的字段集合（程序化 setValue / AI 识图回填 /
+        # AI 重估采用 / 历史恢复永不进入）：suggested_package 的唯一来源。
+        # 参考裸品 confirmed_facts 的成功做法：不靠数值比较猜用户是否编辑。
+        self._user_manual_package_fields: set[str] = set()
         self._recognized_image_fingerprint: tuple[tuple[str, str], ...] = ()
         self._accepted_bare_fields: set[str] = set()
+        # 用户真正编辑过的裸字段（程序化 setValue 永不进入）。
+        # confirmed_facts 捕获主机制：用户编辑数值的瞬间（valueChanged）即记录，
+        # 点击 AI 时再从这些字段按控件当前值落盘，不依赖 editingFinished/失焦。
+        self._user_edited_bare_fields: set[str] = set()
         self._pending_confirmed_normal: dict[str, Any] = {}
 
         self._load_ui_widgets()
@@ -329,6 +350,9 @@ class CalculationPage(QWidget):
             if rule.enabled and not rule.archived
         ))
         self.profit_binder.selectedRuleChanged.connect(self._persist_selected_rule)
+        # 三项利润字段（活动预留/标价利率/活动后利润率）恢复用户上一次明确保存的默认值；
+        # 从未保存过则沿用现有初始默认（15% / 25%）。这是本轮唯一主软件业务改动。
+        apply_profit_defaults(self.settings, self.profit_binder)
 
         self.rebuild_image_slots(int(self.settings.get("image_slot_count", 5)))
         self.rebuild_quote_cards()
@@ -363,6 +387,7 @@ class CalculationPage(QWidget):
         self.product_summary = _TextAdapter(f(QLineEdit, "txtAiSummary"))
         self.structure_summary = _TextAdapter(f(QLineEdit, "txtPackingState"))
         self.structure_summary._widget.setReadOnly(True)
+        self.product_summary._widget.setReadOnly(True)
         # 发货判断只在 AI 估算卡正式展示。保留旧 objectName 和绑定，
         # 仅隐藏顶部重复入口以兼容历史 payload 与现有自动化。
         packing_state_title = f(QLabel, "lblPackingStateTitle")
@@ -491,13 +516,6 @@ class CalculationPage(QWidget):
         self.product_link = f(QLineEdit, "txtProductLink")
         self.btn_save_record = f(QPushButton, "btnSaveCurrentRecord")
         self.btn_clear_new = f(QPushButton, "btnClearAndNew")
-        # 保存按钮旁的历史编辑状态轻提示（不占用新布局区域）
-        bottom_layout = f(QHBoxLayout, "bottomActionLayout")
-        self.edit_state_label = QLabel("")
-        self.edit_state_label.setProperty("muted", True)
-        self.edit_state_label.setVisible(False)
-        if bottom_layout is not None:
-            bottom_layout.insertWidget(2, self.edit_state_label)
         self._apply_adopted_flow_ui()
         self._apply_round3_ui_polish()
 
@@ -837,7 +855,8 @@ class CalculationPage(QWidget):
         for name, fields in (("AI估算", self.normal_fields), ("当前采用", self.conservative_fields)):
             fields["method"].textChanged.connect(lambda _text, n=name: self._scenario_manually_changed(n))
             for key in ("length", "width", "height", "weight"):
-                fields[key].valueChanged.connect(lambda _value, n=name: self._scenario_manually_changed(n))
+                # 传入字段 key：用户亲手编辑当前采用的哪个字段会被显式记录
+                fields[key].valueChanged.connect(lambda _value, n=name, k=key: self._scenario_manually_changed(n, k))
 
         self.product_cost.editingFinished.connect(lambda: self._accept_numeric_field("product_cost_rmb", self.product_cost))
         self.domestic_shipping.editingFinished.connect(lambda: self._accept_numeric_field("domestic_shipping_rmb", self.domestic_shipping))
@@ -845,10 +864,13 @@ class CalculationPage(QWidget):
             widget.editingFinished.connect(self._upstream_changed)
         for key, widget in (("length_cm", self.bare_length), ("width_cm", self.bare_width), ("height_cm", self.bare_height), ("weight_g", self.bare_weight)):
             widget.editingFinished.connect(lambda k=key: self._accept_bare_field(k))
+        # 用户编辑瞬间即捕获（主机制）：非程序化 valueChanged → 记录“用户编辑过此字段”
+        # 并即时写入 session。程序化 setValue 由 _SpinAdapter._programmatic 抑制，
+        # 永不进入这里（程序化 AI 回填不会升级为用户确认）。
+        for key, widget in (("length_cm", self.bare_length), ("width_cm", self.bare_width), ("height_cm", self.bare_height), ("weight_g", self.bare_weight)):
+            widget.valueChanged.connect(lambda value, k=key: self._on_bare_user_edited(k, value))
         self.product_summary.textChanged.connect(lambda _text: self._upstream_changed())
-        self.product_summary._widget.editingFinished.connect(
-            lambda: self._accept_text_field("product_name", self.product_summary)
-        )
+        # product_summary is now read-only; no editing override
         self.material_summary.textChanged.connect(lambda _text: self._upstream_changed())
         self.structure_summary.textChanged.connect(lambda _text: self._upstream_changed())
         for combo in (self.rigidity_combo, self.foldability_combo, self.compressibility_combo):
@@ -898,6 +920,8 @@ class CalculationPage(QWidget):
     # ------------------------------------------------------------------
 
     def _mark_dirty(self) -> None:
+        if self._updating:
+            return
         if not self.dirty:
             self.dirty = True
             self.dirtyChanged.emit(True)
@@ -915,12 +939,69 @@ class CalculationPage(QWidget):
     def _adopted_packaging(self) -> PackagingProposal | None:
         return self.session.adopted_packaging or self.proposal
 
+    # ------------------------------------------------------------------
+    # 复核徽标（v2.2：needs_review = 真实风险，全链一致）
+    # ------------------------------------------------------------------
+
+    def _real_review_reasons(self) -> list[str]:
+        """真实“用户有必要知道/处理”的原因：packaging 仲裁真实问题 + 非精确成本。
+
+        不包含信息性行（“complete AI packaging candidate adopted...”）。
+        """
+        reasons: list[str] = []
+        proposal = self._adopted_packaging()
+        if proposal is not None and proposal.needs_review:
+            for reason in proposal.review_reasons:
+                text = str(reason or "").strip()
+                if not text or text.startswith("complete AI packaging candidate adopted"):
+                    continue
+                if text not in reasons:
+                    reasons.append(text)
+        observation = self.observation if self.observation is not None else self.session.observation
+        for warning in cost_review_warnings(observation):
+            if warning not in reasons:
+                reasons.append(warning)
+        return reasons
+
+    def _update_review_badge(self, *, loaded: bool = False) -> None:
+        """按真实状态刷新复核徽标（不再机械“需要复核”）。
+
+        待识别 / 估算已过期·禁止保存 / 需要复核（真实风险）/ 已采用修正重估 /
+        用户已修改（中性）/ 已识别（普通完整AI结果）/ 已载入（历史恢复，loaded=True）。
+        """
+        if self.packaging_stale:
+            text, warn = "估算已过期 · 禁止保存", True
+            reasons: list[str] = []
+        else:
+            reasons = self._real_review_reasons()
+            if reasons:
+                text, warn = "需要复核", True
+            elif self._reestimate_adopted:
+                text, warn = "已采用修正重估", False
+            elif self.manual_scenarios:
+                text, warn = "用户已修改", False
+            elif self.proposal is not None:
+                text, warn = "已载入" if loaded else "已识别", False
+            else:
+                text, warn = "待识别", False
+        self.review_badge.setText(text)
+        self.review_badge.setProperty("warning", warn)
+        self.review_badge.setProperty("success", not warn)
+        if reasons:
+            self.review_badge.setToolTip("\n".join(reasons))
+        else:
+            self.review_badge.setToolTip("")
+        self._refresh_badge_style()
+
     def mark_saved(self) -> None:
         self.dirty = False
         self.dirtyChanged.emit(False)
 
     def _persist_selected_rule(self, rule_id: str) -> None:
-        self.selected_profit_rule_id = str(rule_id or "")
+        new_id = str(rule_id or "")
+        if new_id == self.selected_profit_rule_id:
+            return
+        self.selected_profit_rule_id = new_id
         self.settings["selected_profit_rule_id"] = self.selected_profit_rule_id
         self.context.settings_service.save(self.settings)
         self._mark_dirty()
@@ -1029,6 +1110,21 @@ class CalculationPage(QWidget):
                 parts.append(label)
         return "；".join(dict.fromkeys(parts))
 
+    def _force_sync_confirmed_facts(self) -> None:
+        """互补安全网：清焦触发 editingFinished，落盘仍在编辑中的编辑器。
+
+        主机制是 _on_bare_user_edited（用户编辑瞬间即确认）+
+        _ai_request_confirmed_facts（点击 AI 时按控件当前值再落盘一次），
+        不依赖失焦；此方法仅作为多余保险（如正在编辑的非裸字段编辑器）。
+        程序化 setValue 不受影响（_programmatic 保护仍在）。
+        """
+        focused = self._root.focusWidget()
+        if focused is not None and focused is not self._root:
+            focused.clearFocus()
+            # 处理挂起事件，确保 editingFinished 在构建 confirmed_facts 前被分发
+            from PySide6.QtCore import QCoreApplication
+            QCoreApplication.processEvents()
+
     def _accept_bare_field(self, key: str) -> None:
         if not self._updating:
             self._accepted_bare_fields.add(key)
@@ -1044,6 +1140,53 @@ class CalculationPage(QWidget):
             elif key == "weight_g":
                 if hasattr(self, "lbl_bare_weight_source"):
                     self.lbl_bare_weight_source.setText("\u7528\u6237\u786e\u8ba4")
+
+    def _on_bare_user_edited(self, key: str, value: float) -> None:
+        """用户编辑裸字段（非程序化 valueChanged）→ 记录“用户编辑过此字段”并即时确认。
+
+        confirmed_facts 捕获主机制：不依赖 editingFinished / 失焦 / clearFocus。
+        用户真正编辑数值的瞬间（键入、粘贴、步进）即进入 session；
+        程序化 setValue（AI 回填 / 历史恢复 / 清空）被 _SpinAdapter._programmatic
+        与 self._updating 双重抑制，永不升级为用户确认。0 尺寸/0 重量仍表示未设置。
+        """
+        if self._updating:
+            return
+        self._user_edited_bare_fields.add(key)
+        self.session.confirm_value(key, value if value > 0 else None)
+        if key in ("length_cm", "width_cm", "height_cm"):
+            if hasattr(self, "lbl_bare_dim_source"):
+                self.lbl_bare_dim_source.setText("\u7528\u6237\u786e\u8ba4")
+        elif key == "weight_g":
+            if hasattr(self, "lbl_bare_weight_source"):
+                self.lbl_bare_weight_source.setText("\u7528\u6237\u786e\u8ba4")
+
+    def _sync_user_edited_bare_fields(self) -> None:
+        """AI 点击前的最终落盘：把用户编辑过的裸字段当前控件值同步进 session。
+
+        用户在输入框内键入后立即点击 AI（焦点仍在输入框、从未失焦）时，
+        控件值已由 keyboardTracking 实时更新；这里以控件当前值为准再确认一次，
+        覆盖中间值竞态，保证 700g 一定进入 AI 请求。0 仍归一为未设置。
+        """
+        for key, widget in (
+            ("length_cm", self.bare_length),
+            ("width_cm", self.bare_width),
+            ("height_cm", self.bare_height),
+            ("weight_g", self.bare_weight),
+        ):
+            if key not in self._user_edited_bare_fields:
+                continue
+            value = widget.value()
+            self.session.confirm_value(key, value if value > 0 else None)
+
+    def _ai_request_confirmed_facts(self) -> dict[str, dict[str, Any]]:
+        """AI 请求前的权威事实快照：识图与重估共用的唯一入口。
+
+        语义（权威事实层）：用户 confirmed > 页面明确事实 > AI 估算 > 未知。
+        先落盘用户正在编辑的裸字段，再返回完整 confirmed_facts 集合；
+        raw AI 永不修改，程序化回填永不升级。
+        """
+        self._sync_user_edited_bare_fields()
+        return self._confirmed_facts()
 
     def _accept_numeric_field(self, key: str, widget: Any) -> None:
         if self._updating:
@@ -1088,6 +1231,15 @@ class CalculationPage(QWidget):
     def _apply_observation(self, observation: AIObservation) -> None:
         previous_updating = self._updating
         self._updating = True
+        # 统一数据优先级规则 B：页面裸品字段必须显示 authoritative 结果
+        # （raw observation + 页面事实 + 用户确认事实）。即使调用方传入的是
+        # raw AI observation，也在此防御性合并当前已确认事实，杜绝 UI 被
+        # AI 原值回填覆盖（用户 700g 永远优先于 AI raw 600g）。
+        confirmed = self.session.confirmed_facts()
+        if confirmed:
+            display = AIObservation.from_dict(observation.to_dict())
+            apply_confirmed_facts(display, confirmed)
+            observation = display
         if "product_name" not in self.session.user_overrides:
             has_product_fact = bool(
                 observation.product_name
@@ -1187,10 +1339,14 @@ class CalculationPage(QWidget):
         if not image_items:
             QMessageBox.information(self, "没有图片", "请先导入至少一张图片。")
             return
+        # 权威事实快照：用户编辑字段在 valueChanged 瞬间已进 session，此处再按
+        # 控件当前值落盘一次，不依赖 clearFocus/editingFinished；
+        # _force_sync_confirmed_facts 仅作互补安全网。
+        self._force_sync_confirmed_facts()
         self._diagnostic_operation = self.context.diagnostic_logger.begin_operation("ai-recognition")
         images = [self.context.diagnostic_logger.image_metadata(item["path"]) for item in image_items]
         self._diagnostic_operation.event("image_attached", images=images)
-        confirmed_facts = self._confirmed_facts()
+        confirmed_facts = self._ai_request_confirmed_facts()
         self._diagnostic_operation.event("user_confirmed_facts", confirmed_facts=confirmed_facts)
         self._diagnostic_operation.event("ai_request_started")
         self._show_recognition_dialog()
@@ -1258,7 +1414,11 @@ class CalculationPage(QWidget):
         observation: AIObservation,
         external_proposal: PackagingProposal | None,
     ) -> dict[str, Any]:
-        """第一次完整视觉识图成功后捕获 AI 初始快照；无法可靠获得的字段不写、不猜。"""
+        """第一次完整视觉识图成功后捕获 AI 初始快照；无法可靠获得的字段不写、不猜。
+
+        ``observation`` 必须是真正的原始 AI observation（raw_observation），
+        不允许携带用户确认事实；用户确认事实单独记录在 ``confirmed_facts``。
+        """
         adopted = self._adopted_packaging()
         metadata_proposal = adopted or external_proposal
         provider = None
@@ -1269,6 +1429,7 @@ class CalculationPage(QWidget):
                 provider = getattr(profile, "provider", None)
         except Exception:
             provider = None
+        confirmed_facts = self._confirmed_facts()
         return {
             "provider": str(provider).strip() or None,
             "model": observation.model or None,
@@ -1276,6 +1437,7 @@ class CalculationPage(QWidget):
             "engine_version": metadata_proposal.engine_version if metadata_proposal else "vision-runtime-v1",
             "calibration_version": metadata_proposal.calibration_version if metadata_proposal else "",
             "observation": observation.to_dict(),
+            "confirmed_facts": confirmed_facts,
             "external_ai_packaging_proposal": external_proposal.to_dict() if external_proposal else None,
             "adopted_packaging": adopted.to_dict() if adopted else None,
         }
@@ -1289,39 +1451,58 @@ class CalculationPage(QWidget):
         if self.initial_ai_snapshot is None:
             self.initial_ai_snapshot = self._capture_initial_ai_snapshot(observation, external_proposal)
 
-    @Slot(object, object)
-    def _recognition_completed(self, observation: AIObservation, external_proposal: PackagingProposal | None) -> None:
+    @Slot(object)
+    def _recognition_completed(self, outcome: Any) -> None:
+        """一次完整识图结果：raw AI 冻结 + 本地仲裁 + 页面采用。
+
+        ``outcome`` 是 RecognitionOutcome 契约：
+        - raw_observation / raw_ai_proposal：纯外部 AI，永久冻结（左卡 / ai_initial）；
+        - arbitration_observation：应用 confirmed_facts 后的副本（展示用）；
+        - adopted_proposal：本地仲裁后的最终采用（右卡 / 物流唯一输入）。
+        """
+        raw_observation = outcome.raw_observation
+        raw_proposal = outcome.raw_ai_proposal
+        adopted = outcome.adopted_proposal
+        arbitration_observation = outcome.arbitration_observation
         is_first_visual_result = self.initial_ai_snapshot is None
-        conflicts = self.session.protect_confirmed_values(observation)
-        self.session.ai_raw_response = observation.raw_payload
-        self.session.ai_raw_observation = dict(observation.raw_payload.get("observation") or {})
-        self.session.normalized_observation = observation
-        self.session.money_candidates = list(observation.raw_payload.get("money_candidates") or [])
-        if is_first_visual_result:
-            self.session.ai_packaging_proposal = external_proposal
-        self.session.observation = observation
+        conflicts = outcome.arbitration_trace.get("conflicts") or {}
+        # raw 原值永久保留，不被用户事实覆盖
+        self.session.ai_raw_response = raw_observation.raw_payload
+        self.session.ai_raw_observation = dict(raw_observation.raw_payload.get("observation") or {})
+        self.session.normalized_observation = raw_observation
+        # 页面展示用仲裁副本（已应用用户确认事实），与 raw 历史分离；
+        # 再次应用当前 session 已确认事实，保证展示与用户输入一致（raw 不受影响）。
+        self.session.observation = arbitration_observation
+        self.session.protect_confirmed_values(arbitration_observation)
         self.observation = self.session.observation
-        runtime_proposal = external_proposal or RecognitionService.proposal_from_shipment({})
+        self.session.money_candidates = list(raw_observation.raw_payload.get("money_candidates") or [])
+        if is_first_visual_result:
+            # ai_packaging_proposal 必须存真正的 AI 原始提案，不得存 arbitrated 结果
+            self.session.ai_packaging_proposal = raw_proposal
+        runtime_proposal = adopted or RecognitionService.proposal_from_shipment({})
         if is_first_visual_result:
             self._adopt_packaging(runtime_proposal)
         if conflicts:
             self._adopted_packaging().review_reasons.append("user confirmed facts conflict with image evidence")
-        self._apply_observation(observation)
-        self._refresh_display_summaries(observation, self._adopted_packaging())
-        self.apply_proposal(self._adopted_packaging())
+        self._apply_observation(arbitration_observation)
+        self._refresh_display_summaries(arbitration_observation, self._adopted_packaging())
+        self.apply_proposal(self._adopted_packaging(), raw_proposal=raw_proposal)
         if is_first_visual_result:
-            self._maybe_capture_initial_ai_snapshot(observation, external_proposal)
+            # 快照使用真正的 AI 原始提案与原始 observation
+            self._maybe_capture_initial_ai_snapshot(raw_observation, raw_proposal)
             self._ai_baseline = {
                 "summary": self._current_summary(),
                 "product_summary": self.product_summary.text(),
                 "packaging_summary": self.structure_summary.text(),
                 "bare_spec": {
-                    "length_cm": observation.length_cm, "width_cm": observation.width_cm,
-                    "height_cm": observation.height_cm, "weight_g": observation.weight_g,
+                    "length_cm": arbitration_observation.length_cm, "width_cm": arbitration_observation.width_cm,
+                    "height_cm": arbitration_observation.height_cm, "weight_g": arbitration_observation.weight_g,
                 },
                 "normal_packaging": self._scenario_data(self.normal_fields),
             }
             self._accepted_bare_fields.clear()
+            self._user_edited_bare_fields.clear()
+            self._user_manual_package_fields.clear()
             self._pending_confirmed_normal = {}
         self._recognized_image_fingerprint = self._image_fingerprint()
         self.ai_button.setText("AI识图")
@@ -1329,25 +1510,28 @@ class CalculationPage(QWidget):
         if is_first_visual_result:
             self.packaging_stale = False
             self.manual_scenarios.clear()
+            self._reestimate_adopted = False
         self._mark_dirty()
         self.recalculate()
-        payload = observation.to_dict()
+        payload = raw_observation.to_dict()
         missing = [key for key in ("product_cost_rmb", "domestic_shipping_rmb", "length_cm", "width_cm", "height_cm", "weight_g") if payload.get(key) in (None, "", "unknown")]
         op = self._diagnostic_operation
         adopted = self._adopted_packaging()
-        if observation.raw_payload.get("vision_packaging_completion"):
-            op.event("vision_packaging_estimate_missing", completion=observation.raw_payload["vision_packaging_completion"])
+        if raw_observation.raw_payload.get("vision_packaging_completion"):
+            op.event("vision_packaging_estimate_missing", completion=raw_observation.raw_payload["vision_packaging_completion"])
         salvage = adopted.candidate_records.get("candidate_field_salvage", {})
         if salvage:
             op.event("candidate_field_salvage", **dict(salvage.get("diagnostic") or {}),
                      final_source=adopted.proposal_source, adjustments=salvage.get("adjustments", []))
+        op.event("arbitration", raw_ai=raw_proposal.to_dict() if raw_proposal else None,
+                 adopted=adopted.to_dict(), trace=outcome.arbitration_trace)
         op.event("ai_request_completed"); op.event("ai_response_parsed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing); op.event("calibration_bypassed", reason="CAL77 runtime shipment arbitration disabled")
         generated=adopted.normal.is_complete() and adopted.conservative.is_complete()
         op.event("packaging_generated" if generated else "packaging_skipped", skip_reason=None if generated else "AI未返回完整发货尺寸/重量，等待人工填写")
         op.event("logistics_calculated" if self.current_quote else "logistics_skipped", reason=None if self.current_quote else "无可用包装尺寸和重量")
         op.event("page_updated", filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)])
         op.event("operation_completed")
-        op.summary(status="completed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing, field_evidence=observation.raw_payload.get("field_evidence",{}), raw_observation=observation.raw_payload.get("observation", {}), normalized_codes={"product_type_code": observation.product_type_code, "product_family_code": observation.product_family_code, "material_family_code": observation.material_family_code}, value_types={"product_cost": observation.product_cost_value_type, "domestic_shipping": observation.domestic_shipping_value_type}, value_sources={"dimensions": observation.dimension_value_source, "weight": observation.weight_value_source}, ai_packaging_proposal=external_proposal.to_dict() if external_proposal else None, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], generic_fallback=False, packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["AI未返回完整发货尺寸/重量，等待人工填写"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "无可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)], page_empty_fields=missing, warnings=adopted.review_reasons)
+        op.summary(status="completed", returned_fields=[key for key,value in payload.items() if value not in (None,"","unknown")], missing_fields=missing, field_evidence=raw_observation.raw_payload.get("field_evidence",{}), raw_observation=raw_observation.raw_payload.get("observation", {}), normalized_codes={"product_type_code": raw_observation.product_type_code, "product_family_code": raw_observation.product_family_code, "material_family_code": raw_observation.material_family_code}, value_types={"product_cost": raw_observation.product_cost_value_type, "domestic_shipping": raw_observation.domestic_shipping_value_type}, value_sources={"dimensions": raw_observation.dimension_value_source, "weight": raw_observation.weight_value_source}, ai_packaging_proposal=raw_proposal.to_dict() if raw_proposal else None, adopted_packaging=adopted.to_dict(), parse_error=None, matched_cal=[], cal_rejected_rules=[], cal_rejection_reasons=[], generic_fallback=False, packaging_generated=generated, normal_packaging=adopted.normal.to_dict() if generated else None, conservative_packaging=adopted.conservative.to_dict() if generated else None, not_generated_reason=[] if generated else ["AI未返回完整发货尺寸/重量，等待人工填写"], entered_logistics=self.current_quote is not None, logistics_skip_reason=None if self.current_quote else "无可用包装尺寸和重量", logistics_inputs=None, logistics_outputs=asdict(self.current_quote) if self.current_quote else None, page_filled_fields=[key for key,value in {"product_summary":self.product_summary.text(),"structure_summary":self.structure_summary.text(),"bare_length":self.bare_length.value(),"bare_width":self.bare_width.value(),"bare_height":self.bare_height.value(),"bare_weight":self.bare_weight.value()}.items() if value not in (None,"",0)], page_empty_fields=missing, warnings=adopted.review_reasons)
 
     @Slot(str, str)
     def _recognition_failed(self, category: str, message: str) -> None:
@@ -1377,8 +1561,12 @@ class CalculationPage(QWidget):
 
     def collect_observation(self) -> AIObservation:
         observation = AIObservation.from_dict(self.observation.to_dict())
-        observation.product_name = self.product_summary.text().strip()
-        observation.display_product_summary = self.product_summary.text().strip()
+        # v2.2 数据洁净：product_name 必须与“｜数量 2双”等显示后缀彻底分离。
+        # 优先使用当前展示/已确认 observation 的真实商品名，绝不把 UI 摘要当商品名称；
+        # display_product_summary 才是 UI 显示字符串（可含数量/单位）。
+        display_text = self.product_summary.text().strip()
+        observation.product_name = self._current_real_product_name()
+        observation.display_product_summary = display_text
         observation.display_packaging_summary = self.structure_summary.text().strip()
         # Product name is display text; keep the AI-normalized product_type for CAL routing.
         observation.material = self.material_summary.text().strip()
@@ -1413,6 +1601,14 @@ class CalculationPage(QWidget):
         observation.domestic_shipping_rmb = self.domestic_shipping.value()
         return observation
 
+    def _current_real_product_name(self) -> str:
+        """真实商品名（不含“｜数量 2双”等显示后缀）：当前已确认/展示名优先，
+        否则取 UI 摘要第一个分隔段，绝不把数量/单位当商品名称一部分。"""
+        real = str(getattr(self.observation, "product_name", "") or "").strip()
+        if real:
+            return real
+        return self.product_summary.text().strip().split("｜", maxsplit=1)[0].strip()
+
     # ------------------------------------------------------------------
     # 按修正重估
     # ------------------------------------------------------------------
@@ -1428,16 +1624,34 @@ class CalculationPage(QWidget):
             QMessageBox.information(self, "需要用户修正", "请先填写修正原因，再点击“按修正重估”。")
             return
         current = self.collect_observation()
-        session_facts = self.session.confirmed_facts()
+        session_facts = self._ai_request_confirmed_facts()
         confirmed_facts: dict[str, Any] = {}
         for field in ("length_cm", "width_cm", "height_cm", "weight_g"):
             if field in session_facts:
                 confirmed_facts[field] = session_facts[field]["value"]
+        # Full initial AI context for reestimate (not just current_shipment + correction)
+        initial_ai = self.initial_ai_snapshot or {}
+        initial_obs = initial_ai.get("observation", {}) if isinstance(initial_ai, dict) else {}
+        # product_name 必须使用后台真实 observation.product_name，不是 UI 显示摘要
+        real_product_name = ""
+        if isinstance(initial_obs, dict):
+            real_product_name = str(initial_obs.get("product_name") or "").strip()
+        if not real_product_name:
+            real_product_name = self._current_real_product_name()
         context = {
-            "product_name": self.product_summary.text().strip(),
+            "product_name": real_product_name,
             "confirmed_facts": confirmed_facts,
             "current_shipment": self._scenario_data(self.conservative_fields),
             "user_correction": user_correction,
+            "initial_ai_observation": initial_obs,
+            "initial_ai_raw_payload": initial_obs.get("raw_payload", {}) if isinstance(initial_obs, dict) else {},
+        }
+        # 记录本次重估的请求期快照（用户修正 / 硬事实 / 输入当前采用），
+        # 供完成时写入 reestimate_history（接受与拒绝都留档，后台校准证据）。
+        self._pending_reestimate_meta = {
+            "user_correction": user_correction,
+            "confirmed_facts": dict(confirmed_facts),
+            "input_current_adopted": dict(self._scenario_data(self.conservative_fields)),
         }
         self._local_diagnostic_operation = self.context.diagnostic_logger.begin_operation("local-reestimate")
         self._local_diagnostic_operation.event("corrected_reestimate_requested")
@@ -1499,6 +1713,42 @@ class CalculationPage(QWidget):
         self._local_dialog = dialog
         dialog.show()
 
+    def _record_reestimate_attempt(self, result: Any, *, accepted: bool) -> None:
+        """把一次局部重估完整写入 session.reestimate_history（后台校准证据）。
+
+        保留：用户修正 / 确认事实快照 / 输入当前采用 / 文字 AI 原始提案 /
+        仲裁后采用提案 / 仲裁轨迹 / model / provider / prompt_version /
+        timestamp / accepted。重复 append 由 reestimate_id 去重。
+        """
+        meta = self._pending_reestimate_meta if isinstance(self._pending_reestimate_meta, dict) else {}
+        try:
+            prompt_version = str(self.context.local_reestimate_service.PROMPT_VERSION or "")
+        except Exception:
+            prompt_version = ""
+        entry: dict[str, Any] = {
+            "reestimate_id": uuid4().hex,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "user_correction": str(meta.get("user_correction") or ""),
+            "confirmed_facts": dict(meta.get("confirmed_facts") or {}),
+            "input_current_adopted": dict(meta.get("input_current_adopted") or {}),
+            "raw_reestimate_proposal": (
+                result.reestimate_raw_proposal.to_dict()
+                if getattr(result, "reestimate_raw_proposal", None) is not None
+                else None
+            ),
+            "adopted_reestimate_proposal": (
+                result.packaging_proposal.to_dict()
+                if getattr(result, "packaging_proposal", None) is not None
+                else None
+            ),
+            "arbitration_trace": dict(getattr(result, "arbitration_trace", None) or {}),
+            "model": str(getattr(result, "model", "") or ""),
+            "provider": str(getattr(result, "provider", "") or ""),
+            "prompt_version": prompt_version,
+            "accepted": bool(accepted),
+        }
+        self.session.append_reestimate(entry)
+
     @Slot(object)
     def _local_reestimate_completed(self, result: Any) -> None:
         if self._local_dialog is not None:
@@ -1520,6 +1770,9 @@ class CalculationPage(QWidget):
             message,
             confirm_text="采用此结果",
         )
+        # 每次局部重估都留档（接受与拒绝），供 Calibration Agent 读取完整纠偏过程；
+        # 重复 append 由 reestimate_id 去重拦截。
+        self._record_reestimate_attempt(result, accepted=bool(accepted))
         op = getattr(self, "_local_diagnostic_operation", None)
         provider_meta = {"provider": result.provider, "model": result.model, "provider_host": result.provider_host}
         if not accepted:
@@ -1546,16 +1799,19 @@ class CalculationPage(QWidget):
         finally:
             self._updating = previous_updating
         self.manual_scenarios.add("当前采用")
-        self.user_calibration_dirty = True
+        # 接受 AI 重估 ≠ 用户亲手修改：不置 manual dirty；右卡被本次 AI 结果
+        # 整体重写，先前的手动字段标记一并清除，AI 值绝不冒充 user_suggested。
+        self._user_manual_package_fields.clear()
         self.packaging_stale = False
-        self.review_badge.setText("已采用修正重估 · 需要复核")
-        self.review_badge.setProperty("warning", True)
-        self.review_badge.setProperty("success", False)
-        self._refresh_badge_style()
+        self._reestimate_adopted = True
+        self._update_review_badge()
         self._mark_dirty()
         self.recalculate()
         if op:
             op.event("corrected_reestimate_adopted", elapsed_ms=result.elapsed_ms)
+            op.event("arbitration", reestimate_raw=(
+                result.reestimate_raw_proposal.to_dict() if getattr(result, "reestimate_raw_proposal", None) else None
+            ), adopted=scenario.to_dict(), trace=getattr(result, "arbitration_trace", None))
             op.event("calibration_bypassed", reason="CAL77 runtime shipment arbitration disabled")
             op.event("operation_completed")
             op.response(provider_raw_response=None, normalized_result={"shipment": scenario.to_dict()}, parse_error=None, elapsed_ms=result.elapsed_ms, **provider_meta)
@@ -1586,31 +1842,26 @@ class CalculationPage(QWidget):
     # 包装应用与选择
     # ------------------------------------------------------------------
 
-    def apply_proposal(self, proposal: PackagingProposal) -> None:
+    def apply_proposal(self, proposal: PackagingProposal, *, raw_proposal: PackagingProposal | None = None) -> None:
         previous_updating = self._updating
         self._updating = True
-        # 只在第一次 AI（initial_ai_snapshot 尚未捕获）时写入两框：
-        # AI估算与当前采用复制完全相同的首次 AI 数据；
-        # 同会话再次 AI / 按修正重估不得静默覆盖已冻结的首次结果或用户已编辑的当前采用；
-        # 历史编辑模式下（含无 ai_initial 的旧记录）同样不得覆盖已恢复的两卡。
+        # 第一次 AI 识图时：左卡写入 raw AI 原始结果，右卡写入 arbitrated 结果。
+        # 左卡 = external_ai_packaging_proposal（只读、永不覆盖）
+        # 右卡 = 当前采用（用户可修改、物流利润唯一输入）
         if self.initial_ai_snapshot is None and self.editing_record_id is None:
-            for fields in (self.normal_fields, self.conservative_fields):
-                method_text = proposal.normal.packaging_method
-                fields["method"].setText(method_text)
-                fields["length"].setValue(proposal.normal.length_cm or 0)
-                fields["width"].setValue(proposal.normal.width_cm or 0)
-                fields["height"].setValue(proposal.normal.height_cm or 0)
-                fields["weight"].setValue(proposal.normal.weight_g or 0)
+            left_source = (raw_proposal or proposal).normal
+            right_source = proposal.normal
+            for fields, source in (
+                (self.normal_fields, left_source),
+                (self.conservative_fields, right_source),
+            ):
+                fields["method"].setText(source.packaging_method)
+                fields["length"].setValue(source.length_cm or 0)
+                fields["width"].setValue(source.width_cm or 0)
+                fields["height"].setValue(source.height_cm or 0)
+                fields["weight"].setValue(source.weight_g or 0)
         self._updating = previous_updating
-        if proposal.needs_review:
-            self.review_badge.setText("需要复核")
-            self.review_badge.setProperty("warning", True)
-            self.review_badge.setProperty("success", False)
-        else:
-            self.review_badge.setText("已识别")
-            self.review_badge.setProperty("success", True)
-            self.review_badge.setProperty("warning", False)
-        self._refresh_badge_style()
+        self._update_review_badge()
 
     def _refresh_badge_style(self) -> None:
         self.review_badge.style().unpolish(self.review_badge)
@@ -1631,22 +1882,33 @@ class CalculationPage(QWidget):
         self.recalculate()
 
     def _user_calibration_changed(self) -> None:
-        """当前采用尺寸/重量或用户修正被用户手动修改 → 用户校准 dirty。"""
+        """用户修正文字被用户手动输入 → 用户校准 dirty（来源 A：user_note）。
+
+        当前采用尺寸/重量的人工修改走 _scenario_manually_changed（来源 B），
+        两者都置 dirty，但 suggested_package 只由 _user_manual_package_fields 决定。
+        """
         self.user_calibration_dirty = True
         self._mark_dirty()
 
-    def _scenario_manually_changed(self, name: str) -> None:
+    # 包装卡控件字段 key → session/反馈字段名
+    _SCENARIO_KEY_TO_FACT = {
+        "length": "length_cm", "width": "width_cm", "height": "height_cm", "weight": "weight_g",
+    }
+
+    def _scenario_manually_changed(self, name: str, field_key: str | None = None) -> None:
         if self._updating:
             return
         self.manual_scenarios.add(name)
-        # 当前采用是用户校准入口 A：手动修改计入用户校准 dirty；
-        # AI 首次自动复制走程序化 setValue，不会进入这里。
         if name == "当前采用":
+            # 用户亲手修改当前采用的字段才进入 user_manual_package_fields；
+            # 程序化 setValue（AI 首次复制 / 识图回填 / 重估采用 / 历史恢复）
+            # 被 self._updating 抑制，永不进入，也绝不升级为 user_suggested。
+            fact_key = self._SCENARIO_KEY_TO_FACT.get(field_key or "")
+            if fact_key:
+                self._user_manual_package_fields.add(fact_key)
             self.user_calibration_dirty = True
-        self.review_badge.setText("人工修改 · 需要复核")
-        self.review_badge.setProperty("warning", True)
-        self.review_badge.setProperty("success", False)
-        self._refresh_badge_style()
+        # 用户手改 ≠ 机械“需要复核”：无真实冲突时显示中性“用户已修改”。
+        self._update_review_badge()
         self._mark_dirty()
         self.recalculate()
 
@@ -1685,7 +1947,8 @@ class CalculationPage(QWidget):
             weight_g=fields["weight"].value() or None,
             reasoning_summary=method_text or (source.reasoning_summary if source else ""),
             confidence="low" if manual else (source.confidence if source else "low"),
-            needs_review=True if manual else (source.needs_review if source else True),
+            # v2.2：用户手改 ≠ 需要复核；needs_review 只反映真实风险（与 proposal 一致）
+            needs_review=False if manual else (source.needs_review if source else False),
             default_fields_used=list(source.default_fields_used) if source else [],
         )
 
@@ -1874,10 +2137,12 @@ class CalculationPage(QWidget):
             height_cm=self.conservative_fields["height"].value() or None,
             weight_g=self.conservative_fields["weight"].value() or None,
             reasoning_summary=self._adopted_packaging().conservative.reasoning_summary if self._adopted_packaging() else "",
-            # 当前采用（右卡）是唯一正式输入；用户修改即需要复核
+            # 当前采用（右卡）是唯一正式输入；needs_review 只反映真实风险
+            # （v2.2：用户手改 ≠ 需要复核，用户修改标记单独存 user_modified）。
             confidence="low" if ("当前采用" in self.manual_scenarios or "保守档" in self.manual_scenarios) else "medium",
-            needs_review="当前采用" in self.manual_scenarios or "保守档" in self.manual_scenarios,
+            needs_review=bool(self._real_review_reasons()),
         )
+        _review_reasons = self._real_review_reasons()
         profit_scenarios = self.profit_binder.export_profit_scenarios()
         no_activity = profit_scenarios.get("no_activity", {})
         activity = profit_scenarios.get("activity", {})
@@ -1894,39 +2159,21 @@ class CalculationPage(QWidget):
             exchange_rate = float(self.settings.get("exchange_rate_usd_to_rmb", 7.2))
             system_cost_for_record = self.current_system_cost
             adopted_cost = self.profit_binder._calculation_total_cost_rmb
-        # ai_raw.observation 必须保存真正的 AI observation，不能被 bare_estimate 回填或用户修改污染。
-        # 使用 session.normalized_observation（AI 标准化结果）作为基础，
-        # 但裸品字段（length/width/height/weight）必须从 normalized_observation 读取，
-        # 而不是从页面控件读取（collect_observation 会从页面读取，可能已被污染）。
+        # ai_raw.observation 必须保存真正的 AI observation，不能被 bare_estimate 回填
+        # 或用户修改污染（v2.2）：只来源于 session.normalized_observation（真正 raw AI）。
+        # 用户/当前采用修改（材质、结构、摘要、包装说明、成本、运费）进入
+        # adopted / current_estimate / user_feedback 对应层，绝不反写 raw。
         ai_observation = self.session.normalized_observation
         if ai_observation is None or not any(
             getattr(ai_observation, f) is not None
             for f in ("length_cm", "width_cm", "height_cm", "weight_g", "product_name")
         ):
-            # 兼容：没有 normalized_observation 时回退到 collect_observation
+            # 兼容：没有 normalized_observation（未识图的纯手工录入）时回退到页面收集
             ai_observation = self.collect_observation()
         else:
-            # 使用 normalized_observation 的完整副本，但补充页面收集的非裸品字段
             ai_observation = AIObservation.from_dict(ai_observation.to_dict())
-            collected = self.collect_observation()
-            # 非裸品字段从页面收集（这些不会被 bare_estimate 污染）
-            ai_observation.product_name = collected.product_name
-            ai_observation.display_product_summary = collected.display_product_summary
-            ai_observation.display_packaging_summary = collected.display_packaging_summary
-            ai_observation.material = collected.material
-            ai_observation.rigidity = collected.rigidity
-            ai_observation.foldability = collected.foldability
-            ai_observation.compressibility = collected.compressibility
-            for key in (
-                "has_hard_bottom", "has_hard_backboard", "has_frame",
-                "has_rigid_insert", "has_rigid_parts",
-                "requires_shape_retention", "retail_box_visible", "hard_card_visible",
-            ):
-                setattr(ai_observation, key, getattr(collected, key))
-            ai_observation.product_cost_rmb = collected.product_cost_rmb
-            ai_observation.domestic_shipping_rmb = collected.domestic_shipping_rmb
         return {
-            "product_name": self.product_summary.text().strip(),
+            "product_name": self._current_real_product_name(),
             "product_link": self.product_link.text().strip() if self.product_link else "",
             "status": "active",
             "layers": {
@@ -1954,6 +2201,9 @@ class CalculationPage(QWidget):
                     "selected_forwarder_id": self.selected_forwarder_id,
                     "calculation_cost_rmb": adopted_cost,
                     "packaging_estimate_stale": self.packaging_stale,
+                    # v2.2：用户手改状态与真实复核原因分开存储，全链一致。
+                    "user_modified": bool(self.manual_scenarios or self._user_manual_package_fields),
+                    "review_reasons": _review_reasons,
                 },
                 "calculated": {
                     "system_cost_rmb": system_cost_for_record,
@@ -1984,6 +2234,11 @@ class CalculationPage(QWidget):
             "domestic_shipping_rmb": self.domestic_shipping.value(),
             "shein_quote_usd": profit_scenarios.get("shein_quote_usd", 0.0),
             "profit_scenarios": profit_scenarios,
+            # 局部重估完整轨迹走 _v2 附加块（attach_v2_block 会与 ai_initial /
+            # current_estimate 合并；create 与 update 都不丢、不重复）。
+            "_v2": {
+                "reestimate_history": [dict(entry) for entry in self.session.reestimate_history],
+            },
         }
 
     def save_record(self) -> None:
@@ -2014,6 +2269,13 @@ class CalculationPage(QWidget):
             self.context.diagnostic_logger.event("user_feedback_save_failed", record_id=self.record_id, error=str(exc))
             QMessageBox.warning(self, "用户修正未保存", f"记录已保存，但用户修正保存失败：{exc}")
         self.mark_saved()
+        # 明确保存成功后：把活动预留/标价利率/活动后利润率这三项当时的
+        # 值记为以后默认值（仅编辑不保存不改变默认值；本轮唯一主软件业务改动）。
+        capture_profit_defaults(self.settings, self.profit_binder)
+        # 保存成功后记住本次实际采用的货代，作为下次新建的默认货代
+        # （语义："上一次成功保存记录时实际使用的货代" = 下一次新建默认）。
+        self.settings["selected_forwarder_id"] = self.selected_forwarder_id
+        self.context.settings_service.save(self.settings)
         self.context.diagnostic_logger.event("record_saved", record_id=self.record_id)
         # The local reestimate baseline belongs to one unsaved measurement
         # session only.  Saving ends that session; the record itself keeps its
@@ -2029,25 +2291,37 @@ class CalculationPage(QWidget):
             QMessageBox.information(self, "保存成功", f"记录已保存：{self.record_id}")
 
     def _save_user_feedback(self) -> None:
-        """把用户校准（当前采用 + 用户修正）保存为 CalibrationFeedback（source=user）。
+        """把用户校准保存为 CalibrationFeedback（source=user）。
+
+        来源语义拆分（不再用单个 user_calibration_dirty 代表所有事情）：
+          A user_note：用户在“用于重估的修正”文本框亲手输入的文字，
+            独立保存，可进 Excel 用户校准内容；
+          B user_manual_package_fields：只有用户亲手编辑过的“当前采用”字段
+            才进入 suggested_package（user_suggested），
+            程序化 setValue / AI 识图回填 / AI 重估采用 / 历史恢复永不进入；
+          C AI 重估采用：只更新当前采用 / current_estimate / reestimate_history /
+            物流计算，绝不自动变成 user_suggested。
 
         主界面的当前采用属于用户校准入口 A，不是实际发货实测：
         suggested_package 恒为 user_suggested，绝不写 actual_logistics，
-        也绝不标记 actual_measured。
-        仅当用户校准 dirty（手动改当前采用或填写用户修正）时才写建议值；
-        AI 首次自动复制不产生校准反馈。
+        也绝不标记 actual_measured。AI 首次自动复制不产生校准反馈。
         已有 feedback 时更新同一个 feedback_id，并保留其中已录入的
         建议值、实测数据与结构反馈，不重复创建。
+        current_estimate 由 record_service.save 从 layers.adopted 派生
+        （接受 AI 重估 / 用户手动修改都会反映在右卡），此处不再重复写入。
         """
         if not self.record_id:
             return
         note = self.user_correction.text().strip() or None
         adopted = self._card_package_dict(self.conservative_fields)
-        keys = ("packaging_method", "length_cm", "width_cm", "height_cm", "weight_g")
-        adopted_filled = any(adopted[key] is not None for key in keys)
         suggested = None
-        if self.user_calibration_dirty and adopted_filled:
-            suggested = dict(adopted)
+        manual_fields = {
+            field: adopted[field]
+            for field in ("length_cm", "width_cm", "height_cm", "weight_g")
+            if field in self._user_manual_package_fields and adopted[field] is not None
+        }
+        if manual_fields:
+            suggested = dict(manual_fields)
             suggested["evidence_level"] = "user_suggested"
         actual = self._actual_first_mile_dict()
         if note is None and suggested is None and not actual:
@@ -2082,9 +2356,6 @@ class CalculationPage(QWidget):
         if feedback_id != self.current_feedback_id:
             self.current_feedback_id = feedback_id
             self.context.history_record_v2_service.link_feedback(self.record_id, feedback_id)
-        # 用户校准入口 A 同步 current_estimate：与历史页“编辑校准”入口 B 更新同一条
-        if suggested is not None:
-            self.context.history_record_v2_service.update_current_estimate(self.record_id, dict(suggested))
 
     @staticmethod
     def _card_package_dict(fields: dict[str, Any]) -> dict[str, Any]:
@@ -2207,15 +2478,19 @@ class CalculationPage(QWidget):
         self._ai_baseline = None
         self.initial_ai_snapshot = None
         self.current_feedback_id = None
+        self._pending_reestimate_meta = None
         self.user_correction.clear()
         if hasattr(self, "actual_first_mile_fee_edit"):
             self.actual_first_mile_fee_edit.clear()
             self._reload_actual_forwarder_combo()
         self._recognized_image_fingerprint = ()
         self._accepted_bare_fields.clear()
+        self._user_edited_bare_fields.clear()
+        self._user_manual_package_fields.clear()
         self._pending_confirmed_normal = {}
         self.packaging_stale = False
         self.manual_scenarios.clear()
+        self._reestimate_adopted = False
         self.product_summary.clear()
         self.material_summary.clear()
         self.structure_summary.clear()
@@ -2245,12 +2520,63 @@ class CalculationPage(QWidget):
         self.forwarder_selection_changed = False
         self._select_package("正常档", user=False)
         self.profit_binder.reset()
-        self.review_badge.setText("待识别")
-        self.review_badge.setProperty("warning", True)
-        self._refresh_badge_style()
+        # 清空/新建后恢复用户上一次明确保存的三项利润默认值；
+        # 从未保存过则沿用现有初始默认（15% / 25%）。
+        apply_profit_defaults(self.settings, self.profit_binder)
+        self._update_review_badge()
         self._refresh_edit_mode_ui()
         self.mark_saved()
         self.recalculate()
+
+    def _rebuild_session_facts_from_record(
+        self,
+        *,
+        ai_initial: dict[str, Any],
+        observation_raw: dict[str, Any],
+        bare: dict[str, Any],
+    ) -> None:
+        """从已保存记录重建 session 用户确认事实（统一数据优先级规则）。
+
+        每个裸品字段（长/宽/高/重）按以下优先级恢复确认事实：
+          1. ai_initial.confirmed_facts（用户首次识图前确认的硬事实）
+          2. adopted.bare 与 raw AI / bare_estimate 均不一致的值（识图后用户修正）
+        AI 程序化填入的值（与 raw 或 bare_estimate 一致）只显示、不升级为
+        "用户确认事实"；裸品 0 值仍代表未设置。
+        """
+        confirmed = ai_initial.get("confirmed_facts") if isinstance(ai_initial, dict) else {}
+        confirmed = confirmed if isinstance(confirmed, dict) else {}
+        raw_payload = observation_raw.get("raw_payload") if isinstance(observation_raw, dict) else {}
+        raw_payload = raw_payload if isinstance(raw_payload, dict) else {}
+        bare_estimate = raw_payload.get("bare_estimate") if isinstance(raw_payload.get("bare_estimate"), dict) else {}
+        bare_estimate = bare_estimate if isinstance(bare_estimate, dict) else {}
+
+        def _entry_value(entry: Any) -> Any:
+            if isinstance(entry, dict):
+                return entry.get("value")
+            return entry
+
+        for field in ("length_cm", "width_cm", "height_cm", "weight_g"):
+            confirmed_value = _entry_value(confirmed.get(field))
+            if confirmed_value not in (None, ""):
+                self.session.confirm_value(field, confirmed_value)
+                continue
+            adopted_value = bare.get(field)
+            if adopted_value in (None, 0):
+                continue
+            raw_value = observation_raw.get(field) if isinstance(observation_raw, dict) else None
+            estimate_value = bare_estimate.get(field)
+            # 与 raw AI 一致 → 图片识别值，不升级为用户确认
+            if raw_value not in (None, 0) and abs(float(adopted_value) - float(raw_value)) < 0.001:
+                continue
+            # raw 缺失但与 bare_estimate 一致 → AI 估算值，不升级为用户确认
+            if (
+                raw_value in (None, 0)
+                and estimate_value not in (None, 0)
+                and abs(float(adopted_value) - float(estimate_value)) < 0.001
+            ):
+                continue
+            # 与 raw / bare_estimate 均不同 → 用户手动修正，恢复为确认事实
+            self.session.confirm_value(field, adopted_value)
 
     def load_record_payload(self, record_id: str) -> None:
         self.context.diagnostic_logger.event("record_restore_requested", record_id=record_id)
@@ -2261,6 +2587,9 @@ class CalculationPage(QWidget):
             return
         self._updating = True
         self.manual_scenarios.clear()
+        # 清除上个会话残留的“用户编辑过”标记：历史恢复的 AI 值绝不被误确认成用户输入
+        self._user_edited_bare_fields.clear()
+        self._user_manual_package_fields.clear()
         self.record_id = record_id
         # 进入历史编辑模式：恢复后修改任何字段都允许直接重算并更新同一条记录
         self.editing_record_id = record_id
@@ -2277,6 +2606,25 @@ class CalculationPage(QWidget):
         layers = record.get("layers", {})
         ai_raw = layers.get("ai_raw", {})
         observation_raw = ai_raw.get("observation") or {}
+        v2 = record.get("_v2") if isinstance(record.get("_v2"), dict) else {}
+        ai_initial = v2.get("ai_initial") if isinstance(v2.get("ai_initial"), dict) else {}
+        adopted = layers.get("adopted", {})
+        # 统一数据优先级规则：从记录重建 session 用户确认事实
+        # （ai_initial.confirmed_facts 优先，其次 adopted.bare 与 raw AI 不一致的
+        # 用户修正值），并恢复完整重估轨迹。这样历史重开后再 AI / 再重估时，
+        # 用户 700g 硬事实仍参与仲裁与重估上下文，绝不被 AI raw 600g 覆盖。
+        self.session.reset_facts()
+        self.session.reestimate_history = [
+            dict(entry) for entry in (v2.get("reestimate_history") or []) if isinstance(entry, dict)
+        ]
+        self._rebuild_session_facts_from_record(
+            ai_initial=ai_initial,
+            observation_raw=observation_raw,
+            bare=adopted.get("bare", {}) if isinstance(adopted, dict) else {},
+        )
+        # 成本字段是用户输入（0 是合法金额），历史恢复后同样作为确认事实参与链路
+        self.session.confirm_value("product_cost_rmb", float(record.get("product_cost_rmb", 0)))
+        self.session.confirm_value("domestic_shipping_rmb", float(record.get("domestic_shipping_rmb", 0)))
         if observation_raw:
             self.observation = AIObservation.from_dict(observation_raw)
             self._apply_observation(self.observation)
@@ -2287,7 +2635,16 @@ class CalculationPage(QWidget):
             except Exception:
                 self.proposal = None
                 self.session.adopted_packaging = None
-        adopted = layers.get("adopted", {})
+        # 保存时的真实复核原因恢复（v2.2）：badge 与保存记录全链一致。
+        if self.proposal is not None:
+            saved_review = adopted.get("review_reasons") if isinstance(adopted, dict) else None
+            if isinstance(saved_review, list):
+                for reason in saved_review:
+                    text = str(reason or "").strip()
+                    if text and text not in self.proposal.review_reasons:
+                        self.proposal.review_reasons.append(text)
+                if saved_review:
+                    self.proposal.needs_review = True
         # 恢复历史记录后不再携带过期阻断：保存按钮随时可更新同一条记录
         self.packaging_stale = False
         bare = adopted.get("bare", {})
@@ -2342,14 +2699,18 @@ class CalculationPage(QWidget):
 
         if hasattr(self, "lbl_bare_weight_source"):
             self.lbl_bare_weight_source.setText(_source_for_field(_adopted_weight, _observed_weight, _estimate_weight))
-        # AI估算（左卡）：优先第一次 AI 结果（_v2.ai_initial），旧记录回退 adopted.normal
-        v2 = record.get("_v2") if isinstance(record.get("_v2"), dict) else {}
-        ai_initial = v2.get("ai_initial") if isinstance(v2.get("ai_initial"), dict) else {}
+        # AI估算（左卡）：优先第一次 AI 的原始发货提案（_v2.ai_initial.external_ai_packaging_proposal，
+        # 真·首次 raw AI），其次第一次本地仲裁结果（adopted_packaging），旧记录回退 adopted.normal。
         # 恢复第一次 AI 冻结门控：后续再次 AI 识图不得覆盖 AI估算/当前采用两卡；
         # 旧记录没有 ai_initial 时同样冻结（用空快照占位），历史更新由 V2Service 保留 ai_initial
         self.initial_ai_snapshot = dict(ai_initial) if ai_initial else {}
         ai_initial_pkg = ai_initial.get("adopted_packaging") if isinstance(ai_initial.get("adopted_packaging"), dict) else {}
-        left_raw = ai_initial_pkg.get("normal") if isinstance(ai_initial_pkg.get("normal"), dict) else None
+        external_pkg = ai_initial.get("external_ai_packaging_proposal") if isinstance(ai_initial.get("external_ai_packaging_proposal"), dict) else {}
+        left_raw = (
+            external_pkg.get("normal")
+            if isinstance(external_pkg.get("normal"), dict)
+            else (ai_initial_pkg.get("normal") if isinstance(ai_initial_pkg.get("normal"), dict) else None)
+        )
         self._fill_package_fields(self.normal_fields, left_raw or adopted.get("normal", {}))
         # 当前采用（右卡）：优先 current_estimate，旧记录回退 selected 槽（不伪造第一次 AI 数据）
         current_estimate = v2.get("current_estimate")
@@ -2360,7 +2721,7 @@ class CalculationPage(QWidget):
             selected_slot = str(adopted.get("selected_packaging") or "正常档")
             right_raw = adopted.get("conservative" if selected_slot == "保守档" else "normal", {})
         self._fill_package_fields(self.conservative_fields, right_raw)
-        if adopted.get("conservative", {}).get("needs_review"):
+        if adopted.get("user_modified") or adopted.get("conservative", {}).get("needs_review"):
             self.manual_scenarios.add("当前采用")
         if adopted.get("normal", {}).get("needs_review") and not self.observation.display_packaging_summary:
             legacy_instruction = str(adopted.get("normal", {}).get("packaging_method") or "").strip()
@@ -2422,24 +2783,8 @@ class CalculationPage(QWidget):
         try:
             self.profit_binder.load_from_record(record)
             self._select_package(selected_package, user=False)
-            if self.packaging_stale:
-                self.review_badge.setText("估算已过期 · 禁止保存")
-                self.review_badge.setProperty("warning", True)
-                self.review_badge.setProperty("success", False)
-            elif self.proposal is not None:
-                if self.proposal.needs_review or self.manual_scenarios:
-                    self.review_badge.setText("需要复核")
-                    self.review_badge.setProperty("warning", True)
-                    self.review_badge.setProperty("success", False)
-                else:
-                    self.review_badge.setText("已载入")
-                    self.review_badge.setProperty("success", True)
-                    self.review_badge.setProperty("warning", False)
-            else:
-                self.review_badge.setText("人工方案 · 需要复核")
-                self.review_badge.setProperty("warning", True)
-                self.review_badge.setProperty("success", False)
-            self._refresh_badge_style()
+            self._reestimate_adopted = False
+            self._update_review_badge(loaded=True)
             self.recalculate()
         finally:
             self.profit_binder._loading_record = False
@@ -2447,11 +2792,14 @@ class CalculationPage(QWidget):
         self.mark_saved()
 
     def _refresh_edit_mode_ui(self) -> None:
-        """按新建/历史编辑模式刷新保存按钮文案与编辑状态提示。"""
+        """按新建/历史编辑模式刷新保存按钮文案与状态栏。
+
+        不再使用独立的 edit_state_label；统一由 MainWindowBinder.set_history_editing
+        在唯一的 lblSaveStatus 上显示"正在更新历史记录"。
+        """
         editing = self.editing_record_id is not None
         self.btn_save_record.setText("更新此记录" if editing else "保存本次记录")
-        self.edit_state_label.setText("正在编辑历史记录" if editing else "")
-        self.edit_state_label.setVisible(editing)
+        self.historyEditingChanged.emit(editing)
 
     @staticmethod
     def _fill_package_fields(fields: dict[str, Any], raw: dict[str, Any]) -> None:
@@ -2473,7 +2821,9 @@ class CalculationPage(QWidget):
         self.selected_forwarder_id = str(self.settings.get("selected_forwarder_id") or self.selected_forwarder_id)
         self.selected_profit_rule_id = str(self.settings.get("selected_profit_rule_id") or self.selected_profit_rule_id)
         self._updating = True
-        self.tail_fee_usd.setValue(float(self.settings.get("default_tail_fee_usd", 5.56)))
+        from PySide6.QtCore import QSignalBlocker
+        with QSignalBlocker(self.tail_fee_usd.spin):
+            self.tail_fee_usd.setValue(float(self.settings.get("default_tail_fee_usd", 5.56)))
         self._updating = False
         # 重新同步 RMB = USD × 当前有效汇率，确保汇率变化后一致性
         self._sync_tail_rmb_from_usd(recalculate=False)

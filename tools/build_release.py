@@ -8,10 +8,12 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
+from profit_accounting_26._version import __version__
+
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist" / "ProfitAccounting26"
 RELEASE_ROOT = ROOT / "release"
-VERSION = "2.6.1"
+VERSION = __version__
 
 
 def sha256(path: Path) -> str:

@@ -1,3 +1,5 @@
 """Profit Accounting 2.6 migration baseline."""
 
-__version__ = "0.1.0"
+from profit_accounting_26._version import __version__
+
+__all__ = ["__version__"]

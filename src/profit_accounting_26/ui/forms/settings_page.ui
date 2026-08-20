@@ -4,12 +4,10 @@
  <!-- UI contract 2.6.1: settings layout baseline. Dynamic API profiles, forwarders and profit rules are runtime data. --><widget class="QWidget" name="SettingsPage">
   <property name="geometry">
    <rect><x>0</x><y>0</y><width>1500</width><height>900</height></rect></property>
-  <property name="minimumSize">
-   <size>
-    <width>980</width>
-    <height>650</height>
-   </size>
-  </property>
+  <!-- 根节点不设 minimumSize：真正负责小窗口显示的是 settingsScrollArea
+       （settingsBody 保留 1200 设计宽度，窄窗口时出现横向滚动条；
+        高度不足时出现纵向滚动条）。根节点若带 980×650 最小尺寸会把
+        mainStack/主窗口最小宽度撑大，导致低分辨率下窗口超出屏幕。 -->
   <property name="windowTitle">
    <string>设置 · 2.6.1 UI 合同</string></property>
   <property name="styleSheet">
@@ -1582,7 +1580,7 @@ QListWidget::item:selected { background: #edf4ff; border-color: #4b8cff; color: 
            </layout>
           </item>
           <item>
-           <widget class="QTableWidget" name="tableCalibrationPackages"><property name="columnCount"><number>4</number></property><property name="rowCount"><number>0</number></property><property name="minimumHeight"><number>170</number></property><property name="alternatingRowColors"><bool>true</bool></property><column><property name="text"><string>版本</string></property></column><column><property name="text"><string>状态</string></property></column><column><property name="text"><string>导入时间</string></property></column><column><property name="text"><string>文件名</string></property></column></widget>
+           <widget class="QTableWidget" name="tableCalibrationPackages"><property name="columnCount"><number>4</number></property><property name="rowCount"><number>0</number></property><property name="minimumHeight"><number>170</number></property><property name="alternatingRowColors"><bool>true</bool></property><column><property name="text"><string>校准版本</string></property></column><column><property name="text"><string>状态</string></property></column><column><property name="text"><string>首次登记时间</string></property></column><column><property name="text"><string>文件名</string></property></column></widget>
           </item>
           <item>
            <widget class="QLabel" name="lblCalibrationActiveStatus">

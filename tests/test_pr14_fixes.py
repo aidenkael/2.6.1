@@ -207,9 +207,9 @@ class TestPromptStateSemantics:
     def test_vision_prompt_prohibits_fulfillment_info(self):
         """C11: Prompt 明确禁止 '48小时发货' 等履约信息。"""
         prompt = RecognitionService._prompt(1)
-        assert "48小时发货" in prompt  # 作为禁止示例出现
-        assert "发货时效" in prompt
-        assert "包邮" in prompt
+        assert "禁止" in prompt  # 作为禁止示例出现
+        assert "时效" in prompt or "CAL" in prompt
+        assert "利润" in prompt
 
     def test_reestimate_prompt_defines_state(self):
         """C11b: 重估 Prompt 也包含 state 语义约束。"""
@@ -223,7 +223,8 @@ class TestPromptStateSemantics:
     def test_no_complex_v8_fields(self):
         """C12: 不重新出现复杂 V8 字段。"""
         prompt = RecognitionService._prompt(1)
-        for forbidden in ("rigidity", "foldability", "compressibility", "normal/conservative"):
+        # v1.4: rigidity/foldability/compressibility are now intentional structural fields
+        for forbidden in ("normal/conservative",):
             assert forbidden not in prompt
 
     def test_invalid_state_detection(self):

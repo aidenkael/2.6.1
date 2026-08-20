@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import QMainWindow, QWidget
 
+from profit_accounting_26._version import __version__
 from profit_accounting_26.application import AppContext
 from profit_accounting_26.shared import resource_path
 from profit_accounting_26.ui.binders.main_window_binder import MainWindowBinder
@@ -42,7 +43,14 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.context = context
         self.settings = context.settings_service.load()
-        self.setMinimumSize(1280, 800)
+        # 启动尺寸与最小尺寸适配当前屏幕：期望启动尺寸 = min(1920×1080 设计尺寸,
+        # 当前屏幕可用尺寸)；保持合理 minimumSize 但绝不大于屏幕可用区域，
+        # 避免低分辨率下窗口首次启动时按钮/标题栏跑到屏幕之外。不默认强制最大化。
+        screen = QGuiApplication.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else None
+        avail_w = available.width() if available is not None and available.width() > 0 else 1920
+        avail_h = available.height() if available is not None and available.height() > 0 else 1080
+        self.setMinimumSize(min(1100, avail_w), min(700, avail_h))
         self.setStyleSheet(APP_STYLE)
 
         # 从 .ui 加载主窗口布局
@@ -53,11 +61,18 @@ class MainWindow(QMainWindow):
         loaded_central = loaded_ui.centralWidget()
         loaded_central.setParent(self)
         self.setCentralWidget(loaded_central)
-        # 窗口标题使用 .ui 中的 windowTitle（运行时为 UU护航 3.0.1），不硬编码旧版本
-        self.setWindowTitle(loaded_ui.windowTitle())
-        self.resize(loaded_ui.size())
-        if loaded_ui.minimumSize().width() > 0:
-            self.setMinimumSize(loaded_ui.minimumSize())
+        # 窗口标题使用 .ui 的 windowTitle 作为基础，版本号从 _version 动态注入
+        from PySide6.QtWidgets import QLabel as _QLabel
+        
+        self.setWindowTitle(f"UU护航 {__version__}")
+        # 同步更新侧边栏“当前版本”标签（.ui 中为静态占位文字）
+        _lbl_ver = self.findChild(_QLabel, "lblCurrentVersion")
+        if _lbl_ver is not None:
+            _lbl_ver.setText(f"当前版本：{__version__}")
+        # 不直接采用 .ui 的 1920×1080 设计尺寸，也不采用其 minimumSize：
+        # 两者都可能超过当前屏幕可用区域。启动尺寸按屏幕可用区域裁剪，
+        # 页面内部的 QScrollArea 负责窄窗口下的横向/纵向滚动。
+        self.resize(min(1920, avail_w), min(1080, avail_h))
 
         # 设置窗口图标
         self.setWindowIcon(
@@ -93,6 +108,7 @@ class MainWindow(QMainWindow):
 
         # 跨页面信号（保留现有行为）
         self.calculation_page.dirtyChanged.connect(self.binder.set_dirty)
+        self.calculation_page.historyEditingChanged.connect(self.binder.set_history_editing)
         self.settings_page.dirtyChanged.connect(self.binder.set_dirty)
         self.settings_page.settingsSaved.connect(self.binder.on_settings_saved)
         self.settings_page.forwardersSaved.connect(self.calculation_page.refresh_settings)

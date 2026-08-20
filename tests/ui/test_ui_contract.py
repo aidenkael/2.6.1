@@ -145,8 +145,12 @@ class TestUIFileContract:
             # PR #39 收口：导航按钮 text-align 改为 center，图标 SVG 替换为黑色 U
             # 风险标签根因修复 + 导航 SVG 图标两列对齐
             # PR #39 最终：底部商品链接布局调整（取消 400px 限制）
-            "main_window.ui": "9dfd78b558fc7d1dcb85bc8a79c94e46e95994483f76ddc6f8fd7f03f33c41a9",
-            "settings_page.ui": "e7ff5f8b380066a097462f094f1e25e31c81d1c1efc857c3cb35eafa30bdd614",
+            # PR #40 验收修复：清除“保守档冻结/不可直接编辑”旧 tooltip 文案
+            # （当前采用已可编辑）；AI首次框 placeholder/tooltip 术语更新为 AI估算
+            "main_window.ui": "28d093eb2e150f003c4843979f3758f41e566b9b1b452aa7764e67b5435d302d",
+            # PR #40 验收修复：settings_page.ui 根节点去掉 980×650 minimumSize，
+            # 窄窗口由 settingsScrollArea 承担滚动，根节点不再把主窗口最小宽度撑大
+            "settings_page.ui": "bb9feb6783b6a859c7dc2fdadde10928ddb149f050bd6957c9a96617a4ef4028",
         }
         for name, sha in expected.items():
             data = (FORMS_DIR / name).read_bytes()

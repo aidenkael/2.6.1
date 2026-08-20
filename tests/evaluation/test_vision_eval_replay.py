@@ -62,11 +62,14 @@ def test_syn01_complete_ai_candidate_is_adopted(baseline_service, synthetic_case
     assert "ai_candidate" not in replay.trace["rejected_candidates"]
 
 
-def test_syn02_dimension_semantic_issue_triggers_salvage(baseline_service, synthetic_cases):
+def test_syn02_dimension_semantic_issue_keeps_ai_and_marks_review(baseline_service, synthetic_cases):
     replay = replay_case(_case(synthetic_cases, "syn_02_adjustable_leash"), baseline_service)
     assert replay.ok
-    assert replay.trace["proposal_source"] == "ai_candidate_salvaged"
+    # 页面硬事实（维度证据非外廓）→ 本地不自行创造数值，保留 AI shipment + needs_review
+    assert replay.trace["proposal_source"] == "ai_candidate_hard_facts"
     assert "dimension_evidence_not_outer_dimensions" in replay.trace["rejected_candidates"]["ai_candidate"]
+    assert replay.final["normal"]["length_cm"] == 18.0
+    assert replay.final["normal"]["needs_review"] is True
     # observation 层尺寸被 parser 清空（NORMALIZED 层事实）
     assert replay.normalized_observation["length_cm"] is None
     assert replay.normalized_observation.get("dimension_semantic_issue") is None  # 只存在于 raw_payload
@@ -98,10 +101,10 @@ def test_dimension_journey_tracks_every_layer(baseline_service, synthetic_cases)
     journey = dimension_journey(replay)
     for field_name in ("length_cm", "width_cm", "height_cm", "weight_g"):
         assert set(journey[field_name]) == {"AI_RAW", "PARSED", "NORMALIZED", "FINAL"}
-    # 尺寸在 NORMALIZED 层被语义门清空，FINAL 层由本地补全给出不同数值
+    # 尺寸在 NORMALIZED 层被语义门清空；FINAL 层保留 AI shipment（本地不创造数值）
     assert journey["length_cm"]["AI_RAW"] is None
     assert journey["length_cm"]["NORMALIZED"] is None
-    assert journey["length_cm"]["FINAL"] == 20.0
+    assert journey["length_cm"]["FINAL"] == 18.0
 
 
 def test_broken_raw_response_is_reported_not_raised(baseline_service, synthetic_cases):

@@ -151,14 +151,13 @@ class TestSystemCostRows:
 
 
 class TestUserCorrectionPlaceholderGeometry:
-    def test_placeholder_has_real_newline_and_wrap(self, shown_page, qapp):
+    def test_placeholder_is_single_line_with_wrap(self, shown_page, qapp):
         edit = shown_page.user_correction._widget
         assert isinstance(edit, QTextEdit)
         example = edit.example.text()
-        assert "\n" in example
-        # 阶段 3 最终调整：示例文字替换为两行短提示
+        # PR #40：示例文字精简为一行（移除过期说明）
         assert "填写用于重估的修正（本框内容优先）" in example
-        assert "若商品识别错误，请同时修改上方摘要" in example
+        assert "若商品识别错误" not in example
         assert "头程" not in example and "货代" not in example
         assert edit.lineWrapMode() == QTextEdit.LineWrapMode.WidgetWidth
         assert edit.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff

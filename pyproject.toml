@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "profit-accounting-2-6"
-version = "2.6.1"
+dynamic = ["version"]
 description = "Local PySide6 profit, logistics and record management application for SHEIN sellers"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
@@ -22,12 +22,16 @@ dev = [
 
 [project.scripts]
 profit-accounting-2-6 = "profit_accounting_26.ui.app:main"
+uu-calculator = "profit_accounting_26.ui.quick_calculator_app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "profit_accounting_26._version.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

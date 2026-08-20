@@ -27,12 +27,13 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 from uuid import uuid4
 
+from profit_accounting_26._version import __version__
 from profit_accounting_26.application.calibration_feedback_service import CalibrationFeedbackService
 from profit_accounting_26.storage.sqlite_store import SQLiteStore
 
 FULL_EXPORT_FORMAT = "history-export-v1"
 CALIBRATION_EXPORT_FORMAT = "calibration-feedback-v1"
-SOFTWARE_VERSION = "2.6.1"
+SOFTWARE_VERSION = __version__
 
 _FORBIDDEN_KEY_NAMES = {
     "api_key", "apikey", "api-key", "authorization", "auth", "token", "access_token",

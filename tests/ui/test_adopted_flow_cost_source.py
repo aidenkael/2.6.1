@@ -81,8 +81,17 @@ def _simulate_ai(page, dims=(17.0, 32.0, 17.0, 720.0), method="AI建议包装"):
 
 
 def _complete_visual_ai(page, observation, proposal):
+    from profit_accounting_26.application.runtime_ai_services import RecognitionOutcome
+
     page._diagnostic_operation = page.context.diagnostic_logger.begin_operation("test-ai-runtime-v1")
-    page._recognition_completed(observation, proposal)
+    outcome = RecognitionOutcome(
+        raw_observation=observation,
+        raw_ai_proposal=proposal,
+        adopted_proposal=proposal,
+        arbitration_observation=observation,
+        arbitration_trace={},
+    )
+    page._recognition_completed(outcome)
 
 
 def _ensure_forwarders(page):
@@ -263,7 +272,7 @@ class TestAdoptedFlow:
         proposal = _make_proposal((46, 31, 8, 760), "压扁并整理肩带后紧凑发货")
         proposal.proposal_source = "vision_ai_v1"
         proposal.applied_profile_ids = []
-        page._recognition_completed(observation, proposal)
+        _complete_visual_ai(page, observation, proposal)
         assert page.conservative_fields["weight"].value() == pytest.approx(760)
         assert page._adopted_packaging().applied_profile_ids == []
 
@@ -300,7 +309,8 @@ class TestAdoptedFlow:
         assert page.conservative_fields["length"].value() == pytest.approx(46)
         assert page.conservative_fields["weight"].value() == pytest.approx(760)
         assert page.initial_ai_snapshot == initial
-        assert page.user_calibration_dirty is True
+        # 接受 AI 重估 ≠ 用户亲手修改：不得置 manual dirty（来源语义拆分）
+        assert page.user_calibration_dirty is False
         assert "当前采用" in page.manual_scenarios
 
     def test_corrected_reestimate_adopt_preserves_visual_raw_and_complete_current_metadata(self, page, monkeypatch):
