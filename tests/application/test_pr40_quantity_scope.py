@@ -318,3 +318,70 @@ class TestPromptV23:
         src = pathlib.Path(logistics_core.__file__).read_text(encoding="utf-8")
         assert "quantity" not in src
         assert "weight_g * quantity" not in src
+
+
+# ==================================================================
+# 多件商品：confirmed 总裸重语义 + 套叠包装判断硬指令
+# ==================================================================
+
+
+class TestConfirmedWeightTotalSemantics:
+    """confirmed_facts.weight_g meaning 修正：全部购买商品合计净重，不再乘数量。"""
+
+    def test_confirmed_facts_weight_meaning_is_total_not_single_item(self):
+        """“single-item net weight in grams” 不再存在；meaning 为全部购买商品总裸重。"""
+        from profit_accounting_26.application.calculation_session import CalculationSession
+
+        session = CalculationSession()
+        session.confirm_value("weight_g", 180.0)
+        facts = session.confirmed_facts()
+        assert facts["weight_g"]["value"] == 180.0
+        meaning = facts["weight_g"]["meaning"]
+        assert "single-item net weight in grams" not in meaning, (
+            "weight_g 语义不得再是单件净重"
+        )
+        assert "total net weight of all currently purchased/selected items" in meaning
+        assert "do not multiply by purchase_quantity" in meaning
+
+    def test_quantity_3_user_weight_180_is_total_not_multiplied(self):
+        """quantity=3 + 用户手填 weight_g=180 → confirmed 总裸重恒为 180（禁止再 ×3）。"""
+        from profit_accounting_26.application.calculation_session import CalculationSession
+
+        session = CalculationSession()
+        session.confirm_value("quantity", 3)
+        session.confirm_value("weight_g", 180.0)
+        facts = session.confirmed_facts()
+        assert facts["weight_g"]["value"] == 180.0
+        assert "total net weight of all currently purchased/selected items" in (
+            facts["weight_g"]["meaning"]
+        )
+        assert "do not multiply by purchase_quantity" in facts["weight_g"]["meaning"]
+
+
+class TestPromptMultiItemNesting:
+    """Prompt v2.x 多件套叠判断硬指令（AI 仍保留 shipment 整体判断权）。"""
+
+    def test_prompt_forbids_weight_remultiplication(self):
+        prompt = RecognitionService._prompt(1, include_json_shape=False)
+        assert "不要再乘 purchase_quantity" in prompt or "不要再用数量相乘" in prompt
+        assert "不要再乘 purchase_quantity" in prompt
+
+    def test_prompt_forbids_dimension_mechanical_multiplication(self):
+        prompt = RecognitionService._prompt(1, include_json_shape=False)
+        assert "禁止把任意一个裸品尺寸直接乘 purchase_quantity" in prompt
+        assert "单件最大厚度 × 数量" in prompt
+
+    def test_prompt_requires_nesting_judgement_first(self):
+        prompt = RecognitionService._prompt(1, include_json_shape=False)
+        assert "自然套叠、嵌套、重合、交错、贴合" in prompt
+        assert "nest / 自然套叠" in prompt
+        assert "第一件主体厚度 + 后续每件的实际增量厚度" in prompt
+        assert "重新估算多件共同包装方式" in prompt
+
+    def test_prompt_keeps_ai_shipment_authority(self):
+        """AI 仍拥有 shipment 整体包装判断权；不新增本地固定公式/压缩率。"""
+        prompt = RecognitionService._prompt(1, include_json_shape=False)
+        assert "AI 拥有最终判断权" in prompt
+        # 不引入固定压缩率 / 固定套叠比例 / 面具专用规则
+        for banned in ("压缩率按", "套叠比例", "面具专用", "厚度 = 固定"):
+            assert banned not in prompt, f"Prompt 不得包含固定公式: {banned}"

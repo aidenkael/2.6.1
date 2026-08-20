@@ -76,7 +76,7 @@ class CalculationSession:
 
     def confirmed_facts(self) -> dict[str, dict[str, Any]]:
         meanings = {
-            "weight_g": "single-item net weight in grams",
+            "weight_g": "total net weight of all currently purchased/selected items in grams; do not multiply by purchase_quantity",
             "length_cm": "unpacked item length in centimetres",
             "width_cm": "unpacked item width in centimetres",
             "height_cm": "unpacked item height in centimetres",
