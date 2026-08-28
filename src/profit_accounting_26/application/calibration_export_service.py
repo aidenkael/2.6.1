@@ -33,6 +33,7 @@ from typing import Any
 from uuid import uuid4
 
 from profit_accounting_26.application.calibration_feedback_service import CalibrationFeedbackService
+from profit_accounting_26.shared import ensure_data_dir_allowed
 
 CONTRACT_VERSION = "Calibration Feedback Export V2"
 EXPORT_STATE_FILE = "export_state.json"
@@ -203,7 +204,8 @@ class ExportStateStore:
     """轻量独立导出状态（JSON），按 record_id 记录。"""
 
     def __init__(self, data_dir: str | Path) -> None:
-        self.path = Path(data_dir) / "calibration" / EXPORT_STATE_FILE
+        self.data_dir = Path(data_dir)
+        self.path = self.data_dir / "calibration" / EXPORT_STATE_FILE
 
     def load(self) -> dict[str, Any]:
         if not self.path.is_file():
@@ -226,6 +228,8 @@ class ExportStateStore:
                 "export_batch_id": batch_id,
                 "exported_at": exported_at,
             }
+        # 生命周期守卫：废弃数据目录不得被陈旧会话的导出状态写入复活
+        ensure_data_dir_allowed(self.data_dir)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")
         temporary.write_text(

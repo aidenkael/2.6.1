@@ -5,12 +5,18 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+from profit_accounting_26.shared import StaleDataDirectoryError, ensure_data_dir_allowed
+
 
 class DiagnosticOperation:
-    def __init__(self, root: Path, session_id: str, operation_type: str) -> None:
+    def __init__(self, root: Path, session_id: str, operation_type: str, *, enabled: bool = True) -> None:
         self.session_id, self.operation_id, self.operation_type = session_id, uuid4().hex, operation_type
         self.started_at = datetime.now(UTC)
         self.root = root / f"{self.started_at:%Y%m%d-%H%M%S}_{operation_type}_{self.operation_id[:8]}"
+        # disabled 时跳过建目录：后续写入因目录缺失走既有的 OSError 降级路径，
+        # 诊断日志静默不落盘，绝不重建废弃数据目录。
+        if not enabled:
+            return
         try:
             self.root.mkdir(parents=True, exist_ok=False)
             for name in ("events.jsonl", "ai-request.json", "ai-response.json", "diagnostic_summary.json"):
@@ -42,8 +48,12 @@ def _sanitize(value):
 
 class DiagnosticLogger:
     def __init__(self, data_dir: str|Path, settings: dict) -> None:
-        self.root=Path(data_dir)/"logs"; self.session_id=uuid4().hex; self.retention_days=max(1,int(settings.get("log_retention_days",30) or 30)); self._prepare()
+        self.root=Path(data_dir)/"logs"; self.data_dir=Path(data_dir); self.session_id=uuid4().hex; self.retention_days=max(1,int(settings.get("log_retention_days",30) or 30)); self._prepare()
     def _prepare(self) -> None:
+        try:
+            ensure_data_dir_allowed(self.data_dir)
+        except StaleDataDirectoryError:
+            return
         try:
             self.root.mkdir(parents=True,exist_ok=True); cutoff=datetime.now(UTC)-timedelta(days=self.retention_days)
             for child in self.root.iterdir():
@@ -51,7 +61,15 @@ class DiagnosticLogger:
                     for item in child.iterdir(): item.unlink(missing_ok=True)
                     child.rmdir()
         except OSError: pass
-    def begin_operation(self, operation_type: str) -> DiagnosticOperation: return DiagnosticOperation(self.root,self.session_id,operation_type)
+    def begin_operation(self, operation_type: str) -> DiagnosticOperation:
+        # 生命周期守卫：数据目录已被 location.json 抛弃且被删除时，诊断日志
+        # 降级为内存空操作（与既有 OSError 降级同语义），不重建废弃目录。
+        try:
+            ensure_data_dir_allowed(self.data_dir)
+            enabled = True
+        except StaleDataDirectoryError:
+            enabled = False
+        return DiagnosticOperation(self.root, self.session_id, operation_type, enabled=enabled)
     def event(self, *_args, **_kwargs) -> None:
         """Compatibility no-op: diagnostics are stored only in operation folders."""
         return None

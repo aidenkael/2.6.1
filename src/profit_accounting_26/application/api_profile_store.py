@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from uuid import uuid4
 
+from profit_accounting_26.shared import ensure_data_dir_allowed
+
 
 VISUAL_AI = "visual_ai"
 LOCAL_REESTIMATE = "local_reestimate"
@@ -87,6 +89,8 @@ class ApiProfileStore:
 
     @staticmethod
     def _atomic_write(path: Path, data: dict) -> None:
+        # 生命周期守卫：写入目标位于数据目录内，废弃目录不得被陈旧会话复活
+        ensure_data_dir_allowed(path.parent)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

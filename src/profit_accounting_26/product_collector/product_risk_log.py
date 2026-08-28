@@ -21,6 +21,8 @@ import logging.handlers
 import time
 from pathlib import Path
 
+from profit_accounting_26.shared import StaleDataDirectoryError, ensure_data_dir_allowed
+
 _LOGGER_NAME = "profit_accounting_26.product_risk"
 _logger = logging.getLogger(_LOGGER_NAME)
 _logger.propagate = False  # 不冒泡到 root，保持全局 logger 行为不变
@@ -46,6 +48,12 @@ def configure(data_dir: str | Path | None) -> Path | None:
     """
     path = log_file_path(data_dir)
     if path is None:
+        return None
+    # 生命周期守卫：数据目录已被 location.json 抛弃且被删除时，不重建废弃
+    # 目录，日志降级为不落盘（返回 None）。
+    try:
+        ensure_data_dir_allowed(Path(data_dir))
+    except StaleDataDirectoryError:
         return None
     path.parent.mkdir(parents=True, exist_ok=True)
     for handler in list(_logger.handlers):

@@ -99,11 +99,12 @@ class CalculationBinder(QObject):
         # 显示，不按当前设置静默重算双场景；用户主动编辑利润区字段后退出
         # 该模式，之后的计算属当前推算。
         self._snapshot_display_mode = False
-        # 打开记录时捕获的当前设置状态（汇率/规则/选中规则/成本），退出快照模式时恢复
+        # 打开记录时捕获的当前设置状态（汇率/规则/选中规则），退出快照模式时恢复。
+        # 注意：计算总成本是上游状态，不属于“当前设置”，退出快照时永不恢复、
+        # 永不被下游利润字段编辑隐式改写（成本所有权见 set_calculation_cost）。
         self._live_exchange_rate: float | None = None
         self._live_rules: tuple[AdjustmentRule, ...] | None = None
         self._live_selected_rule_id: str | None = None
-        self._live_cost: float | None = None
 
         # 查找所有利润区控件
         self._find_widgets()
@@ -272,23 +273,27 @@ class CalculationBinder(QObject):
         self._refresh_all()
 
     def set_calculation_cost(self, cost_rmb: float) -> None:
-        """上方成本变化时覆盖利润区计算总成本。
+        """上方成本变化时覆盖利润区计算总成本（成本唯一合法来源之一）。
+
+        ``calculation_total_cost_rmb`` 是上游状态，只允许两条变更路径：
+        1. CalculationPage 因上游成本输入变化而显式调用本方法；
+        2. 用户显式编辑计算成本输入（_on_calc_cost_changed）。
+        下游利润字段编辑退出快照时绝不改写/恢复成本。
 
         快照显示模式下：系统总成本变化属于"明确操作"，立即退出历史
         快照模式，将新成本覆盖利润区计算总成本，按当前有效 driver
         重新计算双场景利润，并标记为"当前推算（非历史快照）"。
 
         记录加载保护：``_loading_record=True`` 期间（load_record_payload
-        内部 recalculate/set_calculation_cost），不退出快照，只缓存成本。
-        不依赖浮点成本相等判断。
+        内部 recalculate/set_calculation_cost），不退出快照也不改写成本，
+        直接忽略；不依赖浮点成本相等判断。
         """
         cost_rmb = max(0.0, float(cost_rmb))
         if self._snapshot_display_mode:
             if self._loading_record:
-                # 记录加载期间：不退出快照，缓存成本供退出后使用
-                self._live_cost = cost_rmb
+                # 记录加载期间：程序化调用不退出快照，也不改写快照成本
                 return
-            # 加载完成后系统成本变化 → 退出快照，恢复当前设置后用新成本重算
+            # 加载完成后系统成本变化 → 退出快照，按新成本重算
             self._exit_snapshot_mode()
         self._calculation_total_cost_rmb = cost_rmb
         self._profit_driver = DRIVER_PROFIT_RATE
@@ -775,8 +780,12 @@ class CalculationBinder(QObject):
     def _exit_snapshot_mode(self) -> None:
         """用户主动编辑利润区字段：退出快照显示模式，之后属当前推算。
 
-        恢复快照期间捕获的当前设置（汇率/规则/成本），使后续重算使用
+        恢复快照期间捕获的当前设置（汇率/规则/选中规则），使后续重算使用
         当前设置，而不是继续使用保存时的历史快照值。
+
+        计算总成本不在此恢复：它是上游状态，显示中的快照成本（或用户/
+        上游随后显式设置的成本）保持不变，绝不因下游利润字段编辑而
+        被内部捕获的值静默替换。
 
         旧记录兼容状态被退出后，标记 _legacy_exited=True，后续保存可
         使用双场景 schema（不再保持 legacy_compatible=True）。
@@ -794,20 +803,19 @@ class CalculationBinder(QObject):
         if self._live_selected_rule_id is not None:
             self._selected_rule_id = self._live_selected_rule_id
             self._refresh_rule_combo()
-        if self._live_cost is not None:
-            self._calculation_total_cost_rmb = self._live_cost
         self._live_exchange_rate = None
         self._live_rules = None
         self._live_selected_rule_id = None
-        self._live_cost = None
         self._update_snapshot_status_label()
 
     def capture_current_settings(self, *, exchange_rate: float, rules, selected_rule_id: str = "") -> None:
-        """打开记录前捕获当前设置状态（汇率/启用规则/选中规则），供退出快照模式时恢复。"""
+        """打开记录前捕获当前设置状态（汇率/启用规则/选中规则），供退出快照模式时恢复。
+
+        只捕获设置类状态；计算总成本是上游状态，不参与捕获/恢复。
+        """
         self._live_exchange_rate = float(exchange_rate) if exchange_rate > 0 else None
         self._live_rules = tuple(rules)
         self._live_selected_rule_id = str(selected_rule_id or "")
-        self._live_cost = None
 
     # ------------------------------------------------------------------
     # 快照状态提示（复用 lblProfitConclusion / tooltip）

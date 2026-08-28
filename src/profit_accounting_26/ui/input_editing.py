@@ -1,8 +1,61 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QComboBox, QLineEdit, QDoubleSpinBox, QWidget
+
+
+class NumericFocusSelectAllFilter(QObject):
+    """可编辑 QDoubleSpinBox 获得焦点时自动全选（UU护航 / UU测算 共享交互）。
+
+    背景：Qt 6 的 QDoubleSpinBox 获得焦点不会自动全选，用户想输入新数值时
+    必须先手动删除 ``0.00`` / ``18.00`` 旧文本。
+
+    关键事实（决定了实现方式）：
+    - FocusIn 事件投递给 spinbox 本身，而不是内部 lineEdit（已实测验证）；
+    - 鼠标首击的 press 处理会在焦点事件之后定位光标并清掉选区。
+    因此不能在 FocusIn 里直接 selectAll，也不能只监听 lineEdit：
+    统一用 QTimer.singleShot(0) 把 selectAll 排队到焦点/鼠标默认处理完成之后。
+
+    行为边界：
+    - 已聚焦后的再次点击不产生 FocusIn → 光标编辑保持 Qt 原生行为；
+    - 只读（冻结）字段不处理；
+    - 只排队不拦截事件，不影响 Enter 提交 / Esc 恢复 / 空白草稿回退等既有契约；
+    - 不改任何小数精度，也不把金额/重量字段变成整数输入。
+    """
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if event.type() != QEvent.Type.FocusIn:
+            return False
+        spin = self._owner_spinbox(watched)
+        if spin is None or spin.isReadOnly():
+            return False
+        line = spin.lineEdit()
+        if line is not None:
+            QTimer.singleShot(0, line.selectAll)
+        return False
+
+    @staticmethod
+    def _owner_spinbox(watched: QObject) -> QDoubleSpinBox | None:
+        """FocusIn 可能投递给 spinbox 或其内部 lineEdit，统一解析出所属 spinbox。"""
+        if isinstance(watched, QDoubleSpinBox):
+            return watched
+        if isinstance(watched, QLineEdit):
+            parent = watched.parentWidget()
+            if isinstance(parent, QDoubleSpinBox):
+                return parent
+        return None
+
+
+def install_natural_numeric_input(target: QObject) -> NumericFocusSelectAllFilter:
+    """给 ``target``（QApplication 或某个 spinbox）安装焦点全选过滤器。
+
+    生产入口在 bootstrap_application 里对 QApplication 安装一次，
+    两个软件的全部可编辑数值输入统一生效；测试可对单个 spinbox 安装。
+    """
+    guard = NumericFocusSelectAllFilter(target)
+    target.installEventFilter(guard)
+    return guard
 
 
 class DraftAwareDoubleSpinBox(QDoubleSpinBox):

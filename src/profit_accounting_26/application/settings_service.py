@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from profit_accounting_26.domain.models import Forwarder
+from profit_accounting_26.shared import StaleDataDirectoryError, ensure_data_dir_allowed
 from profit_accounting_26.domain.rules import (
     AdjustmentDirection,
     AdjustmentRule,
@@ -61,13 +62,26 @@ class SettingsService:
         data.setdefault("log_retention_days", 30)
         return data
 
+    def _creation_allowed(self) -> bool:
+        """settings 文件所在数据目录缺失时是否允许创建。
+
+        生命周期守卫：目录已被 location.json 抛弃且已删除时，
+        load 不得静默重建目录/文件（返回默认值的内存副本即可）。
+        """
+        try:
+            ensure_data_dir_allowed(self.path.parent)
+        except StaleDataDirectoryError:
+            return False
+        return True
+
     def load(self) -> dict:
         if not self.path.is_file():
             data = self._default_data()
             data.setdefault("seed_versions", [])
             if DEFAULT_RULE_SEED_VERSION not in data["seed_versions"]:
                 data["seed_versions"].append(DEFAULT_RULE_SEED_VERSION)
-            self.save(data)
+            if self._creation_allowed():
+                self.save(data)
             return data
         current = json.loads(self.path.read_text(encoding="utf-8"))
         defaults = self._default_data()
@@ -124,6 +138,9 @@ class SettingsService:
         return []
 
     def save(self, data: dict) -> None:
+        # 生命周期守卫：数据目录已被 location.json 抛弃且被删除时拒绝重建，
+        # 不允许陈旧会话复活废弃目录（目录仍存在时照常写入，会话延续）。
+        ensure_data_dir_allowed(self.path.parent)
         self.save_copy(data, self.path)
 
     @staticmethod

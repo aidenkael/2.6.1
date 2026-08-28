@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Iterator
 from uuid import uuid4
 
+from profit_accounting_26.shared import ensure_data_dir_allowed
+
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -47,6 +49,9 @@ class SQLiteStore:
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
+        # 生命周期守卫：数据目录已被 location.json 抛弃且被删除时，
+        # 陈旧 store 不得重建目录/数据库文件。
+        ensure_data_dir_allowed(self.path.parent)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row

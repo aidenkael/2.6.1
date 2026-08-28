@@ -15,7 +15,7 @@ from profit_accounting_26.application.formal_bundle_importer import (
     validate_formal_bundle_zip,
 )
 from profit_accounting_26.application.packaging_estimation_service import PackagingEstimationService
-from profit_accounting_26.shared import resource_path
+from profit_accounting_26.shared import ensure_data_dir_allowed, resource_path
 from profit_accounting_26.shared.paths import ApplicationPaths
 from profit_accounting_26.storage import SQLiteStore
 
@@ -254,6 +254,8 @@ class CalibrationManager:
         )
         if existing is None:
             target_dir = self.paths.calibration_packages_dir / "builtin"
+            # 生命周期守卫：废弃数据目录不得被陈旧会话的校准写入复活
+            ensure_data_dir_allowed(self.paths.data_dir)
             target_dir.mkdir(parents=True, exist_ok=True)
             target = target_dir / "calibration.json"
             target.write_text(
@@ -283,6 +285,7 @@ class CalibrationManager:
                 existing["metadata"] = metadata
             if not Path(existing["path"]).is_file():
                 target = Path(existing["path"])
+                ensure_data_dir_allowed(self.paths.data_dir)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(
                     json.dumps(samples, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -594,6 +597,7 @@ class CalibrationManager:
             if not source or not Path(source).is_file():
                 raise RuntimeError("内置校准版本文件丢失且无法恢复，无法删除当前启用版本")
             samples, _ = self._read_json_payload(Path(source))
+            ensure_data_dir_allowed(self.paths.data_dir)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(
                 json.dumps(samples, ensure_ascii=False, indent=2), encoding="utf-8"

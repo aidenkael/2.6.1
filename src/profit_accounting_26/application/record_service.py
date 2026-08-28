@@ -10,6 +10,7 @@ from profit_accounting_26.application.calibration_feedback_service import Calibr
 from profit_accounting_26.application.history_record_service import HistoryRecordV2Service
 from profit_accounting_26.application.image_session import SessionImage
 from profit_accounting_26.shared.paths import ApplicationPaths
+from profit_accounting_26.shared import ensure_data_dir_allowed
 from profit_accounting_26.storage import SQLiteStore
 from profit_accounting_26.storage.image_store import ImageStore
 
@@ -60,6 +61,8 @@ class RecordService:
 
     def _persist_images_legacy_copy(self, record_id: str, images: list[SessionImage]) -> list[dict[str, Any]]:
         """旧复制路径：未注入 ImageStore 时保留原行为（兼容测试与回退）。"""
+        # 生命周期守卫：废弃数据目录不得被陈旧会话的图片复制复活
+        ensure_data_dir_allowed(self.paths.data_dir)
         record_dir = self.paths.images_dir / record_id
         record_dir.mkdir(parents=True, exist_ok=True)
         output: list[dict[str, Any]] = []

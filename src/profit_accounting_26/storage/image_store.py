@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from profit_accounting_26.shared import ensure_data_dir_allowed
 from profit_accounting_26.storage.sqlite_store import SQLiteStore
 
 ALLOWED_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
@@ -114,6 +115,8 @@ class ImageStore:
         existing = self.by_hash(digest)
         if existing is not None:
             return existing  # 相同字节内容只保存一份
+        # 生命周期守卫：废弃数据目录不得被陈旧会话的图片写入复活
+        ensure_data_dir_allowed(self.data_dir)
         self.originals_dir.mkdir(parents=True, exist_ok=True)
         self.thumbnails_dir.mkdir(parents=True, exist_ok=True)
         original_key = self._write_original(data, digest, suffix)

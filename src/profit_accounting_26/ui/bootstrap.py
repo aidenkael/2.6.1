@@ -12,7 +12,11 @@ import sys
 from pathlib import Path
 
 from profit_accounting_26._version import __version__
-from profit_accounting_26.shared import ApplicationPaths, resource_path
+from profit_accounting_26.shared import (
+    ApplicationPaths,
+    activate_data_dir_lifecycle,
+    resource_path,
+)
 
 
 def install_chinese_translator(app) -> None:
@@ -83,8 +87,16 @@ def bootstrap_application(
     app.setOrganizationName("ProfitAccounting26")
     if icon_relative:
         app.setWindowIcon(QIcon(str(resource_path(icon_relative))))
+    # 数值输入共享交互：获得焦点自动全选，直接键入即可覆盖 0.00 之类的旧文本
+    # （UU护航 / UU测算 所有可编辑 QDoubleSpinBox 统一生效，只读字段不变）。
+    from profit_accounting_26.ui.input_editing import install_natural_numeric_input
+
+    install_natural_numeric_input(app)
     if data_dir is not None:
         return app, ApplicationPaths.from_data_dir(data_dir)
+    # 正式启动路径：激活数据目录生命周期守卫（location.json 为唯一权威，
+    # 废弃目录不得被陈旧会话/后续启动复活）。测试/工具注入分支不激活。
+    activate_data_dir_lifecycle()
     paths = ApplicationPaths.ui_default()
     if paths is None:
         selected = choose_data_directory(app)
