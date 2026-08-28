@@ -30,6 +30,7 @@ from urllib.parse import quote
 from playwright.async_api import async_playwright, Response
 
 from .models import CandidateProduct
+from profit_accounting_26.shared import ensure_data_dir_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -236,9 +237,16 @@ def _write_task_log(
     """把单次任务统计写入 logs/collect_<时间戳>.log。
 
     只记统计信息，不保存整页 HTML、完整响应正文或商品图片。
+
+    数据目录生命周期守卫（与主软件同一规则）：宿主注入的日志目录位于
+    数据目录内（<数据目录>/product_collector，见页面 set_log_dir 契约），
+    该数据目录已被 location.json 抛弃且被删除时，本函数走下方既有
+    “日志失败不影响采集结果”降级路径，绝不重建废弃目录；数据目录
+    有效或为独立运行默认目录时照常写日志。
     """
     try:
         directory = Path(log_dir) if log_dir else default_log_dir()
+        ensure_data_dir_allowed(directory.parent)
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"collect_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.log"
         lines = [
