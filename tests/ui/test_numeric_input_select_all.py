@@ -23,7 +23,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtCore import QEvent, QLocale, QPointF, Qt
 from PySide6.QtGui import QFocusEvent, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QDoubleSpinBox
 
@@ -151,6 +151,69 @@ def test_mouse_press_after_focus_clears_selection_like_native(qapp, spin):
     QApplication.sendEvent(spin.lineEdit(), press)
     qapp.processEvents()
     assert spin.lineEdit().selectedText() == ""
+
+
+def test_decimal_key_selects_fractional_digits_for_replacement(qapp, spin):
+    """必需交互：18.00 → 聚焦 → 键入 18 → 按 `.` → 选中 00 →
+    键入 35 → 提交 → 18.35，全程无需 Delete/Backspace；
+    按 `.` 本身不改变数值。"""
+    spin.setLocale(QLocale.c())  # 锁定小数点为 `.`（Windows/中文环境常态）
+    spin.setValue(18.0)
+
+    _focus(spin, qapp)
+    _type(spin, "18")
+    assert spin.lineEdit().text() == "18"
+
+    dot = QKeyEvent(
+        QEvent.Type.KeyPress, Qt.Key.Key_Period, Qt.KeyboardModifier.NoModifier, "."
+    )
+    # 键事件可能直接到达 spinbox 内部 lineEdit（真实键入路径之一）
+    QApplication.sendEvent(spin.lineEdit(), dot)
+    qapp.processEvents()
+
+    # 只选中小数两位，不选整数部分；按 . 本身不改变数值
+    assert spin.lineEdit().selectedText() == "00"
+    assert spin.value() == pytest.approx(18.0)
+
+    _type(spin, "35")
+    assert spin.lineEdit().text() == "18.35"
+
+    enter = QKeyEvent(
+        QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier
+    )
+    QApplication.sendEvent(spin.lineEdit(), enter)
+    qapp.processEvents()
+    assert spin.value() == pytest.approx(18.35)
+    assert spin.text() == "18.35"
+
+
+def test_decimal_key_on_draft_with_separator_selects_only_fraction(qapp, spin):
+    """草稿已含小数点时（如光标编辑 18.00）：按 `.` 只选中小数位 00，
+    不选整数部分，也不改变数值；键入即替换小数位。"""
+    spin.setLocale(QLocale.c())
+    spin.setValue(18.0)
+
+    _focus(spin, qapp)
+    # 构造草稿文本本身已含小数点的光标编辑场景
+    spin.lineEdit().setText("18.00")
+    spin.lineEdit().setCursorPosition(1)
+
+    dot = QKeyEvent(
+        QEvent.Type.KeyPress, Qt.Key.Key_Period, Qt.KeyboardModifier.NoModifier, "."
+    )
+    QApplication.sendEvent(spin, dot)  # 键事件也可能到达 QDoubleSpinBox 本身
+    qapp.processEvents()
+
+    assert spin.lineEdit().selectedText() == "00"
+    assert spin.value() == pytest.approx(18.0)
+
+    _type(spin, "35")
+    enter = QKeyEvent(
+        QEvent.Type.KeyPress, Qt.Key.Key_Enter, Qt.KeyboardModifier.NoModifier
+    )
+    QApplication.sendEvent(spin.lineEdit(), enter)
+    qapp.processEvents()
+    assert spin.value() == pytest.approx(18.35)
 
 
 def test_read_only_field_stays_read_only(qapp):

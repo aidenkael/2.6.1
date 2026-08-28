@@ -18,22 +18,62 @@ class NumericFocusSelectAllFilter(QObject):
     统一用 QTimer.singleShot(0) 把 selectAll 排队到焦点/鼠标默认处理完成之后。
 
     行为边界：
-    - 已聚焦后的再次点击不产生 FocusIn → 光标编辑保持 Qt 原生行为；
+    - 获得焦点自动全选；已聚焦后的再次点击不产生 FocusIn，
+      光标编辑保持 Qt 原生行为；
+    - 小数点键 = 小数位编辑导航：只选中小数位，键入即替换，
+      无需 Delete/Backspace（详见 ``_handle_decimal_key``）；
     - 只读（冻结）字段不处理；
-    - 只排队不拦截事件，不影响 Enter 提交 / Esc 恢复 / 空白草稿回退等既有契约；
+    - Enter 提交 / Esc 恢复 / 空白草稿回退等既有契约不变；
     - 不改任何小数精度，也不把金额/重量字段变成整数输入。
     """
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
-        if event.type() != QEvent.Type.FocusIn:
+        etype = event.type()
+        if etype == QEvent.Type.FocusIn:
+            spin = self._owner_spinbox(watched)
+            if spin is None or spin.isReadOnly():
+                return False
+            line = spin.lineEdit()
+            if line is not None:
+                QTimer.singleShot(0, line.selectAll)
             return False
+        if etype == QEvent.Type.KeyPress:
+            return self._handle_decimal_key(watched, event)
+        return False
+
+    def _handle_decimal_key(self, watched: QObject, event: QKeyEvent) -> bool:
+        """小数点键 = 小数位编辑导航：只选中小数位，键入即替换。
+
+        - 仅处理可编辑且 ``decimals() > 0`` 的 QDoubleSpinBox（含其内部
+          lineEdit——键事件可能到达其中任一目标，统一经 _owner_spinbox 解析）；
+        - 按“控件区域设置的小数点”识别按键（Windows/中文环境的键盘 ``.``
+          即命中；逗号小数布局自动跟随）；
+        - 草稿已含小数点 → 只选中其后的 ``decimals()`` 位小数，
+          不碰前后缀/单位文本；
+        - 草稿尚无小数点（如已键入 "18"）→ 把草稿补全为 "18.00" 并只
+          选中 "00"，用户键入即替换；
+        - 按下小数点本身不改变数值（仅编辑草稿）；
+        - 返回 True 吞掉该键，避免 Qt 再插入一个多余的小数点。
+        """
         spin = self._owner_spinbox(watched)
-        if spin is None or spin.isReadOnly():
+        if spin is None or spin.isReadOnly() or spin.decimals() <= 0:
+            return False
+        decimal_point = spin.locale().decimalPoint()
+        if not event.text() or event.text() != decimal_point:
             return False
         line = spin.lineEdit()
-        if line is not None:
-            QTimer.singleShot(0, line.selectAll)
-        return False
+        if line is None:
+            return False
+        text = line.text()
+        sep = text.rfind(decimal_point)
+        if sep < 0:
+            integer_part = text.strip() or "0"
+            text = f"{integer_part}{decimal_point}{'0' * spin.decimals()}"
+            line.setText(text)
+            sep = text.rfind(decimal_point)
+        start = sep + len(decimal_point)
+        line.setSelection(start, min(spin.decimals(), max(0, len(text) - start)))
+        return True
 
     @staticmethod
     def _owner_spinbox(watched: QObject) -> QDoubleSpinBox | None:
@@ -48,13 +88,19 @@ class NumericFocusSelectAllFilter(QObject):
 
 
 def install_natural_numeric_input(target: QObject) -> NumericFocusSelectAllFilter:
-    """给 ``target``（QApplication 或某个 spinbox）安装焦点全选过滤器。
+    """给 ``target`` 安装焦点全选/小数点导航过滤器。
 
     生产入口在 bootstrap_application 里对 QApplication 安装一次，
     两个软件的全部可编辑数值输入统一生效；测试可对单个 spinbox 安装。
+    传入 QDoubleSpinBox 时同时挂到其内部 lineEdit——键事件可能到达
+    spinbox 或 lineEdit 任一目标，逐 widget 安装也必须两处都覆盖。
     """
     guard = NumericFocusSelectAllFilter(target)
     target.installEventFilter(guard)
+    if isinstance(target, QDoubleSpinBox):
+        line = target.lineEdit()
+        if line is not None:
+            line.installEventFilter(guard)
     return guard
 
 
